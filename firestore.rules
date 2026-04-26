@@ -1,0 +1,122 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Función para obtener la membresía del usuario actual en un tenant específico
+    // Se asume que el ID de la membresía es {uid}_{tenantId} para usuarios activos
+    function getMembership(tenantId) {
+      return get(/databases/$(database)/documents/memberships/$(request.auth.uid + '_' + tenantId)).data;
+    }
+    
+    function isTenantMember(tenantId) {
+      return isAuthenticated() && exists(/databases/$(database)/documents/memberships/$(request.auth.uid + '_' + tenantId));
+    }
+    
+    function getRole(tenantId) {
+      return getMembership(tenantId).role;
+    }
+
+    function isAtLeast(tenantId, requiredRole) {
+      let role = getRole(tenantId);
+      
+      // Mapeo manual de jerarquía simple
+      let rIdx = role == 'Owner' ? 4 : (role == 'Admin' ? 3 : (role == 'Asesor Comercial' ? 2 : (role == 'Técnico' ? 1 : 0)));
+      let qIdx = requiredRole == 'Owner' ? 4 : (requiredRole == 'Admin' ? 3 : (requiredRole == 'Asesor Comercial' ? 2 : (requiredRole == 'Técnico' ? 1 : 0)));
+      
+      return rIdx >= qIdx;
+    }
+
+    function isTenantAdmin(tenantId) {
+      return isAuthenticated() && isAtLeast(tenantId, 'Admin');
+    }
+
+    match /memberships/{membershipId} {
+      // Lectura: Mi propia membresía (por UID o por Email si no estoy logueado/vínculo pendiente) 
+      // o Admins del mismo tenant
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || 
+        resource.data.email == request.auth.token.email ||
+        isTenantAdmin(resource.data.tenantId)
+      );
+      
+      // Creación: Solo Admins pueden invitar
+      allow create: if isAuthenticated() && isTenantAdmin(request.resource.data.tenantId);
+      
+      // Actualización: 
+      // 1. Vinculación inicial (el usuario se vincula a si mismo si el email coincide)
+      // 2. Gestión de Admin (cambio de rol/status)
+      allow update: if isAuthenticated() && (
+        (request.resource.data.userId == request.auth.uid && resource.data.email == request.auth.token.email) ||
+        isTenantAdmin(resource.data.tenantId)
+      );
+      
+      allow delete: if isAuthenticated() && isTenantAdmin(resource.data.tenantId) && resource.data.role != 'Owner';
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated(); 
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    match /tenants/{tenantId} {
+      allow read: if isTenantMember(tenantId);
+      allow write: if isTenantAdmin(tenantId);
+    }
+
+    match /leads/{leadId} {
+      allow read: if isTenantMember(resource.data.tenantId);
+      allow create: if isTenantMember(request.resource.data.tenantId);
+      allow update: if isTenantMember(resource.data.tenantId) 
+                   && isTenantMember(request.resource.data.tenantId);
+      allow delete: if isTenantAdmin(resource.data.tenantId);
+    }
+
+    match /quotes/{quoteId} {
+      allow read: if isTenantMember(resource.data.tenantId);
+      allow create: if isTenantMember(request.resource.data.tenantId);
+      allow update: if isTenantMember(resource.data.tenantId) 
+                   && isTenantMember(request.resource.data.tenantId);
+      allow delete: if isTenantAdmin(resource.data.tenantId);
+    }
+
+    match /settings/{docId} { 
+      allow read: if isTenantMember(docId);
+      allow write: if isTenantAdmin(docId);
+    }
+    
+    match /packages/{pkgId} {
+      allow read: if isTenantMember(resource.data.tenantId);
+      allow create: if isTenantAdmin(request.resource.data.tenantId);
+      allow update, delete: if isTenantAdmin(resource.data.tenantId);
+    }
+    
+    match /agenda_items/{itemId} {
+      allow create: if isTenantMember(request.resource.data.tenantId);
+      allow read, update: if isTenantMember(resource.data.tenantId);
+      allow delete: if isTenantMember(resource.data.tenantId);
+    }
+
+    match /conversations/{conversationId} {
+      allow read: if isTenantMember(resource.data.tenantId);
+      allow create: if isTenantMember(request.resource.data.tenantId);
+      allow update: if isTenantMember(resource.data.tenantId) 
+                   && isTenantMember(request.resource.data.tenantId);
+      
+      match /messages/{messageId} {
+        allow read, write: if isTenantMember(get(/databases/$(database)/documents/conversations/$(conversationId)).data.tenantId);
+      }
+    }
+    
+    match /integrations/{integrationId} {
+      allow read: if isTenantAdmin(resource.data.tenantId);
+      allow create: if isTenantAdmin(request.resource.data.tenantId);
+      allow update: if isTenantAdmin(resource.data.tenantId) 
+                   && isTenantAdmin(request.resource.data.tenantId);
+      allow delete: if isTenantAdmin(resource.data.tenantId);
+    }
+  }
+}

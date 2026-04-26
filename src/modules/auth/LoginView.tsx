@@ -1,0 +1,235 @@
+import { useState } from 'react';
+import { Navigate } from 'react-router-dom';
+import { useAuthStore } from '@/stores/authStore';
+import { AuthService } from '@/services/AuthService';
+import { Sun, Mail, Lock, Loader2, Globe } from 'lucide-react';
+
+export const LoginView = () => {
+  const { isAuthenticated, user, memberships } = useAuthStore();
+  const [view, setView] = useState<'login' | 'register'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // Redirigir si está autenticado y tiene membresías
+  if (isAuthenticated && user && memberships.length > 0) {
+     return <Navigate to="/" replace />;
+  }
+
+  // Redirigir a ventana de espera si está autenticado pero no tiene membresías (Acceso pendiente)
+  if (isAuthenticated && user && memberships.length === 0) {
+    return <Navigate to="/access-pending" replace />;
+  }
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) return;
+    
+    setIsProcessing(true);
+    setError('');
+    
+    try {
+      await AuthService.login(email.trim(), password);
+    } catch (err: any) {
+      console.error(err.code, err);
+      
+      const errorCode = err.code;
+      if (errorCode === 'auth/user-not-found' || errorCode === 'auth/invalid-credential') {
+        // Verificar si está invitado antes de dar el mensaje final
+        try {
+          const memberships = await AuthService.getMembershipsByEmail(email.trim());
+          if (memberships.length > 0) {
+            setError('Esta cuenta aún no tiene contraseña. Haz clic en "Crea tu cuenta aquí" o ingresa con Google.');
+          } else {
+            setError('Este correo no tiene acceso asignado.');
+          }
+        } catch (checkErr) {
+          setError('Credenciales incorrectas.');
+        }
+      } else if (errorCode === 'auth/wrong-password') {
+        setError('Contraseña incorrecta.');
+      } else if (errorCode === 'auth/too-many-requests') {
+        setError('Demasiados intentos fallidos. Intenta más tarde.');
+      } else {
+        setError('Error al iniciar sesión. Verifica tus datos.');
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password || !name) return;
+    
+    setIsProcessing(true);
+    setError('');
+    
+    try {
+      await AuthService.register(email.trim(), password, name);
+    } catch (err: any) {
+      console.error(err);
+      if (err.message.includes('acceso asignado')) {
+        setError(err.message);
+      } else if (err.code === 'auth/email-already-in-use') {
+        setError('Este correo ya tiene una cuenta. Inicia sesión directamente.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('La contraseña debe tener al menos 6 caracteres.');
+      } else {
+        setError(err.message || 'Error al crear cuenta.');
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setIsProcessing(true);
+    setError('');
+    try {
+      await AuthService.loginWithGoogle();
+    } catch (err: any) {
+      const errorCode = err.code;
+      if (errorCode === 'auth/popup-closed-by-user') {
+        // El usuario cerró el popup, no es un error crítico
+        return;
+      } else if (errorCode === 'auth/popup-blocked') {
+        setError('El navegador bloqueó la ventana de Google. Por favor, permite las ventanas emergentes.');
+      } else if (errorCode === 'auth/unauthorized-domain') {
+        setError('Este dominio no está autorizado para usar Google Sign-In. Contacta al soporte.');
+      } else if (errorCode === 'auth/operation-not-allowed') {
+        setError('Google Sign-In no está habilitado en Firebase. Contacta al Admin.');
+      } else if (errorCode === 'auth/account-exists-with-different-credential') {
+        setError('Ya existe una cuenta con este correo pero usa otro método de inicio (ej: contraseña).');
+      } else if (errorCode === 'auth/user-disabled') {
+        setError('Esta cuenta de usuario ha sido deshabilitada.');
+      } else if (err.message.includes('acceso asignado') || errorCode === 'permission-denied') {
+        setError('Este correo no tiene acceso asignado o hubo un error de permisos.');
+      } else {
+        setError(`Error de acceso: No se pudo validar tu invitación. Asegúrate de haber sido invitado.`);
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="flex justify-center text-primary-600 dark:text-primary-500 mb-6">
+          <Sun className="w-12 h-12" />
+        </div>
+        <h2 className="text-center text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+          Paneles Solares MX
+        </h2>
+        <p className="mt-2 text-center text-sm text-slate-600 dark:text-slate-400">
+          {view === 'login' ? 'Iniciar sesión en tu portal corporativo' : 'Crear tu cuenta corporativa'}
+        </p>
+      </div>
+
+      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="bg-white dark:bg-slate-900 py-8 px-4 shadow-xl sm:rounded-2xl sm:px-10 border border-slate-100 dark:border-slate-800">
+          
+          <button
+            onClick={handleGoogleLogin}
+            disabled={isProcessing}
+            className="w-full flex items-center justify-center gap-3 px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-lg shadow-sm bg-white dark:bg-slate-800 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors mb-6"
+          >
+            {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Globe className="w-5 h-5 text-blue-500" />}
+            Continuar con Google
+          </button>
+
+          <div className="relative mb-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-200 dark:border-slate-800"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-white dark:bg-slate-900 text-slate-500">o usa tu correo corporativo</span>
+            </div>
+          </div>
+
+          <form className="space-y-6" onSubmit={view === 'login' ? handleLogin : handleRegister}>
+            {error && (
+              <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 p-3 rounded-lg text-sm font-medium border border-red-200 dark:border-red-800 text-center">
+                {error}
+              </div>
+            )}
+            
+            {view === 'register' && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Nombre completo</label>
+                <input
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="mt-1 appearance-none block w-full px-3 py-2.5 border border-slate-300 dark:border-slate-700 rounded-lg shadow-sm placeholder-slate-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  placeholder="Juan Perez"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Correo electrónico</label>
+              <div className="mt-1 relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Mail className="h-5 w-5 text-slate-400" />
+                </div>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="appearance-none block w-full pl-10 px-3 py-2.5 border border-slate-300 dark:border-slate-700 rounded-lg shadow-sm placeholder-slate-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  placeholder="admin@panelessolares.mx"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Contraseña</label>
+              <div className="mt-1 relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Lock className="h-5 w-5 text-slate-400" />
+                </div>
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="appearance-none block w-full pl-10 px-3 py-2.5 border border-slate-300 dark:border-slate-700 rounded-lg shadow-sm placeholder-slate-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+
+            <div>
+              <button
+                type="submit"
+                disabled={isProcessing}
+                className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : view === 'login' ? 'Acceder al Sistema' : 'Crear Cuenta'}
+              </button>
+            </div>
+          </form>
+
+          <div className="mt-6 text-center">
+            <button
+              onClick={() => setView(view === 'login' ? 'register' : 'login')}
+              className="text-sm font-medium text-primary-600 hover:text-primary-500 transition-colors"
+            >
+              {view === 'login' ? '¿Ya fuiste invitado? Crea tu cuenta aquí' : '¿Ya tienes cuenta? Inicia sesión'}
+            </button>
+          </div>
+        </div>
+        
+        <p className="text-center text-xs text-slate-400 mt-6 tracking-widest uppercase">
+           Paneles Solares MX • v6.2
+        </p>
+      </div>
+    </div>
+  );
+};
