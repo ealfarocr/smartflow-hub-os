@@ -7,6 +7,9 @@ export const AccessPendingView = () => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
        <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl flex flex-col overflow-hidden text-center p-8">
+        <div className="flex justify-center mb-8">
+          <img src="/brand/logo-smartflow-blue.png" alt="SmartFlow Hub Logo" className="h-12 w-auto object-contain dark:brightness-200" />
+        </div>
           <div className="w-16 h-16 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 rounded-full flex items-center justify-center mx-auto mb-6">
              <span className="text-2xl font-bold">!</span>
           </div>

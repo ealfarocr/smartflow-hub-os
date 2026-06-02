@@ -1,0 +1,2945 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartFlow Hub OS — El sistema que reemplaza todo</title>
+  <meta name="description" content="CRM gratis + herramientas a la carta. WhatsApp, Agente IA, Cotizaciones, Pagos y más. Para cualquier negocio. Empieza gratis hoy." />
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #FFFFFF;
+      --bg-2: #F0F5FF;
+      --bg-3: #EBF2FF;
+      --blue: #1877F2;
+      --blue-2: #0A65DB;
+      --blue-light: #4FACFE;
+      --blue-xlight: #EEF4FF;
+      --green: #10B981;
+      --pink: #EC4899;
+      --yellow: #F59E0B;
+      --orange: #F97316;
+      --purple: #7C3AED;
+      --cyan: #0EA5E9;
+      --text: #0F172A;
+      --text-2: #334155;
+      --slate: #64748B;
+      --slate-mid: #64748B;
+      --slate-light: #94A3B8;
+      --border: rgba(0,0,0,0.08);
+      --border-blue: rgba(24,119,242,0.2);
+      --white: #FFFFFF;
+    }
+
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 5%; }
+    .grad-text { background: linear-gradient(135deg, #1877F2, #4FACFE); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .grad-text-2 { background: linear-gradient(135deg, #EC4899, #F59E0B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .grad-text-3 { background: linear-gradient(135deg, #10B981, #1877F2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+
+    /* ═══ NAV ═══ */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      height: 72px; display: flex; align-items: center; justify-content: space-between;
+      padding: 0 5%;
+      background: rgba(255,255,255,0.94); backdrop-filter: blur(24px) saturate(180%);
+      border-bottom: 1px solid rgba(0,0,0,0.07);
+      box-shadow: 0 1px 16px rgba(0,0,0,0.06);
+    }
+    .nav-logo { display: flex; align-items: center; text-decoration: none; height: 100%; padding: 4px 0; }
+    .nav-logo-icon { width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, var(--blue), var(--blue-light)); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 20px rgba(24,119,242,.3); }
+    .nav-logo-icon svg { width: 20px; height: 20px; fill: white; }
+    .nav-logo-text { font-size: 16px; font-weight: 800; color: var(--text); letter-spacing: -.3px; }
+    .nav-logo-text span { color: var(--blue); }
+    .nav-center { display: flex; align-items: center; gap: 32px; }
+    .nav-center a { color: var(--slate); font-size: 14px; font-weight: 500; text-decoration: none; transition: color .2s; }
+    .nav-center a:hover { color: var(--text); }
+    .nav-right { display: flex; align-items: center; gap: 12px; }
+    .nav-login { color: var(--slate); font-size: 14px; font-weight: 500; text-decoration: none; transition: color .2s; }
+    .nav-login:hover { color: var(--text); }
+    .nav-cta { background: var(--blue); color: white; padding: 10px 22px; border-radius: 9px; font-size: 14px; font-weight: 700; text-decoration: none; transition: opacity .2s, transform .15s, box-shadow .2s; box-shadow: 0 0 24px rgba(24,119,242,.35); }
+    .nav-cta:hover { opacity: .92; transform: translateY(-1px); box-shadow: 0 4px 30px rgba(24,119,242,.45); }
+
+    /* ═══ HERO ═══ */
+    .hero {
+      min-height: 100vh; padding: 100px 5% 60px;
+      position: relative; overflow: hidden;
+      background: linear-gradient(135deg, #1877F2 0%, #0A65DB 60%, #1565D8 100%);
+    }
+    .hero::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(ellipse 70% 50% at 80% 20%, rgba(255,255,255,.08) 0%, transparent 60%);
+      pointer-events: none; z-index: 0;
+    }
+    .hero-orb { position: absolute; border-radius: 50%; pointer-events: none; }
+    .hero-orb-1 { width: 700px; height: 700px; top: -200px; left: -200px; background: radial-gradient(circle, rgba(255,255,255,.1) 0%, transparent 65%); }
+    .hero-orb-2 { width: 500px; height: 500px; bottom: -100px; right: -100px; background: radial-gradient(circle, rgba(255,255,255,.06) 0%, transparent 65%); }
+
+    /* LEFT ALIGNED LAYOUT */
+    .hero-inner {
+      position: relative; z-index: 1;
+      max-width: 1200px; margin: 0 auto;
+      display: flex; flex-direction: column; align-items: flex-start; justify-content: center; text-align: left;
+      min-height: calc(100vh - 160px);
+    }
+    .hero-left { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; width: 100%; max-width: 800px; }
+
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
+      color: white; padding: 6px 16px; border-radius: 100px;
+      font-size: 12px; font-weight: 600; margin-bottom: 28px;
+      animation: fadeUp .6s ease both; width: fit-content;
+    }
+    .badge-dot { width: 6px; height: 6px; background: white; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.4)} }
+    @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes scaleIn { from{opacity:0;transform:scale(.96) translateY(10px)} to{opacity:1;transform:scale(1) translateY(0)} }
+
+    .hero-headline {
+      font-size: clamp(40px, 5vw, 68px);
+      font-weight: 900; line-height: 1.03; letter-spacing: -2.5px;
+      color: white; margin-bottom: 24px;
+      animation: fadeUp .7s .1s ease both;
+    }
+
+    /* Bullets — inline exacto como ClickUp */
+    .hero-bullets { list-style: none; margin-bottom: 32px; animation: fadeUp .7s .2s ease both; }
+    .hero-bullet {
+      display: flex; align-items: baseline; gap: 10px;
+      font-size: 16px; margin-bottom: 10px; line-height: 1.5;
+    }
+    .hero-bullet::before { content: '✓'; color: white; font-weight: 900; font-size: 14px; flex-shrink: 0; }
+    .hero-bullet strong { color: white; margin-right: 4px; }
+    .hero-bullet span { color: rgba(255,255,255,.72); }
+
+    /* CTA area — botón + nota al lado (igual ClickUp) */
+    .hero-cta-area {
+      display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+      margin-bottom: 24px; animation: fadeUp .7s .3s ease both;
+    }
+    .btn-hero {
+      background: white; color: var(--blue);
+      padding: 17px 34px; border-radius: 11px;
+      font-size: 17px; font-weight: 800; text-decoration: none;
+      box-shadow: 0 8px 40px rgba(0,0,0,.2);
+      transition: transform .15s, box-shadow .2s; display: inline-flex; align-items: center; gap: 8px;
+      white-space: nowrap;
+    }
+    .btn-hero:hover { transform: translateY(-2px); box-shadow: 0 12px 50px rgba(0,0,0,.28); }
+    .hero-cta-note {
+      display: flex; flex-direction: column; gap: 2px;
+      font-size: 13px; color: rgba(255,255,255,.65); line-height: 1.4;
+      animation: fadeUp .7s .35s ease both;
+    }
+
+    /* Separador — como el "GET 400% MORE DONE" de ClickUp */
+    .hero-separator {
+      font-size: 11px; font-weight: 700; letter-spacing: 2.5px;
+      text-transform: uppercase; color: rgba(255,255,255,.45);
+      margin-bottom: 14px; animation: fadeUp .7s .4s ease both;
+    }
+
+    /* Tabs — dos filas como ClickUp */
+    .hero-tabs { display: flex; gap: 8px; flex-wrap: wrap; animation: fadeUp .7s .45s ease both; }
+    .hero-tab-item {
+      padding: 6px 16px; border-radius: 100px; font-size: 13px; font-weight: 600; cursor: pointer;
+      border: 1.5px solid rgba(255,255,255,.22); color: rgba(255,255,255,.78);
+      background: transparent; transition: all .2s; white-space: nowrap;
+    }
+    .hero-tab-item.active {
+      background: transparent; color: white;
+      border-color: white;
+    }
+    .hero-tab-item.active::after { content: ' ✓'; font-size: 11px; }
+    .hero-tab-item:hover:not(.active) { border-color: rgba(255,255,255,.5); color: white; }
+
+    /* Screenshot — limpio sin doble frame */
+    .hero-screenshot-wrap {
+      position: relative; width: 100%;
+      animation: scaleIn 1s .3s ease both;
+    }
+    .hero-screenshot-wrap::after {
+      content: ''; position: absolute; bottom: -40px; left: 10%; right: 10%; height: 80px;
+      background: radial-gradient(ellipse, rgba(0,0,0,.4) 0%, transparent 70%);
+      filter: blur(30px); z-index: 0; pointer-events: none;
+    }
+    .hero-screenshot-frame {
+      position: relative; z-index: 1;
+      border-radius: 16px; overflow: hidden;
+      border: 1.5px solid rgba(255,255,255,.2);
+      box-shadow: 0 32px 80px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.1);
+    }
+    .hero-screenshot-img {
+      width: 100%; display: block;
+      object-fit: cover; object-position: top left;
+    }
+
+    /* APP WINDOW — stays dark (product mockup) */
+    .app-window {
+      background: #0D0F1A; border-radius: 20px; overflow: hidden;
+      border: 1px solid rgba(255,255,255,.1);
+      box-shadow: 0 60px 120px rgba(24,119,242,.12), 0 0 0 1px rgba(24,119,242,.12), inset 0 1px 0 rgba(255,255,255,.06);
+      position: relative; z-index: 1;
+    }
+    .app-topbar {
+      background: #07090F; padding: 14px 20px;
+      display: flex; align-items: center; gap: 8px;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .app-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .app-dot:nth-child(1) { background: #FF5F57; }
+    .app-dot:nth-child(2) { background: #FEBC2E; }
+    .app-dot:nth-child(3) { background: #28C840; }
+    .app-url { margin-left: 16px; background: rgba(255,255,255,.05); border-radius: 6px; padding: 5px 16px; font-size: 12px; color: #475569; font-family: monospace; }
+
+    .app-tabs { display: flex; gap: 4px; padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,.06); background: rgba(255,255,255,.02); overflow-x: auto; }
+    .app-tab { padding: 7px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all .2s; color: #64748B; border: 1px solid transparent; }
+    .app-tab.active { background: rgba(24,119,242,.15); color: #93C5FD; border-color: rgba(24,119,242,.25); }
+    .app-tab:hover:not(.active) { color: white; background: rgba(255,255,255,.05); }
+
+    .app-body { display: flex; min-height: 460px; }
+    .app-sidebar { width: 220px; background: #07090F; border-right: 1px solid rgba(255,255,255,.05); padding: 20px 16px; display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+    .app-logo-row { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; padding: 0 4px; }
+    .app-logo-dot { width: 28px; height: 28px; border-radius: 7px; background: linear-gradient(135deg, #1877F2, #4FACFE); }
+    .app-logo-name { font-size: 13px; font-weight: 800; color: white; }
+    .app-nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; font-size: 12px; color: #475569; transition: all .2s; cursor: pointer; }
+    .app-nav-item.active { background: rgba(24,119,242,.15); color: #93C5FD; }
+    .app-nav-item svg { width: 14px; height: 14px; flex-shrink: 0; }
+    .app-nav-item:hover:not(.active) { background: rgba(255,255,255,.04); color: #94A3B8; }
+    .app-nav-sep { height: 1px; background: rgba(255,255,255,.05); margin: 8px 0; }
+    .app-nav-label { font-size: 10px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 1px; padding: 4px 10px; }
+
+    .app-main { flex: 1; background: #0A0C15; display: flex; flex-direction: column; overflow: hidden; }
+    .app-main-header { padding: 16px 24px 12px; border-bottom: 1px solid rgba(255,255,255,.05); display: flex; align-items: center; justify-content: space-between; }
+    .app-main-title { font-size: 15px; font-weight: 800; color: white; }
+    .app-main-actions { display: flex; gap: 8px; }
+    .app-btn-sm { padding: 6px 14px; border-radius: 7px; font-size: 11px; font-weight: 700; cursor: pointer; }
+    .app-btn-sm.purple { background: linear-gradient(135deg, #1877F2, #4FACFE); color: white; border: none; }
+    .app-btn-sm.ghost { background: rgba(255,255,255,.06); color: #94A3B8; border: 1px solid rgba(255,255,255,.08); }
+
+    .app-content { padding: 20px 24px; flex: 1; }
+    .app-stats-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 20px; }
+    .app-stat-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06); border-radius: 10px; padding: 14px; }
+    .app-stat-num { font-size: 24px; font-weight: 900; margin-bottom: 2px; }
+    .app-stat-label { font-size: 10px; color: #64748B; text-transform: uppercase; letter-spacing: .5px; }
+    .app-stat-change { font-size: 10px; margin-top: 4px; }
+    .up { color: #10B981; } .neutral { color: #64748B; }
+
+    .app-kanban { display: grid; grid-template-columns: repeat(5,1fr); gap: 10px; }
+    .app-col { background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.04); border-radius: 9px; padding: 10px; }
+    .app-col-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .app-col-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: #64748B; }
+    .app-col-count { font-size: 10px; font-weight: 700; color: #64748B; background: rgba(255,255,255,.06); padding: 2px 7px; border-radius: 100px; }
+    .app-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); border-radius: 7px; padding: 10px; margin-bottom: 7px; }
+    .app-card-name { font-size: 11px; font-weight: 700; color: white; margin-bottom: 5px; }
+    .app-card-row { display: flex; align-items: center; justify-content: space-between; }
+    .app-card-tag { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .tag-hot { background: rgba(239,68,68,.15); color: #FCA5A5; }
+    .tag-warm { background: rgba(245,158,11,.15); color: #FCD34D; }
+    .tag-cold { background: rgba(59,130,246,.15); color: #93C5FD; }
+    .tag-done { background: rgba(16,185,129,.15); color: #6EE7B7; }
+    .app-card-score { font-size: 10px; font-weight: 700; }
+
+    /* ═══ POWER-UP SECTION ═══ */
+    .power-section { padding: 100px 5% 80px; background: linear-gradient(180deg, #F8FAFF 0%, #EEF4FF 100%); overflow: hidden; }
+    .power-inner { max-width: 1000px; margin: 0 auto; }
+    .power-stage {
+      display: grid; grid-template-columns: 1.25fr 1fr 56px;
+      gap: 40px; align-items: start;
+      margin-top: 56px;
+    }
+    .power-main { display: flex; flex-direction: column; gap: 0; }
+
+    /* Hub card — CRM base */
+    .power-hub {
+      background: linear-gradient(135deg, #1877F2 0%, #0A65DB 100%);
+      border-radius: 20px 20px 0 0; padding: 20px 24px;
+      display: flex; align-items: center; gap: 16px;
+      box-shadow: 0 8px 40px rgba(24,119,242,.3);
+      position: relative; overflow: hidden;
+      transition: box-shadow .6s ease;
+    }
+    .power-hub::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(ellipse at 75% 50%, rgba(255,255,255,.16) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .power-hub.ultra { box-shadow: 0 8px 60px rgba(24,119,242,.55), 0 0 0 3px rgba(79,172,254,.3); }
+    .power-hub-icon { font-size: 34px; position: relative; z-index: 1; transition: transform .3s ease; }
+    .power-hub.ultra .power-hub-icon { transform: scale(1.15); }
+    .power-hub-text { position: relative; z-index: 1; flex: 1; }
+    .power-hub-name { font-size: 17px; font-weight: 900; color: white; letter-spacing: -.4px; }
+    .power-hub-tag { font-size: 11px; font-weight: 700; color: rgba(255,255,255,.85); background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.28); padding: 3px 12px; border-radius: 100px; display: inline-block; margin-top: 5px; }
+    .power-hub-score {
+      position: relative; z-index: 1;
+      text-align: right; line-height: 1;
+    }
+    .power-hub-score-num { font-size: 28px; font-weight: 900; color: white; letter-spacing: -1px; transition: all .4s ease; }
+    .power-hub-score-label { font-size: 9px; font-weight: 700; color: rgba(255,255,255,.6); text-transform: uppercase; letter-spacing: 1px; }
+
+    /* Connector: hub → tools */
+    .power-connector {
+      height: 16px; background: linear-gradient(180deg, rgba(24,119,242,.35), rgba(24,119,242,.08));
+      margin: 0; position: relative;
+    }
+    .power-connector::before, .power-connector::after {
+      content: ''; position: absolute; top: 0; bottom: 0; width: 1px;
+      background: linear-gradient(180deg, rgba(24,119,242,.4), transparent);
+    }
+    .power-connector::before { left: 28px; }
+    .power-connector::after { right: 28px; }
+
+    .power-left-panel {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+    }
+    .model-organic-flow {
+      margin-top: 64px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 40px;
+      padding-top: 40px;
+      border-top: 1px solid rgba(24,119,242,0.1);
+    }
+    @media (max-width: 768px) {
+      .model-organic-flow {
+        grid-template-columns: 1fr;
+        gap: 24px;
+      }
+    }
+    .power-tool {
+      background: white; padding: 14px 16px;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      cursor: pointer; transition: all .3s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,.04);
+    }
+    .power-tool:hover {
+      border-color: var(--blue);
+      box-shadow: 0 8px 20px rgba(24,119,242,.15);
+      transform: translateY(-2px);
+    }
+    .power-tool-content {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .power-tool-add {
+      width: 24px; height: 24px; border-radius: 50%;
+      background: rgba(24,119,242,.1); color: var(--blue);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 14px; transition: all .2s;
+    }
+    .power-tool:hover .power-tool-add {
+      background: var(--blue); color: white; transform: scale(1.1);
+    }
+    .power-tool.hidden {
+      opacity: 0; pointer-events: none; transform: scale(0.9); border-color: transparent; box-shadow: none;
+    }
+
+    .power-hub-slots {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+      background: rgba(24,119,242,.04);
+      border: 1.5px dashed rgba(24,119,242,.2);
+      border-top: none;
+      border-radius: 0 0 20px 20px;
+      padding: 24px;
+      min-height: 220px;
+    }
+    .power-slot {
+      height: 68px;
+      border: 1.5px dashed rgba(24,119,242,.25);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.4);
+      display: flex; align-items: center; justify-content: center;
+      color: rgba(24,119,242,.5); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+    }
+    .power-tool-slotted {
+      background: white; padding: 12px;
+      display: flex; align-items: center; gap: 10px;
+      border: 1px solid rgba(24,119,242,.3);
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(24,119,242,.15);
+      width: 100%; height: 100%;
+      animation: slottedPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .power-slot-crm {
+      background: linear-gradient(135deg, rgba(5,150,105,.1), rgba(16,185,129,.04));
+      padding: 10px 8px;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 3px;
+      border: 2px solid rgba(16,185,129,.5);
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(16,185,129,.2);
+      width: 100%; min-height: 68px;
+      animation: slottedPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes slottedPop {
+      0% { transform: scale(0.8); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    
+    .flying-tool {
+      position: fixed; z-index: 9999;
+      pointer-events: none;
+      transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+      background: white; padding: 12px;
+      display: flex; align-items: center; gap: 10px;
+      border: 1px solid var(--blue);
+      border-radius: 12px;
+      box-shadow: 0 15px 40px rgba(24,119,242,.25);
+    }
+    
+    .power-tool-icon { font-size: 22px; flex-shrink: 0; }
+    .power-tool-name { font-size: 13px; font-weight: 800; color: var(--text); line-height: 1.2; }
+    .power-tool-price { font-size: 10px; color: var(--slate); font-weight: 600; margin-top: 2px; }
+
+    .power-hub.pulse {
+      animation: hubPulse 0.5s ease-out;
+    }
+    @keyframes hubPulse {
+      0% { transform: scale(1); filter: brightness(1); box-shadow: 0 8px 40px rgba(24,119,242,.3); }
+      30% { transform: scale(1.04); filter: brightness(1.2); box-shadow: 0 15px 60px rgba(24,119,242,.6), 0 0 0 2px rgba(79,172,254,.4); }
+      100% { transform: scale(1); filter: brightness(1); box-shadow: 0 8px 40px rgba(24,119,242,.3); }
+    }
+    .energy-particle {
+      position: absolute;
+      width: 4px; height: 30px;
+      background: linear-gradient(to top, transparent, white, white);
+      border-radius: 10px;
+      box-shadow: 0 0 15px 4px rgba(255,255,255,0.8), 0 0 30px 8px rgba(79,172,254,0.6);
+      z-index: 50;
+      pointer-events: none;
+    }
+
+    /* Power level badge */
+    .power-level {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      margin-top: 16px; padding: 11px 20px; border-radius: 100px;
+      font-size: 13px; font-weight: 800;
+      background: rgba(24,119,242,.07); border: 1.5px solid rgba(24,119,242,.18); color: var(--blue);
+      transition: all .5s ease; white-space: nowrap;
+    }
+    .power-level.maxed {
+      background: linear-gradient(135deg, #1877F2, #4FACFE);
+      border-color: transparent; color: white;
+      box-shadow: 0 6px 28px rgba(24,119,242,.42);
+      animation: levelPop .55s ease;
+    }
+    @keyframes levelPop { 0%{transform:scale(.92)} 65%{transform:scale(1.06)} 100%{transform:scale(1)} }
+
+    /* Vertical power bar */
+    .power-bar-wrap {
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      padding-top: 4px;
+    }
+    .power-bar-top-label { font-size: 8px; font-weight: 800; color: var(--blue); text-transform: uppercase; letter-spacing: 1.2px; text-align: center; line-height: 1.3; }
+    .power-bar-track {
+      width: 10px; height: 280px;
+      background: rgba(0,0,0,.07); border-radius: 10px;
+      position: relative; overflow: hidden;
+    }
+    .power-bar-fill {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 0%;
+      background: linear-gradient(0deg, #1877F2 0%, #4FACFE 60%, #fff 100%);
+      border-radius: 10px; transition: height 1s cubic-bezier(.4,0,.2,1);
+      box-shadow: 0 -4px 12px rgba(79,172,254,.7);
+    }
+    .power-bar-fill::after {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 8px;
+      background: white; border-radius: 10px;
+      opacity: .6; animation: barGlow 1.2s ease-in-out infinite;
+    }
+    @keyframes barGlow { 0%,100%{opacity:.4} 50%{opacity:.9} }
+    .power-bar-bot-label { font-size: 8px; font-weight: 700; color: var(--slate-light); text-transform: uppercase; letter-spacing: .8px; }
+
+    /* ═══ METRICS ═══ */
+    .metrics-section {
+      padding: 80px 5%;
+      background: linear-gradient(135deg, rgba(24,119,242,.06) 0%, rgba(79,172,254,.04) 100%);
+      border-top: 1px solid rgba(24,119,242,.1); border-bottom: 1px solid rgba(24,119,242,.1);
+    }
+    .metrics-inner { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: repeat(4,1fr); gap: 40px; }
+    .metric-item { text-align: center; }
+    .metric-num { font-size: clamp(40px,5vw,64px); font-weight: 900; letter-spacing: -2px; line-height: 1; margin-bottom: 10px; }
+    .metric-label { font-size: 15px; color: var(--slate); line-height: 1.5; }
+
+    /* ═══ PARA QUIÉN ═══ */
+    .forwhom-section { padding: 100px 5%; background: var(--bg); }
+    .forwhom-inner { max-width: 1200px; margin: 0 auto; }
+    .section-header { margin-bottom: 56px; }
+    .chip-label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: var(--blue); margin-bottom: 16px; }
+    .chip-label::before { content: ''; width: 20px; height: 1px; background: var(--blue); }
+    .section-h2 { font-size: clamp(32px,4vw,52px); font-weight: 900; letter-spacing: -2px; line-height: 1.1; color: var(--text); }
+    .section-p { font-size: 17px; color: var(--slate); max-width: 520px; margin-top: 16px; line-height: 1.7; }
+
+    .forwhom-grid { 
+      display: grid; 
+      grid-template-columns: repeat(4, 1fr); 
+      grid-auto-rows: 200px;
+      gap: 16px; 
+      margin-top: 56px;
+    }
+    .forwhom-card {
+      background: white; border: none;
+      border-radius: 24px; position: relative; overflow: hidden;
+      transition: all .5s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 4px 20px rgba(0,0,0,.04);
+      cursor: pointer;
+    }
+    .forwhom-card.large { grid-column: span 2; grid-row: span 2; }
+    .forwhom-card.wide { grid-column: span 2; }
+    
+    .forwhom-bg {
+      position: absolute; inset: 0;
+      background-size: cover; background-position: center;
+      transition: transform 0.8s ease;
+      filter: brightness(0.6) contrast(1.1);
+      z-index: 1;
+    }
+    .forwhom-card:hover .forwhom-bg { transform: scale(1.1); filter: brightness(0.7) contrast(1.15); }
+    
+    .forwhom-content {
+      position: absolute; inset: 0;
+      padding: 30px;
+      display: flex; flex-direction: column; justify-content: flex-end;
+      background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.3) 50%, transparent 100%);
+      color: white;
+      z-index: 2;
+    }
+    .forwhom-tag { font-size: 10px; font-weight: 800; color: rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 6px; }
+    .forwhom-name { font-size: 22px; font-weight: 900; color: white !important; letter-spacing: -0.5px; margin: 0; }
+    .forwhom-card.large .forwhom-name { font-size: 32px; }
+
+    .forwhom-card:hover { transform: translateY(-8px); box-shadow: 0 30px 60px rgba(24,119,242,0.15); }
+
+    /* ═══ CÓMO FUNCIONA ═══ */
+    .how-section {
+      padding: 100px 5%;
+      background: linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 50%, var(--bg) 100%);
+      position: relative; overflow: hidden;
+    }
+    .how-orb { position: absolute; width: 600px; height: 600px; border-radius: 50%; background: radial-gradient(circle, rgba(24,119,242,.05) 0%, transparent 70%); left: 50%; top: 50%; transform: translate(-50%,-50%); pointer-events: none; }
+    .how-inner { max-width: 1200px; margin: 0 auto; }
+    .how-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: center; margin-top: 60px; }
+    .how-steps { display: flex; flex-direction: column; gap: 0; }
+    .how-step { display: flex; gap: 20px; padding: 28px 0; border-bottom: 1px solid var(--border); cursor: pointer; transition: all .2s; position: relative; }
+    .how-step:last-child { border-bottom: none; }
+    .how-step.active { padding-left: 4px; }
+    .how-step.active::before { content: ''; position: absolute; left: 0; top: 28px; bottom: 28px; width: 3px; background: linear-gradient(180deg, var(--blue), var(--blue-light)); border-radius: 2px; }
+    .how-step-num { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 900; flex-shrink: 0; transition: all .3s; }
+    .how-step.active .how-step-num { background: linear-gradient(135deg, var(--blue), var(--blue-light)); box-shadow: 0 4px 20px rgba(24,119,242,.4); color: white; }
+    .how-step:not(.active) .how-step-num { background: rgba(0,0,0,.05); color: var(--slate); }
+    .how-step-title { font-size: 18px; font-weight: 800; margin-bottom: 6px; transition: color .2s; color: var(--text); }
+    .how-step:not(.active) .how-step-title { color: var(--slate); }
+    .how-step-desc { font-size: 14px; color: var(--slate); line-height: 1.7; display: none; }
+    .how-step.active .how-step-desc { display: block; }
+    .how-step-tag { display: inline-block; margin-top: 10px; padding: 3px 12px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+    .how-visual-box { position: relative; }
+    .how-visual { background: #0D0F1A; border: 1px solid rgba(255,255,255,.1); border-radius: 20px; overflow: hidden; box-shadow: 0 40px 80px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,.06); }
+    .how-visual-header { background: #07090F; padding: 14px 20px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,.05); }
+    .how-dot { width: 11px; height: 11px; border-radius: 50%; }
+    .how-dot:nth-child(1){background:#FF5F57} .how-dot:nth-child(2){background:#FEBC2E} .how-dot:nth-child(3){background:#28C840}
+    .how-visual-body { padding: 24px; }
+
+    .vis-panel { display: none; }
+    .vis-panel.active { display: block; }
+
+    .vis-crm-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 16px; }
+    .vis-crm-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); border-radius: 10px; padding: 14px; }
+    .vis-num { font-size: 28px; font-weight: 900; color: white; }
+    .vis-label { font-size: 10px; color: #64748B; text-transform: uppercase; }
+    .vis-leads { display: flex; flex-direction: column; gap: 7px; }
+    .vis-lead-row { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.05); border-radius: 8px; padding: 10px 12px; }
+    .vis-lead-avatar { width: 28px; height: 28px; border-radius: 50%; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: white; }
+    .vis-lead-name { font-size: 12px; font-weight: 700; flex: 1; color: white; }
+    .vis-lead-tag { font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+
+    .vis-store-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 10px; }
+    .vis-tool-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); border-radius: 12px; padding: 16px; display: flex; align-items: flex-start; gap: 12px; transition: all .2s; }
+    .vis-tool-card:hover { border-color: rgba(24,119,242,.3); background: rgba(24,119,242,.06); }
+    .vis-tool-icon { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+    .vis-tool-name { font-size: 12px; font-weight: 700; color: white; margin-bottom: 3px; }
+    .vis-tool-price { font-size: 11px; font-weight: 700; }
+    .vis-tool-add { font-size: 9px; color: #64748B; margin-top: 6px; }
+
+    .vis-activate { display: flex; flex-direction: column; gap: 10px; }
+    .vis-activate-item { display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.05); border-radius: 10px; padding: 12px 16px; }
+    .vis-activate-icon { font-size: 20px; }
+    .vis-activate-name { font-size: 13px; font-weight: 700; flex: 1; color: white; }
+    .vis-toggle { width: 36px; height: 20px; border-radius: 100px; position: relative; cursor: pointer; flex-shrink: 0; }
+    .vis-toggle.on { background: var(--blue); }
+    .vis-toggle.off { background: rgba(255,255,255,.1); }
+    .vis-toggle::after { content: ''; position: absolute; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: white; transition: left .2s; }
+    .vis-toggle.on::after { left: 18px; }
+    .vis-toggle.off::after { left: 2px; }
+
+    .vis-invoice { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06); border-radius: 12px; padding: 20px; }
+    .vis-inv-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.05); font-size: 13px; }
+    .vis-inv-row:last-of-type { border-bottom: none; }
+    .vis-inv-name { color: #94A3B8; }
+    .vis-inv-price { font-weight: 700; color: white; }
+    .vis-inv-free { color: #10B981; }
+    .vis-inv-total { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.1); }
+    .vis-inv-total-label { font-size: 14px; font-weight: 700; color: white; }
+    .vis-inv-total-price { font-size: 24px; font-weight: 900; background: linear-gradient(135deg, #1877F2, #4FACFE); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+    /* ═══ TOOLS ═══ */
+    .tools-section { padding: 100px 5%; background: var(--bg); }
+    .tools-inner { max-width: 1200px; margin: 0 auto; }
+    .tools-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 48px; flex-wrap: wrap; gap: 20px; }
+    .tools-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
+    .tool-card {
+      background: white; border: 1px solid var(--border);
+      border-radius: 18px; padding: 24px; position: relative; overflow: hidden;
+      transition: all .25s; display: flex; flex-direction: column;
+      box-shadow: 0 2px 8px rgba(0,0,0,.04);
+    }
+    .tool-card::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; opacity: 0; transition: opacity .3s; }
+    .tool-card:hover { transform: translateY(-5px); }
+    .tool-card.tc-purple:hover { border-color: rgba(124,58,237,.25); box-shadow: 0 20px 50px rgba(124,58,237,.08); }
+    .tool-card.tc-purple::after { background: linear-gradient(90deg, transparent, rgba(124,58,237,.7), transparent); }
+    .tool-card.tc-green:hover { border-color: rgba(16,185,129,.25); box-shadow: 0 20px 50px rgba(16,185,129,.08); }
+    .tool-card.tc-green::after { background: linear-gradient(90deg, transparent, rgba(16,185,129,.7), transparent); }
+    .tool-card.tc-blue:hover { border-color: rgba(24,119,242,.25); box-shadow: 0 20px 50px rgba(24,119,242,.08); }
+    .tool-card.tc-blue::after { background: linear-gradient(90deg, transparent, rgba(24,119,242,.7), transparent); }
+    .tool-card.tc-pink:hover { border-color: rgba(236,72,153,.25); box-shadow: 0 20px 50px rgba(236,72,153,.08); }
+    .tool-card.tc-pink::after { background: linear-gradient(90deg, transparent, rgba(236,72,153,.7), transparent); }
+    .tool-card.tc-yellow:hover { border-color: rgba(245,158,11,.25); box-shadow: 0 20px 50px rgba(245,158,11,.08); }
+    .tool-card.tc-yellow::after { background: linear-gradient(90deg, transparent, rgba(245,158,11,.7), transparent); }
+    .tool-card.tc-cyan:hover { border-color: rgba(14,165,233,.25); box-shadow: 0 20px 50px rgba(14,165,233,.08); }
+    .tool-card.tc-cyan::after { background: linear-gradient(90deg, transparent, rgba(14,165,233,.7), transparent); }
+    .tool-card.tc-orange:hover { border-color: rgba(249,115,22,.25); box-shadow: 0 20px 50px rgba(249,115,22,.08); }
+    .tool-card.tc-orange::after { background: linear-gradient(90deg, transparent, rgba(249,115,22,.7), transparent); }
+    .tool-card:hover::after { opacity: 1; }
+    .tool-icon-wrap { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; font-size: 24px; }
+    .tool-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+    .tool-badge { font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 6px; letter-spacing: .5px; text-transform: uppercase; }
+    .badge-free { background: rgba(16,185,129,.1); color: #059669; border: 1px solid rgba(16,185,129,.2); }
+    .badge-paid { background: rgba(24,119,242,.08); color: var(--blue); border: 1px solid rgba(24,119,242,.18); }
+    .tool-name { font-size: 16px; font-weight: 800; margin-bottom: 8px; color: var(--text); }
+    .tool-desc { font-size: 13px; color: var(--slate); line-height: 1.65; flex: 1; }
+    .tool-add { margin-top: 18px; width: 100%; padding: 10px; border-radius: 9px; font-size: 13px; font-weight: 700; background: rgba(0,0,0,.03); border: 1px solid var(--border); color: var(--slate); cursor: pointer; transition: all .2s; text-align: center; }
+    .tool-add.is-free { background: rgba(16,185,129,.06); border-color: rgba(16,185,129,.2); color: #059669; }
+    .tool-card:hover .tool-add:not(.is-free) { background: rgba(24,119,242,.06); border-color: rgba(24,119,242,.22); color: var(--blue); }
+
+    /* ═══ TESTIMONIALS ═══ */
+    .testi-section {
+      padding: 100px 5%;
+      background: var(--bg-2);
+      border-top: 1px solid rgba(0,0,0,.06);
+    }
+    .testi-inner { max-width: 1200px; margin: 0 auto; }
+    .testi-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 56px; }
+    .testi-card { background: white; border: 1px solid var(--border); border-radius: 20px; padding: 28px; transition: all .25s; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+    .testi-card:hover { border-color: rgba(24,119,242,.2); transform: translateY(-4px); box-shadow: 0 20px 50px rgba(24,119,242,.08); }
+    .testi-stars { display: flex; gap: 3px; margin-bottom: 16px; }
+    .testi-stars span { color: var(--yellow); font-size: 14px; }
+    .testi-quote { font-size: 15px; line-height: 1.75; color: var(--text-2); margin-bottom: 24px; font-style: italic; }
+    .testi-author { display: flex; align-items: center; gap: 12px; }
+    .testi-av { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; color: white; flex-shrink: 0; }
+    .testi-name { font-size: 14px; font-weight: 800; color: var(--text); }
+    .testi-biz { font-size: 12px; color: var(--slate); }
+    .testi-result { margin-top: 16px; padding: 10px 14px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+
+    /* ═══ CTA — Azul Facebook de fondo ═══ */
+    .cta-section {
+      padding: 140px 5%; text-align: center; position: relative; overflow: hidden;
+      background: linear-gradient(135deg, #1877F2 0%, #0A65DB 60%, #1565D8 100%);
+    }
+    .cta-orb-1 { position: absolute; bottom: -100px; left: 50%; transform: translateX(-50%); width: 800px; height: 400px; border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.15) 0%, transparent 65%); filter: blur(40px); pointer-events: none; }
+    .cta-orb-2 { position: absolute; top: 50px; left: -100px; width: 400px; height: 400px; border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.08) 0%, transparent 65%); pointer-events: none; }
+    .cta-orb-3 { position: absolute; top: 50px; right: -100px; width: 400px; height: 400px; border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.06) 0%, transparent 65%); pointer-events: none; }
+    .cta-inner { position: relative; z-index: 1; max-width: 800px; margin: 0 auto; }
+    .cta-eyebrow { font-size: 13px; font-weight: 700; color: rgba(255,255,255,.8); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px; }
+    /* ═══ MODERN COMPARISON (No boxes) ═══ */
+    .comparison-section { padding: 0; background: white; overflow: hidden; }
+    .comparison-container { display: flex; min-height: 600px; }
+    
+    .comp-side { flex: 1; padding: 100px 8%; display: flex; flex-direction: column; justify-content: center; position: relative; }
+    .comp-side.left { background: #F8FAFC; }
+    .comp-side.right { 
+      background: #FFFFFF; 
+      color: #0F172A; 
+      border-left: 1px solid #E2E8F0;
+    }
+    
+    .comp-side.right::before {
+      content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+      background: radial-gradient(circle, rgba(24,119,242,0.15) 0%, transparent 50%);
+      pointer-events: none;
+    }
+
+    .comp-tag { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px; display: block; }
+    .left .comp-tag { color: #64748B; }
+    .right .comp-tag { color: #4FACFE; }
+
+    .comp-h2 { font-size: clamp(32px, 4vw, 56px); font-weight: 900; line-height: 1.1; margin-bottom: 32px; letter-spacing: -2px; }
+    .left .comp-h2 { color: #0F172A; }
+    .right .comp-h2 { color: #0F172A; }
+    .strike { text-decoration: line-through; opacity: 0.4; }
+
+    .comp-price-wrap { margin-bottom: 40px; }
+    .comp-price-val { font-size: 64px; font-weight: 900; display: block; line-height: 1; }
+    .comp-price-label { font-size: 16px; font-weight: 600; opacity: 0.6; margin-top: 8px; display: block; }
+
+    .comp-features { list-style: none; padding: 0; margin: 0; }
+    .comp-feature { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; font-size: 17px; font-weight: 500; }
+    .left .comp-feature { color: #475569; }
+    .left .comp-feature i { color: #EF4444; font-style: normal; font-weight: 900; }
+    .right .comp-feature i { color: #10B981; font-style: normal; font-weight: 900; }
+
+    .comp-btn-wrap { margin-top: 48px; }
+
+    @media (max-width: 900px) {
+      .comparison-container { flex-direction: column; }
+      .comp-side { padding: 80px 8%; }
+    }
+
+    /* ═══ MODULES BAR ═══ */
+    .modules-bar { background: white; border-bottom: 1px solid rgba(0,0,0,.05); padding: 20px 5%; overflow: hidden; }
+    .modules-bar-inner { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 20px; overflow-x: auto; scrollbar-width: none; }
+    .modules-bar-inner::-webkit-scrollbar { display: none; }
+    .modules-bar-inner span { font-size: 12px; font-weight: 700; color: #94A3B8; text-transform: uppercase; letter-spacing: 1.5px; white-space: nowrap; transition: color .2s; }
+    .modules-bar-inner span:hover { color: var(--blue); }
+
+    .cta-h2 { font-size: clamp(40px,6vw,72px); font-weight: 900; letter-spacing: -2.5px; line-height: 1.05; margin-bottom: 24px; color: white; }
+    .cta-h2 .grad-text { background: linear-gradient(135deg, #FFFFFF, rgba(255,255,255,.75)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .cta-p { font-size: 18px; color: rgba(255,255,255,.8); margin-bottom: 48px; line-height: 1.7; }
+    .cta-actions { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; }
+    .btn-cta-main { background: white; color: var(--blue); padding: 18px 40px; border-radius: 12px; font-size: 17px; font-weight: 800; text-decoration: none; box-shadow: 0 10px 50px rgba(0,0,0,.2); transition: transform .15s, box-shadow .2s; display: inline-flex; align-items: center; gap: 8px; }
+    .btn-cta-main:hover { transform: translateY(-3px); box-shadow: 0 16px 60px rgba(0,0,0,.25); }
+    .cta-note { font-size: 14px; color: rgba(255,255,255,.65); margin-top: 18px; }
+    .cta-trust { display: flex; justify-content: center; gap: 32px; flex-wrap: wrap; margin-top: 48px; padding-top: 48px; border-top: 1px solid rgba(255,255,255,.2); }
+    .cta-trust-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,.78); }
+
+    /* ═══ HERO REDESIGN ═══ */
+    .hero {
+      position: relative;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      padding: 96px 5% 52px;
+      overflow: hidden;
+      background: #0F172A; /* Fallback */
+    }
+    .hero-bg-img {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background-image: url('assets/hero_bg.png');
+      background-size: cover;
+      background-position: center 55%;
+      z-index: 0;
+    }
+    .hero-overlay {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: linear-gradient(90deg, rgba(15, 23, 42, 0.95) 30%, rgba(15, 23, 42, 0.4) 100%);
+      z-index: 1;
+    }
+    .hero-inner { 
+      position: relative;
+      z-index: 2;
+      max-width: 1200px; 
+      margin: 0 auto; 
+      width: 100%;
+    }
+    .hero-left { max-width: 650px; }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255,255,255,.1);
+      border: 1px solid rgba(255,255,255,.2);
+      padding: 6px 16px;
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 700;
+      color: white;
+      margin-bottom: 20px;
+      backdrop-filter: blur(10px);
+    }
+    .badge-dot { width: 6px; height: 6px; background: #4FACFE; border-radius: 50%; box-shadow: 0 0 10px #4FACFE; }
+    .hero-headline {
+      font-size: clamp(36px, 4.2vw, 54px);
+      line-height: 1.06;
+      font-weight: 900;
+      color: white;
+      letter-spacing: -2px;
+      margin-bottom: 18px;
+    }
+    .hero-subtext {
+      font-size: 17px;
+      color: rgba(255,255,255,.8);
+      line-height: 1.55;
+      margin-bottom: 26px;
+      max-width: 520px;
+    }
+    .hero-cta-group {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .btn-hero-primary {
+      background: var(--blue);
+      color: white;
+      padding: 16px 32px;
+      border-radius: 14px;
+      font-size: 17px;
+      font-weight: 800;
+      text-decoration: none;
+      box-shadow: 0 20px 40px rgba(24,119,242,.3);
+      transition: all .2s;
+    }
+    .btn-hero-primary:hover { transform: translateY(-3px); box-shadow: 0 25px 50px rgba(24,119,242,.4); }
+    .btn-hero-secondary {
+      color: white;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: opacity .2s;
+    }
+    .btn-hero-secondary:hover { opacity: .8; }
+    
+    .hero-benefits {
+      display: flex;
+      gap: 28px;
+      margin-top: 28px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255,255,255,.1);
+    }
+    .benefit-item { display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,.7); font-size: 14px; font-weight: 600; }
+    .benefit-icon { color: #10B981; font-size: 18px; }
+
+    .hero-separator { display: none; } /* Quitamos ruido visual */
+
+    @media (min-width: 1025px) {
+      .hero-inner {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        justify-content: center !important;
+        text-align: left !important;
+      }
+      .hero-left {
+        max-width: 750px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+      }
+      .hero-subtext {
+        margin-left: 0; margin-right: 0;
+      }
+      .hero-cta-group {
+        justify-content: flex-start;
+      }
+    }
+
+    /* ═══ COMBINACIONES RECOMENDADAS ═══ */
+    .routes-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-bottom: 48px;
+    }
+    @media (max-width: 900px) {
+      .routes-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* ═══ PANEL 2 — DEMO CHAT PREMIUM WOW ═══ */
+    .demo-layout {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 56px;
+      align-items: stretch;
+    }
+    .demo-visual-wrap {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      position: relative;
+    }
+    .demo-mockup-container {
+      position: relative;
+      perspective: 1500px;
+    }
+    .app-window {
+      background: #ffffff;
+      border-radius: 24px;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      box-shadow: 0 30px 70px rgba(10, 22, 40, 0.12);
+      overflow: hidden;
+      transform: rotateY(-6deg) rotateX(4deg) rotateZ(-1.5deg);
+      transform-style: preserve-3d;
+      transition: all 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .app-window:hover {
+      transform: rotateY(0deg) rotateX(0deg) rotateZ(0deg) scale(1.02);
+      box-shadow: 0 45px 95px rgba(10, 22, 40, 0.18);
+    }
+    .premium-feature-card {
+      background: #ffffff;
+      border: 1.5px solid #F1F5F9;
+      border-radius: 24px;
+      padding: 24px;
+      display: flex;
+      gap: 18px;
+      align-items: flex-start;
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 4px 12px rgba(10,22,40,0.01);
+      position: relative;
+      overflow: hidden;
+    }
+    .premium-feature-card:hover {
+      transform: translateY(-4px) scale(1.01);
+      border-color: rgba(24, 119, 242, 0.18);
+      box-shadow: 0 20px 40px rgba(24, 119, 242, 0.05);
+      background: linear-gradient(135deg, #ffffff 0%, #F8FAFC 100%);
+    }
+    .premium-feature-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: transparent;
+      transition: background 0.3s ease;
+    }
+    .premium-feature-card:hover::before {
+      background: linear-gradient(90deg, #1877F2, #00C6FF);
+    }
+    .feature-icon-badge {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+      box-shadow: inset 0 2px 4px rgba(255,255,255,0.8);
+    }
+    @media (max-width: 1024px) {
+      .demo-layout {
+        grid-template-columns: 1fr !important;
+        gap: 48px;
+      }
+      .app-window {
+        transform: none !important;
+      }
+    }
+    @media (max-width: 900px) {
+      .demo-bullets-wrap {
+        order: 2 !important;
+      }
+      .demo-visual-wrap {
+        order: 1 !important;
+        margin-bottom: 20px;
+      }
+    }
+
+    /* ═══ PANEL 3 — MODEL GRID ═══ */
+    .model-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 40px;
+      text-align: left;
+    }
+    @media (max-width: 900px) {
+      .model-grid {
+        grid-template-columns: 1fr !important;
+        gap: 16px;
+      }
+    }
+    /* ═══ PANEL 6 — COEXISTENTE ═══ */
+    @media (max-width: 900px) {
+      .coexistente-section > div {
+        grid-template-columns: 1fr !important;
+        gap: 32px;
+      }
+    }
+
+    /* ═══ PANEL 9 — VERTICALS ═══ */
+    .verticals-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+    }
+    .vertical-card {
+      background: #F8FAFC;
+      border: 1.5px solid #F1F5F9;
+      border-radius: 16px;
+      padding: 20px;
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      transition: all 0.3s ease;
+    }
+    .vertical-card:hover {
+      border-color: rgba(24,119,242,0.15);
+      background: white;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.02);
+      transform: translateY(-2px);
+    }
+    .vertical-icon {
+      font-size: 24px;
+      flex-shrink: 0;
+    }
+    .vertical-card h4 {
+      font-size: 14px;
+      font-weight: 900;
+      color: #0A1628;
+      margin: 0 0 4px 0;
+    }
+    .vertical-card p {
+      font-size: 12px;
+      color: #64748B;
+      margin: 0;
+      line-height: 1.4;
+      font-weight: 500;
+    }
+    @media (max-width: 1024px) {
+      .verticals-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+      }
+    }
+    @media (max-width: 600px) {
+      .verticals-grid {
+        grid-template-columns: 1fr !important;
+      }
+    }
+    /* ═══════════ FOOTER — dark navy ═══ */
+    footer { background: #0A1628; border-top: 1px solid rgba(255,255,255,.06); padding: 60px 5% 40px; }
+    .footer-inner { max-width: 1200px; margin: 0 auto; }
+    .footer-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 48px; gap: 40px; flex-wrap: wrap; }
+    .footer-logo { font-size: 18px; font-weight: 900; color: white; margin-bottom: 10px; }
+    .footer-logo span { background: linear-gradient(90deg, #4FACFE, #1877F2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .footer-tagline { font-size: 13px; color: #475569; max-width: 240px; line-height: 1.6; }
+    .footer-links { display: flex; gap: 60px; flex-wrap: wrap; }
+    .footer-col h4 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: white; margin-bottom: 16px; }
+    .footer-col a { display: block; color: #475569; text-decoration: none; font-size: 14px; margin-bottom: 10px; transition: color .2s; }
+    .footer-col a:hover { color: #94A3B8; }
+    .footer-bottom { display: flex; justify-content: space-between; align-items: center; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.05); flex-wrap: wrap; gap: 12px; }
+    .footer-copy { font-size: 13px; color: #334155; }
+    .footer-legal { display: flex; gap: 20px; }
+    .footer-legal a { font-size: 12px; color: #334155; text-decoration: none; transition: color .2s; }
+    .footer-legal a:hover { color: #64748B; }
+
+    /* ═══ RESPONSIVE ═══ */
+    @media (max-width: 1024px) {
+      .hero-inner { grid-template-columns: 1fr; gap: 40px; min-height: auto; }
+      .hero-right { justify-content: center; }
+      .hero-screenshot-img { max-height: 400px; }
+    }
+    @media (max-width: 1100px) {
+      .tools-grid { grid-template-columns: repeat(3,1fr); }
+      .forwhom-grid { grid-template-columns: repeat(4,1fr); }
+    }
+    @media (max-width: 900px) {
+      .how-grid { grid-template-columns: 1fr; }
+      .how-visual-box { display: none; }
+      .metrics-inner { grid-template-columns: repeat(2,1fr); gap: 24px; }
+      .testi-grid { grid-template-columns: 1fr; }
+      .app-body { flex-direction: column; }
+      .app-sidebar { display: none; }
+      .app-kanban { grid-template-columns: repeat(3,1fr); }
+      .tools-grid { grid-template-columns: repeat(2,1fr); }
+      .forwhom-grid { grid-template-columns: repeat(3,1fr); }
+      .power-stage { grid-template-columns: 1fr; }
+      .power-left-panel { display: grid; grid-template-columns: 1fr 1fr; }
+      .power-hub-score { display: none; }
+      .comparison-grid { grid-template-columns: 1fr; gap: 24px; }
+      .comp-card.smartflow { transform: scale(1); }
+    }
+    @media (max-width: 768px) {
+      nav { padding: 0 4%; }
+      .nav-center { display: none; }
+      .nav-login { display: none; }
+      .app-stats-row { grid-template-columns: repeat(2,1fr); }
+      .app-kanban { grid-template-columns: repeat(2,1fr); }
+      .tools-grid { grid-template-columns: 1fr 1fr; }
+      .forwhom-grid { grid-template-columns: repeat(3,1fr); }
+      .metrics-inner { grid-template-columns: repeat(2,1fr); }
+      .footer-top { flex-direction: column; }
+      .vis-store-grid { grid-template-columns: 1fr; }
+      .power-bar-wrap { display: none; }
+      .power-left-panel { grid-template-columns: 1fr; }
+      .power-hub-slots { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 500px) {
+      .tools-grid { grid-template-columns: 1fr; }
+      .forwhom-grid { grid-template-columns: repeat(2,1fr); }
+      h1, .hero-headline { letter-spacing: -1.5px; }
+    }
+
+    /* ═══ MODULES BAR ═══ */
+    .modules-bar { background: white; border-bottom: 1px solid rgba(0,0,0,.05); padding: 20px 5%; overflow: hidden; }
+    .modules-bar-inner { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 20px; overflow-x: auto; scrollbar-width: none; }
+    .modules-bar-inner::-webkit-scrollbar { display: none; }
+    .modules-bar-inner span { font-size: 12px; font-weight: 700; color: #94A3B8; text-transform: uppercase; letter-spacing: 1.5px; white-space: nowrap; transition: color .2s; }
+    .modules-bar-inner span:hover { color: var(--blue); }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════ NAV ═══════════ -->
+<nav>
+  <a href="/" class="nav-logo">
+    <img src="brand/logo-smartflow-blue.png?v=4" alt="SmartFlow Hub OS" style="width: 240px; height: 56px; display: block; object-fit: cover; object-position: center; flex-shrink: 0;" />
+  </a>
+  <div class="nav-center">
+    <a href="#como">Cómo funciona</a>
+    <a href="#herramientas">Herramientas</a>
+    <a href="#negocios">Negocios</a>
+    <a href="#precios">Precios</a>
+  </div>
+  <div class="nav-right">
+    <a href="https://hub.smartflow-suite.com" class="nav-login">Iniciar sesión</a>
+    <a href="https://hub.smartflow-suite.com/checkout" class="nav-cta">Empieza gratis →</a>
+  </div>
+</nav>
+
+<!-- ═══ STICKY CTA BAR ═══ -->
+<div class="sticky-cta-bar" id="stickyCta">
+  <span class="sticky-cta-text">🚀 CRM gratis + herramientas à la carta — <span>Stack completo $197/mes</span></span>
+  <a href="https://hub.smartflow-suite.com/checkout" class="sticky-cta-btn">Empieza gratis →</a>
+</div>
+
+<!-- ═══════════ HERO ═══════════ -->
+<section class="hero">
+  <div class="hero-bg-img"></div>
+  <div class="hero-overlay"></div>
+
+  <div class="hero-inner">
+    <div class="hero-left">
+      <div class="hero-badge"><div class="badge-dot"></div> Para negocios que venden por WhatsApp</div>
+
+      <h1 class="hero-headline">
+        Cada minuto sin respuesta<br>es un cliente que se va.
+      </h1>
+
+      <p class="hero-subtext">
+        SmartFlow Hub OS: CRM gratis + herramientas a la carta.<br>
+        Responde en segundos. Vende con orden. Escala sin pagar por usuario.
+      </p>
+
+      <div class="hero-cta-group">
+        <a href="https://hub.smartflow-suite.com/checkout" class="btn-hero-primary" style="padding: 18px 40px; font-size: 16px;">Crear CRM gratis en 90 segundos →</a>
+      </div>
+
+      <div class="hero-benefits">
+        <div class="benefit-item"><span class="benefit-icon">✓</span> CRM gratis para siempre</div>
+        <div class="benefit-item"><span class="benefit-icon">✓</span> Usuarios ilimitados</div>
+        <div class="benefit-item"><span class="benefit-icon" style="color:#F59E0B;">⚡</span> Sin tarjetas de crédito</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="modules-bar">
+  <div class="modules-bar-inner">
+    <span>WhatsApp API</span>
+    <span>Agente IA 24/7</span>
+    <span>Multi-Agente</span>
+    <span>Auditor de Vendedores</span>
+    <span>Links de Pago WhatsApp</span>
+    <span>Cotizaciones PDF</span>
+    <span>Paquetes & Ofertas</span>
+    <span>Agenda Inteligente</span>
+  </div>
+</div>
+
+<!-- ═══════════ SECCIÓN 1: CÓMO FUNCIONA ═══════════ -->
+<style>
+  .how-works-section {
+    padding: 100px 5%;
+    background: radial-gradient(120% 120% at 50% 0%, #FFFFFF 40%, #F8FAFC 80%, #EEF4FF 100%);
+    position: relative;
+    overflow: hidden;
+    border-top: 1px solid rgba(24,119,242,0.03);
+  }
+  .how-works-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 5;
+  }
+  .how-works-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
+    margin-top: 56px;
+  }
+  @media (max-width: 1024px) {
+    .how-works-grid {
+      grid-template-columns: 1fr;
+      gap: 40px;
+    }
+  }
+  
+  /* Step Card */
+  .step-card {
+    background: white;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    border-radius: 24px;
+    padding: 32px;
+    box-shadow: 0 15px 35px rgba(15, 23, 42, 0.04);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    overflow: hidden;
+  }
+  .step-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 30px 60px rgba(15, 23, 42, 0.08);
+    border-color: rgba(24, 119, 242, 0.2);
+  }
+  
+  .step-num-badge {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(24, 119, 242, 0.08);
+    color: #1877F2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 900;
+    margin-bottom: 24px;
+  }
+  
+  .step-title {
+    font-size: 20px;
+    font-weight: 850;
+    color: #0F172A;
+    margin-bottom: 12px;
+    letter-spacing: -0.5px;
+  }
+  .step-desc {
+    font-size: 14.5px;
+    color: #475569;
+    line-height: 1.6;
+    font-weight: 500;
+    margin-bottom: 24px;
+    min-height: 68px;
+  }
+  
+  /* Mockup Frame - LIGHT VERSION */
+  .mockup-frame {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 16px;
+    height: 240px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+  }
+
+  /* Mockup 1 (CRM Sync) Styles */
+  .m1-wrapper {
+    display: grid;
+    grid-template-columns: 4.5fr 5.5fr;
+    height: 100%;
+  }
+  .m1-chat {
+    background: #FFFFFF;
+    padding: 12px;
+    border-right: 1px solid #E2E8F0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+  .m1-bubble {
+    background: #EEF2F7;
+    color: #1E293B;
+    padding: 8px 10px;
+    border-radius: 8px 8px 8px 0;
+    font-size: 9.5px;
+    line-height: 1.3;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    margin-bottom: 8px;
+    position: relative;
+    font-weight: 500;
+    opacity: 0;
+    animation: m1ChatBubble 6s infinite;
+  }
+  .m1-crm {
+    background: #F8FAFC;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .m1-column {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    height: 100%;
+  }
+  .m1-col-title {
+    font-size: 8.5px;
+    font-weight: 800;
+    color: #64748B;
+    text-transform: uppercase;
+    border-bottom: 1px solid #F1F5F9;
+    padding-bottom: 4px;
+    margin-bottom: 2px;
+  }
+  .m1-lead-card {
+    background: #FFFFFF;
+    border: 1.5px solid #1877F2;
+    border-radius: 6px;
+    padding: 6px;
+    font-size: 8.5px;
+    font-weight: 700;
+    color: #0F172A;
+    box-shadow: 0 2px 4px rgba(24,119,242,0.1);
+    opacity: 0;
+    animation: m1LeadCardFlow 6s infinite;
+  }
+
+  /* Mockup 2 (AI Agent) Styles */
+  .m2-phone {
+    background: #FFFFFF;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  .m2-header {
+    background: #F8FAFC;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid #E2E8F0;
+  }
+  .m2-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #1877F2, #00C6FF);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    color: white;
+    font-weight: 900;
+  }
+  .m2-chat-area {
+    background: #FFFFFF;
+    flex: 1;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .m2-bubble-user {
+    background: #DCF8C6;
+    color: #075E54;
+    align-self: flex-end;
+    padding: 6px 10px;
+    border-radius: 8px 8px 0 8px;
+    font-size: 10px;
+    font-weight: 500;
+    max-width: 80%;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+    opacity: 0;
+    animation: m2UserIn 6s infinite;
+  }
+  .m2-typing {
+    background: #F1F5F9;
+    align-self: flex-start;
+    padding: 6px 12px;
+    border-radius: 8px 8px 8px 0;
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    width: 44px;
+    height: 20px;
+    opacity: 0;
+    animation: m2TypingIn 6s infinite;
+  }
+  .m2-bubble-bot {
+    background: #F1F5F9;
+    color: #1E293B;
+    align-self: flex-start;
+    padding: 8px 10px;
+    border-radius: 8px 8px 8px 0;
+    font-size: 9.5px;
+    max-width: 85%;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+    line-height: 1.35;
+    opacity: 0;
+    animation: m2BotIn 6s infinite;
+  }
+
+  /* Mockup 3 (Payment Checkouts) Styles */
+  .m3-phone {
+    background: #FFFFFF;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 12px;
+    gap: 8px;
+    position: relative;
+  }
+  .m3-bubble-pay {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 10px;
+    align-self: flex-start;
+    width: 85%;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    opacity: 0;
+    transform: translateY(10px);
+    animation: m3PayBubbleIn 6s infinite;
+  }
+  @keyframes m3PayBubbleIn {
+    0% { opacity: 0; transform: translateY(10px); }
+    5% { opacity: 1; transform: translateY(0); }
+    80% { opacity: 1; transform: translateY(0); }
+    90% { opacity: 0; }
+    100% { opacity: 0; }
+  }
+  .m3-pay-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 8px;
+    font-weight: 800;
+    color: #1877F2;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .m3-pay-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: #E9EDEF;
+    margin-bottom: 3px;
+  }
+  .m3-pay-price {
+    font-size: 12px;
+    font-weight: 900;
+    color: #10B981;
+    margin-bottom: 8px;
+  }
+  .m3-pay-btn {
+    background: #1877F2;
+    color: white;
+    font-size: 9px;
+    font-weight: 800;
+    text-align: center;
+    padding: 6px;
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+    animation: m3PayBtnPulse 6s infinite;
+  }
+  @keyframes m3PayBtnPulse {
+    0% { background: #1877F2; }
+    30% { background: #1877F2; }
+    35% { background: #10B981; }
+    80% { background: #10B981; }
+    90% { background: #1877F2; }
+  }
+  .m3-cursor {
+    width: 14px;
+    height: 14px;
+    background: rgba(255,255,255,0.7);
+    border-radius: 50%;
+    position: absolute;
+    border: 1px solid #000;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    pointer-events: none;
+    animation: m3CursorTap 6s infinite;
+  }
+  @keyframes m3CursorTap {
+    0% { transform: translate(30px, 30px) scale(0); opacity: 0; }
+    20% { transform: translate(10px, 10px) scale(1); opacity: 1; }
+    28% { transform: translate(0, 0) scale(1); opacity: 1; }
+    30% { transform: translate(0, 0) scale(0.8); opacity: 1; }
+    33% { transform: translate(0, 0) scale(1.2); opacity: 0; }
+    80% { opacity: 0; }
+    90% { opacity: 0; }
+  }
+  .m3-success-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(11, 20, 26, 0.95);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    animation: m3SuccessIn 6s infinite;
+  }
+  @keyframes m3SuccessIn {
+    0% { opacity: 0; }
+    33% { opacity: 0; }
+    38% { opacity: 1; }
+    80% { opacity: 1; }
+    90% { opacity: 0; }
+    100% { opacity: 0; }
+  }
+  .m3-success-badge {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #10B981;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 18px;
+    margin-bottom: 8px;
+    transform: scale(0.5);
+    animation: m3Pop 6s infinite;
+  }
+  @keyframes m3Pop {
+    0% { transform: scale(0.5); }
+    33% { transform: scale(0.5); }
+    40% { transform: scale(1.1); }
+    43% { transform: scale(1); }
+    80% { transform: scale(1); }
+    90% { transform: scale(0.5); }
+  }
+  .m3-success-text {
+    font-size: 11px;
+    color: white;
+    font-weight: 800;
+  }
+</style>
+
+<section class="how-works-section" id="como">
+  <div class="how-works-inner">
+    
+    <div style="text-align: center; max-width: 600px; margin: 0 auto;">
+      <h2 style="font-size: clamp(32px, 5vw, 48px); font-weight: 950; color: #0A1628; line-height: 1.1; letter-spacing: -2px; margin-bottom: 20px;">
+        Simplicidad en cada paso.
+      </h2>
+      <p style="font-size: 18px; color: #475569; font-weight: 500; line-height: 1.6; margin: 0;">
+        De la conversación al cierre, sin fricciones.
+      </p>
+    </div>
+
+    <div class="how-works-grid">
+      
+      <!-- Paso 1 -->
+      <div class="step-card">
+        <div class="step-num-badge">1</div>
+        <h3 class="step-title">Captura.</h3>
+        <p class="step-desc">Cada chat de WhatsApp se convierte en un lead en tu CRM automáticamente. Sin intervención manual.</p>
+        
+        <div class="mockup-frame">
+          <div class="m1-wrapper">
+            <div class="m1-chat">
+              <div class="m1-bubble">
+                Hola, me interesa agendar una cotización.
+              </div>
+            </div>
+            <div class="m1-crm">
+              <div class="m1-column">
+                <div class="m1-col-title">Nuevo</div>
+                <div class="m1-lead-card">
+                  <div style="margin-bottom: 2px; font-size:7px; color:#64748B;">Lead #1024</div>
+                  <strong>Ana Martínez</strong>
+                  <div style="margin-top: 4px; color:#1877F2; font-weight:800;">WhatsApp</div>
+                </div>
+              </div>
+              <div class="m1-column" style="opacity: 0.3;">
+                <div class="m1-col-title">Proceso</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Paso 2 -->
+      <div class="step-card">
+        <div class="step-num-badge">2</div>
+        <h3 class="step-title">Conversa.</h3>
+        <p class="step-desc">Tu Agente IA califica y responde en segundos. Atención perfecta las 24 horas.</p>
+        
+        <div class="mockup-frame">
+          <div class="m2-phone">
+            <div class="m2-header">
+              <div class="m2-avatar">🤖</div>
+              <div style="display: flex; flex-direction: column;">
+                <span style="font-size: 9px; font-weight: 800; color: #0F172A; line-height: 1.1;">IA Assistant</span>
+                <span style="font-size: 7.5px; color: #10B981; font-weight: 700;">Activo</span>
+              </div>
+            </div>
+            <div class="m2-chat-area">
+              <div class="m2-bubble-user">
+                ¿Qué costo tiene?
+              </div>
+              <div class="m2-typing">
+                <span style="width: 4px; height: 4px; background: #8696A0; border-radius: 50%;"></span>
+              </div>
+              <div class="m2-bubble-bot">
+                ¡Hola! El costo es de $12,800 MXN con instalación incluida. ¿Agendamos?
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Paso 3 -->
+      <div class="step-card">
+        <div class="step-num-badge">3</div>
+        <h3 class="step-title">Cierra.</h3>
+        <p class="step-desc">Envía links de pago y cierra ventas dentro del chat. Sencillo y seguro.</p>
+        
+        <div class="mockup-frame">
+          <div class="m3-phone">
+            <div class="m3-bubble-pay">
+              <div class="m3-pay-header">
+                <span>💳</span> Checkout
+              </div>
+              <div class="m3-pay-title">Servicio Solar</div>
+              <div class="m3-pay-price">$12,800.00</div>
+              <div class="m3-pay-btn">
+                Pagar ahora
+                <div class="m3-cursor"></div>
+              </div>
+            </div>
+            
+            <div class="m3-success-overlay">
+              <div class="m3-success-badge">✓</div>
+              <div class="m3-success-text">Pago Exitoso</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════ SECCIÓN 2: EL MODELO ═══════════ -->
+<style>
+  .pricing-model-section {
+    padding: 100px 5%;
+    background: #FFFFFF;
+    color: #0F172A;
+    position: relative;
+    overflow: hidden;
+  }
+  .pricing-model-inner {
+    max-width: 1000px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 5;
+  }
+  
+  /* Core Free Card - Light & Premium */
+  .core-free-card {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 24px;
+    padding: 40px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.03);
+    position: relative;
+  }
+  
+  .addon-item-card {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 18px;
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.3s ease;
+  }
+  .addon-item-card:hover {
+    border-color: #1877F2;
+    transform: translateX(4px);
+  }
+  .addon-name {
+    font-size: 16px;
+    font-weight: 800;
+    color: #0F172A;
+    margin-bottom: 4px;
+  }
+  .capped-price-banner {
+    background: #F0F7FF;
+    border: 1px solid #1877F2;
+    border-radius: 20px;
+    padding: 24px 32px;
+    margin-top: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+  }
+</style>
+
+<section class="pricing-model-section" id="superpoderes">
+  <div class="pricing-model-inner">
+    
+    <div style="text-align: center; max-width: 600px; margin: 0 auto 64px;">
+      <h2 style="font-size: clamp(32px, 5vw, 42px); font-weight: 950; color: #0F172A; line-height: 1.1; letter-spacing: -2px; margin-bottom: 16px;">
+        Paga solo lo que usas.
+      </h2>
+      <p style="font-size: 18px; color: #475569; font-weight: 500;">
+        Un CRM potente y gratuito. Superpoderes a la carta.
+      </p>
+    </div>
+
+    <div class="pricing-model-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 40px;">
+      
+      <!-- Core Free Card -->
+      <div class="core-free-card">
+        <div>
+          <h3 style="font-size: 24px; font-weight: 900; color: #0F172A; margin-bottom: 8px;">CRM Base</h3>
+          <p style="font-size: 14px; color: #475569; margin-bottom: 24px;">Todo lo esencial para empezar.</p>
+          
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 32px;">
+            <div style="font-size: 14px; color: #475569; font-weight: 600;">✓ Pipeline ilimitado</div>
+            <div style="font-size: 14px; color: #475569; font-weight: 600;">✓ Usuarios ilimitados</div>
+            <div style="font-size: 14px; color: #475569; font-weight: 600;">✓ Tareas integradas</div>
+          </div>
+        </div>
+        
+        <div>
+          <div style="font-size: 32px; font-weight: 950; color: #0F172A; margin-bottom: 16px;">$0</div>
+          <a href="https://hub.smartflow-suite.com/checkout" class="btn-hero-primary" style="display:block; text-align:center; padding: 14px; background: #0F172A; color: white;">Empezar Gratis</a>
+        </div>
+      </div>
+          
+          <div style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 40px;">
+            <div style="display: flex; align-items: center; gap: 12px; font-size: 14px; color: #E2E8F0; font-weight: 600;">
+              <span style="color:#10B981; font-weight:900;">✓</span> Pipeline de ventas ilimitado
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; font-size: 14px; color: #E2E8F0; font-weight: 600;">
+              <span style="color:#10B981; font-weight:900;">✓</span> Usuarios y agentes ilimitados
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; font-size: 14px; color: #E2E8F0; font-weight: 600;">
+              <span style="color:#10B981; font-weight:900;">✓</span> Módulo "Mis Tareas" integrado
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; font-size: 14px; color: #E2E8F0; font-weight: 600;">
+              <span style="color:#10B981; font-weight:900;">✓</span> Historial de conversaciones
+            </div>
+          </div>
+        </div>
+        
+        <div>
+          <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 24px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 24px;">
+            <span style="font-size: 40px; font-weight: 950; color: white;">$0</span>
+            <span style="font-size: 14px; color: #64748B; font-weight: 700;">GRATIS PARA SIEMPRE</span>
+          </div>
+          <a href="https://hub.smartflow-suite.com/checkout" class="btn-hero-primary" style="display:block; text-align:center; padding: 16px; font-size: 14px; background: white; color: #0B132B; border-color: white; font-weight: 800; box-shadow: 0 10px 30px rgba(255,255,255,0.08);">Empezar gratis ya →</a>
+        </div>
+      </div>
+
+      <!-- Addons List (Right) -->
+      <div style="display:flex; flex-direction:column; justify-content:space-between; gap:20px;">
+        
+        <div class="addons-wrapper">
+          <div style="font-size: 11px; font-weight: 900; color: #64748B; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">
+            Complementos Modulares (A la carta)
+          </div>
+          
+          <!-- Addon 1 -->
+          <div class="addon-item-card">
+            <div class="addon-info">
+              <div class="addon-icon-box" style="background: rgba(24,119,242,0.15); color: #1877F2;">💬</div>
+              <div>
+                <h4 class="addon-name">WhatsApp Multi-Agente</h4>
+                <p class="addon-desc">Conecta tu número oficial y permite que todo tu equipo vende en simultáneo.</p>
+              </div>
+            </div>
+            <div class="addon-price">
+              $69<span class="addon-period">/mes</span>
+            </div>
+          </div>
+
+          <!-- Addon 2 -->
+          <div class="addon-item-card">
+            <div class="addon-info">
+              <div class="addon-icon-box" style="background: rgba(16,185,129,0.15); color: #10B981;">🤖</div>
+              <div>
+                <h4 class="addon-name">Agente IA 24/7</h4>
+                <p class="addon-desc">IA calibrada con tu información que responde y califica prospectos al instante.</p>
+              </div>
+            </div>
+            <div class="addon-price">
+              $49<span class="addon-period">/mes</span>
+            </div>
+          </div>
+
+          <!-- Addon 3 -->
+          <div class="addon-item-card">
+            <div class="addon-info">
+              <div class="addon-icon-box" style="background: rgba(245,158,11,0.15); color: #F59E0B;">💳</div>
+              <div>
+                <h4 class="addon-name">Links de Pago WhatsApp</h4>
+                <p class="addon-desc">Envía solicitudes de pago integradas y cobra directo en la conversación.</p>
+              </div>
+            </div>
+            <div class="addon-price">
+              $12<span class="addon-period">/mes</span>
+            </div>
+          </div>
+          
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Ceiling Price Banner -->
+    <div class="capped-price-banner">
+      <div style="display: flex; align-items: center; gap: 20px;">
+        <div style="max-width: 500px;">
+          <h4 style="font-size: 18px; font-weight: 850; color: #0F172A; margin-bottom: 4px;">Precio Máximo Garantizado</h4>
+          <p style="font-size: 14px; color: #475569; margin: 0;">Activa todo por un tope de $197/mes. Sin sorpresas.</p>
+        </div>
+      </div>
+      <div style="text-align: right;">
+        <span style="font-size: 32px; font-weight: 950; color: #0F172A;">$197<span style="font-size: 14px; color:#64748B;">/mes</span></span>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════ MODERN COMPARISON ═══════════ -->
+<section class="comparison-section" id="precios">
+  <div class="comparison-container">
+    
+    <!-- Lado Competencia -->
+    <div class="comp-side left">
+      <span class="comp-tag">Tradicional</span>
+      <h2 class="comp-h2">Planes rígidos y <span class="strike">costosos.</span></h2>
+      
+      <div class="comp-price-wrap">
+        <span class="comp-price-val" style="color: #64748B;">Plan Fijo</span>
+      </div>
+  
+      <ul class="comp-features">
+        <li class="comp-feature"><i>×</i> Paga por lo que no usas</li>
+        <li class="comp-feature"><i>×</i> Cobros por usuario extra</li>
+        <li class="comp-feature"><i>×</i> Complejo y lento</li>
+      </ul>
+    </div>
+  
+    <!-- Lado SmartFlow -->
+    <div class="comp-side right">
+      <span class="comp-tag">SmartFlow</span>
+      <h2 class="comp-h2">Modular y <span style="color:#1877F2;">eficiente.</span></h2>
+      
+      <div class="comp-price-wrap">
+        <span class="comp-price-val" style="color: #0F172A;">$0</span>
+        <span class="comp-price-label">Base gratuita para siempre.</span>
+      </div>
+  
+      <ul class="comp-features">
+        <li class="comp-feature"><i>✓</i> Solo pagas lo que activas</li>
+        <li class="comp-feature"><i>✓</i> Usuarios ilimitados</li>
+        <li class="comp-feature"><i>✓</i> Activo en 5 minutos</li>
+      </ul>
+  
+      <div class="comp-btn-wrap">
+        <a href="https://hub.smartflow-suite.com/checkout" class="btn-hero-primary" style="box-shadow: 0 20px 40px rgba(0,0,0,.3); background: #1877F2; border-color: #1877F2;">Crear mi CRM gratis</a>
+      </div>
+    </div>
+ 
+  </div>
+</section>
+
+<!-- ═══════════ METRICS ═══════════ -->
+<div class="metrics-section">
+  <div class="metrics-inner">
+        <div class="metric-item">
+      <div class="metric-num"><span class="grad-text">$0</span></div>
+      <div class="metric-label">para empezar con<br>el CRM completo</div>
+    </div>
+    <div class="metric-item">
+      <div class="metric-num"><span class="grad-text-3">menos leads*</span></div>
+      <div class="metric-label">sin seguimiento por no responder<br>a tiempo</div>
+    </div>
+    <div class="metric-item">
+      <div class="metric-num"><span class="grad-text-2">90 seg*</span></div>
+      <div class="metric-label">para tener tu<br>equipo operando</div>
+    </div>
+    <div class="metric-item">
+      <div class="metric-num"><span class="grad-text">24/7</span></div>
+      <div class="metric-label">el Agente IA responde<br><span style="font-size:0.72em;opacity:0.75;">(con Agente IA — $49/mes)</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SOCIAL PROOF BAR ═══════════ -->
+<div class="social-proof-bar">
+  <div class="social-proof-inner">
+    <div class="sp-item"><span class="sp-dot"></span> +50 negocios activos en LATAM</div>
+    <div class="sp-item">⭐ 4.9/5 satisfacción promedio</div>
+    <div class="sp-item">⚡ Activo en menos de 5 minutos</div>
+    <div class="sp-item">🇲🇽 🇨🇷 🇨🇴 🇵🇦 Soporte en español</div>
+  </div>
+</div>
+
+<!-- ═══════════ TESTIMONIOS ═══════════ -->
+<section class="testimonials-section">
+  <div style="max-width:1100px;margin:0 auto;text-align:center;">
+    <div class="chip-label" style="justify-content:center;margin-bottom:16px;">Casos reales</div>
+    <h2 class="section-h2">Lo que dicen quienes ya lo usan</h2>
+    <p class="section-p" style="max-width:680px;margin:12px auto 0;">Negocios de LATAM que digitalizaron sus ventas con SmartFlow Hub OS.</p>
+  </div>
+  <div class="testimonials-grid">
+
+    <div class="testimonial-card">
+      <div class="testimonial-stars">★★★★★</div>
+      <p class="testimonial-text">"Antes tardábamos 2 días en dar seguimiento a cada lead. Teníamos chats mezclados en 3 teléfonos y perdíamos clientes sin saberlo. Ahora la IA responde en segundos y toda la clínica ve el mismo número."</p>
+      <div class="testimonial-highlight">+3 consultas adicionales por semana sin contratar más personal</div>
+      <div class="testimonial-author">
+        <div class="testimonial-avatar">MG</div>
+        <div>
+          <div class="testimonial-name">María González</div>
+          <div class="testimonial-biz">Clínica Dental Sonrisa · México</div>
+        </div>
+      </div>
+      <div class="testimonial-modules">
+        <span class="testimonial-module">WhatsApp Coexistente</span>
+        <span class="testimonial-module">Agente IA</span>
+        <span class="testimonial-module">Agenda</span>
+      </div>
+    </div>
+
+    <div class="testimonial-card">
+      <div class="testimonial-stars">★★★★★</div>
+      <p class="testimonial-text">"Tenemos 8 asesores y antes distribuir leads de WhatsApp era un caos. Cada uno usaba su celular personal y los clientes quedaban sin respuesta. Hoy todo entra al CRM automáticamente y cada asesor ve solo sus conversaciones."</p>
+      <div class="testimonial-highlight">0 leads perdidos desde que activamos Multi-Agente</div>
+      <div class="testimonial-author">
+        <div class="testimonial-avatar">RM</div>
+        <div>
+          <div class="testimonial-name">Roberto Mendoza</div>
+          <div class="testimonial-biz">Inmobiliaria Raíces · Costa Rica</div>
+        </div>
+      </div>
+      <div class="testimonial-modules">
+        <span class="testimonial-module">Multi-Agente</span>
+        <span class="testimonial-module">CRM Base</span>
+        <span class="testimonial-module">Cotizaciones PDF</span>
+      </div>
+    </div>
+
+    <div class="testimonial-card">
+      <div class="testimonial-stars">★★★★★</div>
+      <p class="testimonial-text">"Soy solo yo y una asistente. El Agente IA responde fuera de horario, agenda citas y cuando llego al consultorio ya tengo la agenda llena. Pagué el $49 el primer día que vi que había funcionado."</p>
+      <div class="testimonial-highlight">La IA agenda mientras duermo. Recuperé mis fines de semana.</div>
+      <div class="testimonial-author">
+        <div class="testimonial-avatar">AR</div>
+        <div>
+          <div class="testimonial-name">Ana Rodríguez</div>
+          <div class="testimonial-biz">Veterinaria Central · Panamá</div>
+        </div>
+      </div>
+      <div class="testimonial-modules">
+        <span class="testimonial-module">Agente IA 24/7</span>
+        <span class="testimonial-module">Agenda Inteligente</span>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════ PARA QUIÉN ═══════════ -->
+<section class="forwhom-section" id="negocios" style="padding: 100px 5% 40px; background: white;">
+  <div class="forwhom-inner" style="max-width: 1200px; margin: 0 auto; text-align: center;">
+    <div class="section-header" style="margin-bottom: 56px;">
+      <div class="chip-label" style="justify-content:center;">Hecho para negocios que venden por WhatsApp</div>
+      <h2 class="section-h2" style="font-size: 48px;">Si recibes leads, cierras ventas y tienes un equipo — <span class="grad-text">esto es para ti.</span></h2>
+      <p class="section-p" style="max-width: 800px; margin: 16px auto;">Clínicas, talleres, inmobiliarias, agencias, distribuidoras, emprendedores. Si tu cliente te escribe por WhatsApp y necesitas que tu equipo le dé seguimiento sin perder ninguno — SmartFlow Hub OS es para ti.</p>
+    </div>
+    
+    <div class="unified-business-img" style="width: 100%; border-radius: 32px; overflow: hidden; box-shadow: 0 40px 100px rgba(0,0,0,.1);">
+      <img src="assets/panorama.png" alt="Emprendedores Latinos exitosos con SmartFlow Hub OS" style="width: 100%; display: block;">
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ CÓMO FUNCIONA ═══════════ -->
+<section class="how-section" id="como">
+  <div class="how-orb"></div>
+  <div class="how-inner">
+    <div class="section-header">
+      <div class="chip-label">Así funciona</div>
+      <h2 class="section-h2">Tú eliges.<br><span class="grad-text">Pagas solo lo que usas.</span></h2>
+      <p class="section-p">Como un menú: ves todas las herramientas, escoges las que necesitas y las agregas a tu plataforma. Se activan al instante.</p>
+    </div>
+
+    <div class="how-grid">
+      <div class="how-steps">
+        <div class="how-step active" onclick="setStep(0, this)">
+          <div class="how-step-num">1</div>
+          <div class="how-step-body">
+            <div class="how-step-title">Inicia.</div>
+            <div class="how-step-desc">Tu CRM activo en 90 segundos. Gratis.</div>
+          </div>
+        </div>
+        <div class="how-step" onclick="setStep(1, this)">
+          <div class="how-step-num">2</div>
+          <div class="how-step-body">
+            <div class="how-step-title">Ordena.</div>
+            <div class="how-step-desc">Tus clientes organizados desde el primer día.</div>
+          </div>
+        </div>
+        <div class="how-step" onclick="setStep(2, this)">
+          <div class="how-step-num">3</div>
+          <div class="how-step-body">
+            <div class="how-step-title">Elige.</div>
+            <div class="how-step-desc">Activa WhatsApp, IA o Pagos cuando los necesites.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="how-visual-box">
+        <div class="how-visual" style="background: #FFFFFF; border: 1px solid #E2E8F0;">
+          <div class="how-visual-header" style="background: #F8FAFC; border-bottom: 1px solid #E2E8F0;">
+            <div class="how-dot"></div><div class="how-dot"></div><div class="how-dot"></div>
+          </div>
+          <div class="how-visual-body">
+            <div class="vis-panel active" id="vis-0">
+              <div class="vis-crm-row">
+                <div class="vis-crm-card" style="background: #F8FAFC; border: 1px solid #E2E8F0; color: #0F172A;">
+                  <div class="vis-num">38</div><div class="vis-label">Leads</div>
+                </div>
+                <div class="vis-crm-card" style="background: #F8FAFC; border: 1px solid #E2E8F0; color: #0F172A;">
+                  <div class="vis-num">12</div><div class="vis-label">Cierres</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ PANEL 6 — WHATSAPP COEXISTENTE ═══════════ -->
+<section class="coexistente-section" style="padding: 100px 5%; background: #FAF9F6; border-top: 1px solid rgba(0,0,0,.04); overflow: hidden;">
+  <div style="max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center;">
+    
+    <!-- Left side: Text & Bullets -->
+    <div class="coexistente-text">
+      <div class="chip-label" style="background: rgba(16,185,129,0.08); border: 1.5px solid rgba(16,185,129,0.15); color: #10B981; display: inline-flex; padding: 6px 14px; border-radius: 99px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">WhatsApp Coexistente</div>
+      <h2 class="section-h2" style="font-size: 36px; font-weight: 950; color: #0A1628; line-height: 1.2; margin-top: 16px;">
+        Use el mismo número de <span class="grad-text">WhatsApp que ya tiene</span>
+      </h2>
+      <p style="font-size: 16px; color: #475569; line-height: 1.6; margin-top: 16px; margin-bottom: 24px; font-weight: 600;">
+        HubOS se conecta con WhatsApp Coexistente para que su negocio pueda seguir usando su número actual y, al mismo tiempo, activar CRM, seguimiento, IA, cotizaciones, cobros y métricas comerciales.
+      </p>
+
+      <!-- Bullets -->
+      <div style="display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 24px;">
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; color: #1E293B;">
+          <span style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: #E0F2FE; color: #0284C7; border-radius: 50%; font-size: 11px; font-weight: bold;">✓</span> No cambie su número
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; color: #1E293B;">
+          <span style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: #E0F2FE; color: #0284C7; border-radius: 50%; font-size: 11px; font-weight: bold;">✓</span> No pierda su canal actual
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; color: #1E293B;">
+          <span style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: #E0F2FE; color: #0284C7; border-radius: 50%; font-size: 11px; font-weight: bold;">✓</span> Siga atendiendo desde WhatsApp
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; color: #1E293B;">
+          <span style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: #E0F2FE; color: #0284C7; border-radius: 50%; font-size: 11px; font-weight: bold;">✓</span> Controle conversaciones desde HubOS
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; color: #1E293B;">
+          <span style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: #E0F2FE; color: #0284C7; border-radius: 50%; font-size: 11px; font-weight: bold;">✓</span> Active IA, cobros, cotizaciones y seguimiento
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; color: #1E293B;">
+          <span style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: #E0F2FE; color: #0284C7; border-radius: 50%; font-size: 11px; font-weight: bold;">✓</span> Ideal para negocios que ya venden por WhatsApp todos los días
+        </div>
+      </div>
+
+      <p style="font-size: 11px; color: #64748B; font-weight: 600; font-style: italic;">
+        * Los costos oficiales de mensajería de WhatsApp/Meta pueden aplicar según consumo y tipo de mensaje.
+      </p>
+
+      <div style="margin-top: 32px;">
+        <a href="https://hub.smartflow-suite.com/checkout" class="btn-hero-primary" style="background:#10B981; border-color:#10B981; padding: 14px 28px; border-radius: 12px; text-decoration: none; font-weight: 800; color: white;">Empezar a usar Coexistente</a>
+      </div>
+    </div>
+
+    <!-- Right side: Image mockup showing phone screen and dashboard connection -->
+    <div class="coexistente-visual" style="display: flex; justify-content: center;">
+      <div style="background: white; border-radius: 24px; border: 1.5px solid #E2E8F0; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.03); max-width: 420px; width: 100%; position: relative;">
+        <!-- Glowing connection line -->
+        <div style="display: flex; align-items: center; gap: 16px; justify-content: space-between; margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 44px; height: 44px; background: #25D366; color: white; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 900; box-shadow: 0 4px 12px rgba(37,211,102,0.3);">💬</div>
+            <div>
+              <h4 style="font-size: 14px; font-weight: 900; color: #0A1628; margin: 0;">WhatsApp App</h4>
+              <p style="font-size: 10px; font-weight: 700; color: #10B981; margin: 0; text-transform: uppercase;">Tu Número Actual</p>
+            </div>
+          </div>
+          <div style="flex: 1; height: 2px; position: relative; border-top: 2px dashed #1877F2;">
+            <span style="position: absolute; top: -5px; left: 50%; width: 8px; height: 8px; background: #1877F2; border-radius: 50%; transform: translateX(-50%);"></span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 44px; height: 44px; background: #1877F2; color: white; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 900; box-shadow: 0 4px 12px rgba(24,119,242,0.3);">⚡</div>
+            <div>
+              <h4 style="font-size: 14px; font-weight: 900; color: #0A1628; margin: 0;">HubOS</h4>
+              <p style="font-size: 10px; font-weight: 700; color: #1877F2; margin: 0; text-transform: uppercase;">CRM & Herramientas</p>
+            </div>
+          </div>
+        </div>
+
+        <div style="background: #F8FAFC; border-radius: 16px; padding: 16px; border: 1.5px solid #E2E8F0;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+            <span style="font-size: 11px; font-weight: 900; text-transform: uppercase; color: #64748B; letter-spacing: 0.5px;">Estado de Coexistencia</span>
+            <span style="background: rgba(16,185,129,0.1); color: #059669; font-size: 10px; font-weight: 900; padding: 4px 10px; border-radius: 99px;">✓ Conectado</span>
+          </div>
+          <p style="font-size: 12.5px; color: #334155; line-height: 1.5; margin: 0; font-weight: 600;">
+            El tráfico comercial se sincroniza en tiempo real de forma segura. El número sigue operando en los celulares de su equipo con total normalidad mientras HubOS potencia el seguimiento y las ventas en segundo plano.
+          </p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════ HERRAMIENTAS ═══════════ -->
+<section class="tools-section" id="herramientas">
+  <div class="tools-inner">
+    <div class="tools-header">
+      <div>
+        <div class="chip-label">Marketplace</div>
+        <h2 class="section-h2">Todo lo que puedes<br><span class="grad-text">agregar a tu plataforma</span></h2>
+      </div>
+      <p style="color:var(--slate);font-size:15px;max-width:300px;line-height:1.7;">Activa lo que necesitas, desactiva lo que no. Tu plataforma crece contigo.</p>
+    </div>
+
+    <div class="tools-grid">
+
+      <!-- 1. CRM BASE -->
+      <div class="tool-card tc-green">
+        <div class="tool-top">
+          <div class="tool-icon-wrap" style="background:rgba(16,185,129,.1); font-size:26px;">📊</div>
+          <span class="tool-badge badge-free">Incluido gratis</span>
+        </div>
+        <div class="tool-name">CRM Base Gratis</div>
+        <div class="tool-desc">Dashboard básico, embudo por columnas para leads, contactos, tareas (To-Do) y configuración de moneda. Todo lo que necesitas para digitalizar tu negocio hoy.</div>
+        <div class="tool-add is-free">✓ Siempre gratis — $0</div>
+      </div>
+
+      <!-- 2. WHATSAPP COEXISTENTE -->
+      <div class="tool-card tc-blue">
+        <div class="tool-top">
+          <div class="tool-icon-wrap" style="background:rgba(24,119,242,.1); font-size:26px;">💬</div>
+          <span class="tool-badge badge-paid">Módulo Premium</span>
+        </div>
+        <div class="tool-name">WhatsApp Coexistente</div>
+        <div class="tool-desc"><strong>No cambies tu número. No pierdas tu WhatsApp.</strong> HubOS se conecta encima mediante Embedded Signup de Meta y lo convierte en un CRM potente multi-agente con 300 créditos de reactivación incluidos al mes.</div>
+        <div class="tool-add">+ Activar por $69/mes</div>
+      </div>
+
+      <!-- 3. AGENTE IA -->
+      <div class="tool-card tc-cyan">
+        <div class="tool-top">
+          <div class="tool-icon-wrap" style="background:rgba(14,165,233,.1); font-size:26px;">🤖</div>
+          <span class="tool-badge badge-paid">Módulo Premium</span>
+        </div>
+        <div class="tool-name">Agente IA</div>
+        <div class="tool-desc">Responde a tus leads de WhatsApp en segundos, los califica, responde objeciones y agenda citas sin que tú intervengas. Lo entrenas con tus PDF/textos en minutos. Habla de forma natural y vende 24/7.</div>
+        <div class="tool-add">+ Activar por $49/mes</div>
+      </div>
+
+      <!-- 4. AUDITOR IA / COACH DE VENTAS -->
+      <div class="tool-card tc-pink">
+        <div class="tool-top">
+          <div class="tool-icon-wrap" style="background:rgba(236,72,153,.1); font-size:26px;">🛡️</div>
+          <span class="tool-badge badge-paid">Módulo Premium</span>
+        </div>
+        <div class="tool-name">Auditor IA / Coach de Ventas</div>
+        <div class="tool-desc">Audita cada conversación para asegurar la calidad comercial de tus asesores. Mide automáticamente: tiempos de respuesta, claridad, tono de voz, cierre, seguimiento y oportunidades perdidas.</div>
+        <div class="tool-add">+ Activar por $25/mes</div>
+      </div>
+
+      <!-- 5. LINKS DE PAGO -->
+      <div class="tool-card tc-orange">
+        <div class="tool-top">
+          <div class="tool-icon-wrap" style="background:rgba(249,115,22,.1); font-size:26px;">💳</div>
+          <span class="tool-badge badge-paid">Módulo Premium</span>
+        </div>
+        <div class="tool-name">Links de pago</div>
+        <div class="tool-desc">Genera enlaces de cobro y mándalos directo por chat. Tu cliente paga de forma segura con tarjeta o PayPal. Compatible con SINPE móvil y transferencias bancarias para Costa Rica.</div>
+        <div class="tool-add">+ Activar por $12/mes</div>
+      </div>
+
+      <!-- 6. COTIZACIONES PDF -->
+      <div class="tool-card tc-indigo">
+        <div class="tool-top">
+          <div class="tool-icon-wrap" style="background:rgba(79,70,229,.1); font-size:26px;">📄</div>
+          <span class="tool-badge badge-paid">Módulo Premium</span>
+        </div>
+        <div class="tool-name">Cotizaciones PDF</div>
+        <div class="tool-desc">Crea cotizaciones y propuestas PDF profesionales con tu logo en segundos y envíalas directo por WhatsApp. Sabes exactamente cuándo la abrió tu cliente.</div>
+        <div class="tool-add">+ Activar por $15/mes</div>
+      </div>
+
+      <!-- 7. CATÁLOGO -->
+      <div class="tool-card tc-purple">
+        <div class="tool-top">
+          <div class="tool-icon-wrap" style="background:rgba(124,58,237,.1); font-size:26px;">📁</div>
+          <span class="tool-badge badge-paid">Módulo Premium</span>
+        </div>
+        <div class="tool-name">Catálogo</div>
+        <div class="tool-desc">Organiza tus productos, servicios, descripciones, imágenes y precios. Realiza búsquedas rápidas, selecciona productos y envía fichas completas directamente al cliente por WhatsApp.</div>
+        <div class="tool-add">+ Activar por $27/mes</div>
+      </div>
+
+      <!-- 8. PAQUETES COMERCIALES -->
+      <div class="tool-card tc-yellow">
+        <div class="tool-top">
+          <div class="tool-icon-wrap" style="background:rgba(245,158,11,.1); font-size:26px;">📦</div>
+          <span class="tool-badge badge-free" style="background: rgba(16, 185, 129, 0.1); color: #10B981; font-weight: 800; padding: 4px 10px; border-radius: 99px; font-size: 11px;">CRM Gratis</span>
+        </div>
+        <div class="tool-name">Paquetes comerciales</div>
+        <div class="tool-desc">Agrupa múltiples productos, servicios o promociones en combos para cargarlos en bloque al cotizar. Maximiza el ticket de venta promedio en un par de clics.</div>
+        <div class="tool-add" style="color: #10B981; background: rgba(16, 185, 129, 0.05); cursor: default;">✓ Activo gratis en tu CRM</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ PANEL 9 — SOPORTE DE INDUSTRIAS (CONSTELLACIÓN ORGÁNICA) ═══════════ -->
+<style>
+  .verticals-section-organic {
+    padding: 120px 5%; 
+    background: radial-gradient(circle at 50% 50%, #ffffff 0%, #f8fafc 100%); 
+    position: relative; 
+    overflow: hidden; 
+    border-top: 1px solid rgba(0,0,0,.03);
+  }
+  /* Floating Abstract Blur Orbs for Organic Flow */
+  .organic-orb-1 {
+    position: absolute;
+    top: 20%;
+    left: 10%;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, rgba(24,119,242,0.05) 0%, rgba(24,119,242,0) 70%);
+    filter: blur(50px);
+    pointer-events: none;
+    z-index: 1;
+    animation: floatOrb 12s ease-in-out infinite alternate;
+  }
+  .organic-orb-2 {
+    position: absolute;
+    bottom: 15%;
+    right: 8%;
+    width: 350px;
+    height: 350px;
+    background: radial-gradient(circle, rgba(16,185,129,0.04) 0%, rgba(16,185,129,0) 70%);
+    filter: blur(50px);
+    pointer-events: none;
+    z-index: 1;
+    animation: floatOrb 16s ease-in-out infinite alternate-reverse;
+  }
+  .organic-orb-3 {
+    position: absolute;
+    top: 50%;
+    left: 45%;
+    width: 280px;
+    height: 280px;
+    background: radial-gradient(circle, rgba(124,58,237,0.03) 0%, rgba(124,58,237,0) 70%);
+    filter: blur(40px);
+    pointer-events: none;
+    z-index: 1;
+    animation: floatOrb 10s ease-in-out infinite alternate;
+  }
+  
+  .organic-pills-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 18px 14px;
+    max-width: 1100px;
+    margin: 40px auto 0;
+    position: relative;
+    z-index: 2;
+  }
+  
+  .organic-pill-node {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 28px;
+    border-radius: 99px; /* Pill-shaped */
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.02);
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    cursor: pointer;
+    position: relative;
+    z-index: 2;
+    transform: translateY(0);
+  }
+  
+  .organic-pill-node:hover {
+    background: #ffffff;
+    transform: scale(1.06) translateY(-4px);
+    border-color: rgba(24, 119, 242, 0.2);
+    box-shadow: 0 20px 40px rgba(24, 119, 242, 0.08);
+  }
+  
+  .organic-pill-node:hover .organic-node-icon {
+    transform: scale(1.2) rotate(-6deg);
+  }
+  
+  .organic-node-icon {
+    font-size: 22px;
+    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    display: inline-block;
+  }
+  
+  .organic-node-text h4 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 850;
+    color: var(--text);
+    letter-spacing: -0.3px;
+  }
+  
+  .organic-node-text p {
+    margin: 2px 0 0;
+    font-size: 11px;
+    color: var(--slate);
+    font-weight: 600;
+  }
+
+  /* Staggered Float Bobbing to create a moving constellation */
+  .float-delay-1 { animation: floatBob 6s ease-in-out infinite alternate; }
+  .float-delay-2 { animation: floatBob 7s ease-in-out infinite alternate 1s; }
+  .float-delay-3 { animation: floatBob 8s ease-in-out infinite alternate 2s; }
+  .float-delay-4 { animation: floatBob 9s ease-in-out infinite alternate 1.5s; }
+  
+  @keyframes floatBob {
+    0% { transform: translateY(0px) rotate(0deg); }
+    100% { transform: translateY(-8px) rotate(0.5deg); }
+  }
+  @keyframes floatOrb {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(30px, -20px) scale(1.1); }
+  }
+</style>
+
+<style>
+    .sticky-cta-bar {
+      position: fixed; top: 72px; left: 0; right: 0; z-index: 190;
+      background: #FFFFFF; color: #0F172A;
+      padding: 10px 5%; display: flex; align-items: center; justify-content: space-between;
+      transform: translateY(-110%); transition: transform .35s cubic-bezier(.4,0,.2,1);
+      border-bottom: 1px solid #E2E8F0;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+    }
+    .sticky-cta-bar.visible { transform: translateY(0); }
+    .sticky-cta-text { font-size: 14px; font-weight: 700; }
+    .sticky-cta-text span { color: #1877F2; }
+.sticky-cta-btn {
+  background: #1877F2; color: white; padding: 9px 22px; border-radius: 8px;
+  font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap;
+  transition: opacity .2s; flex-shrink: 0;
+}
+.sticky-cta-btn:hover { opacity: .88; }
+@media (max-width: 640px) { .sticky-cta-text { display: none; } }
+
+/* ═══ SOCIAL PROOF BAR ═══ */
+.social-proof-bar {
+  background: white; border-top: 1px solid rgba(0,0,0,.06); border-bottom: 1px solid rgba(0,0,0,.06);
+  padding: 16px 5%;
+}
+.social-proof-inner {
+  max-width: 1100px; margin: 0 auto;
+  display: flex; align-items: center; justify-content: center; gap: 36px; flex-wrap: wrap;
+}
+.sp-item { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #334155; }
+.sp-dot { width: 8px; height: 8px; border-radius: 50%; background: #10B981; animation: pulse 2s infinite; flex-shrink: 0; }
+
+/* ═══ TESTIMONIALS ═══ */
+.testimonials-section { padding: 80px 5% 60px; background: #F8FAFF; }
+.testimonials-grid {
+  max-width: 1100px; margin: 48px auto 0;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+}
+@media (max-width: 900px) { .testimonials-grid { grid-template-columns: 1fr; } }
+.testimonial-card {
+  background: white; border-radius: 20px; padding: 28px;
+  border: 1px solid rgba(0,0,0,.07);
+  box-shadow: 0 4px 24px rgba(0,0,0,.05);
+  display: flex; flex-direction: column;
+}
+.testimonial-stars { color: #F59E0B; font-size: 15px; margin-bottom: 14px; letter-spacing: 2px; }
+.testimonial-text { font-size: 15px; line-height: 1.65; color: #334155; margin-bottom: 16px; flex: 1; }
+.testimonial-highlight {
+  background: #EEF4FF; border-left: 3px solid #1877F2;
+  padding: 10px 14px; border-radius: 6px; margin-bottom: 20px;
+  font-size: 14px; font-weight: 700; color: #1877F2; line-height: 1.4;
+}
+.testimonial-author { display: flex; align-items: center; gap: 12px; }
+.testimonial-avatar {
+  width: 42px; height: 42px; border-radius: 50%;
+  background: linear-gradient(135deg, #1877F2, #4FACFE);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; font-weight: 800; color: white; flex-shrink: 0;
+}
+.testimonial-name { font-size: 14px; font-weight: 700; color: #0F172A; }
+.testimonial-biz { font-size: 12px; color: #64748B; margin-top: 2px; }
+.testimonial-modules { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 16px; }
+.testimonial-module {
+  font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 100px;
+  background: #F0F5FF; color: #1877F2; border: 1px solid rgba(24,119,242,.15);
+}
+
+/* ═══ WHATSAPP FLOAT ═══ */
+.wa-float {
+  position: fixed; bottom: 28px; right: 28px; z-index: 9999;
+  width: 60px; height: 60px; border-radius: 50%;
+  background: #25D366;
+  box-shadow: 0 8px 30px rgba(37,211,102,.5);
+  display: flex; align-items: center; justify-content: center;
+  text-decoration: none; transition: transform .2s, box-shadow .2s;
+  animation: scaleIn .5s 2s ease both;
+}
+.wa-float:hover { transform: scale(1.1); box-shadow: 0 14px 40px rgba(37,211,102,.6); }
+.wa-float svg { width: 30px; height: 30px; fill: white; }
+.wa-float-tooltip {
+  position: absolute; right: 72px; bottom: 10px;
+  background: #0F172A; color: white; padding: 8px 14px; border-radius: 10px;
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+  opacity: 0; pointer-events: none; transform: translateX(8px);
+  transition: opacity .2s, transform .2s;
+}
+.wa-float:hover .wa-float-tooltip { opacity: 1; transform: translateX(0); }
+.wa-float-tooltip::after {
+  content: ''; position: absolute; left: 100%; top: 50%; transform: translateY(-50%);
+  border: 6px solid transparent; border-left-color: #FFFFFF;
+}
+
+/* ═══ EXIT INTENT POPUP ═══ */
+/* ═══ EXIT INTENT POPUP — 3 PACKS ═══ */
+.exit-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(0,0,0,.55); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  opacity: 0; pointer-events: none; transition: opacity .3s;
+}
+.exit-overlay.show { opacity: 1; pointer-events: all; }
+.exit-modal {
+  background: white; border-radius: 28px; padding: 40px 36px 32px;
+  max-width: 720px; width: 100%; text-align: center; position: relative;
+  box-shadow: 0 40px 100px rgba(0,0,0,.25);
+  transform: translateY(12px) scale(.97); transition: transform .35s cubic-bezier(.4,0,.2,1);
+}
+.exit-overlay.show .exit-modal { transform: translateY(0) scale(1); }
+.exit-close {
+  position: absolute; top: 16px; right: 20px;
+  font-size: 20px; cursor: pointer; color: #94A3B8;
+  background: none; border: none; line-height: 1; padding: 6px; border-radius: 6px;
+}
+.exit-close:hover { color: #334155; background: #F1F5F9; }
+.exit-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D;
+  font-size: 12px; font-weight: 700; padding: 4px 14px; border-radius: 100px;
+  margin-bottom: 14px; letter-spacing: .3px;
+}
+.exit-h { font-size: 24px; font-weight: 900; color: #0F172A; margin-bottom: 6px; line-height: 1.2; }
+.exit-p { font-size: 14px; color: #64748B; margin-bottom: 24px; line-height: 1.6; }
+
+/* Pack cards */
+.exit-packs { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 20px; }
+@media (max-width: 580px) { .exit-packs { grid-template-columns: 1fr; } .exit-modal { padding: 32px 20px 24px; } }
+.exit-pack {
+  border: 2px solid #E2E8F0; border-radius: 18px; padding: 20px 16px;
+  text-align: left; position: relative; transition: border-color .2s, box-shadow .2s;
+}
+.exit-pack:hover { border-color: #1877F2; box-shadow: 0 4px 20px rgba(24,119,242,.12); }
+.exit-pack.popular {
+  border-color: #1877F2;
+  box-shadow: 0 0 0 3px rgba(24,119,242,.12);
+}
+.exit-pack-badge {
+  position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+  background: #1877F2; color: white; font-size: 10px; font-weight: 800;
+  padding: 3px 12px; border-radius: 100px; white-space: nowrap; letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.exit-pack-name { font-size: 13px; font-weight: 800; color: #0F172A; margin-bottom: 8px; }
+.exit-pack-tools { margin-bottom: 12px; }
+.exit-pack-tool {
+  font-size: 11px; color: #64748B; display: flex; align-items: center; gap: 5px;
+  margin-bottom: 4px; line-height: 1.3;
+}
+.exit-pack-tool::before { content: '✓'; color: #10B981; font-weight: 800; font-size: 11px; flex-shrink: 0; }
+.exit-pack-price-normal { font-size: 11px; color: #94A3B8; text-decoration: line-through; margin-bottom: 2px; }
+.exit-pack-price-now { font-size: 22px; font-weight: 900; color: #0F172A; line-height: 1; }
+.exit-pack-price-now span { font-size: 12px; font-weight: 600; color: #64748B; }
+.exit-pack-saving { font-size: 11px; color: #10B981; font-weight: 700; margin-bottom: 14px; }
+.exit-pack-btn {
+  display: block; text-align: center; text-decoration: none;
+  background: #F1F5F9; color: #0F172A;
+  padding: 10px 14px; border-radius: 10px;
+  font-size: 13px; font-weight: 700; transition: all .2s;
+}
+.exit-pack.popular .exit-pack-btn { background: #1877F2; color: white; }
+.exit-pack-btn:hover { opacity: .88; transform: translateY(-1px); }
+
+.exit-promo-note {
+  background: #F8FAFF; border: 1px solid #DBEAFE; border-radius: 10px;
+  padding: 10px 16px; margin-bottom: 16px; font-size: 13px; color: #1877F2; font-weight: 600;
+}
+.exit-promo-note code {
+  background: #DBEAFE; padding: 2px 8px; border-radius: 5px;
+  font-family: monospace; font-weight: 800; letter-spacing: 1px;
+}
+.exit-skip-link { font-size: 13px; color: #94A3B8; text-decoration: none; border: 1px solid #334155; border-radius: 8px; padding: 10px 20px; display: inline-block; transition: all 0.2s; }
+.exit-skip-link:hover { color: #CBD5E1; border-color: #475569; background: rgba(255,255,255,0.04); }
+</style>
+
+
+
+<section class="verticals-section-organic" id="industrias">
+  <!-- Organic Background Blurs -->
+  <div class="organic-orb-1"></div>
+  <div class="organic-orb-2"></div>
+  <div class="organic-orb-3"></div>
+
+  <div style="max-width: 1200px; margin: 0 auto; text-align: center; position: relative; z-index: 2;">
+    <div class="chip-label" style="justify-content:center;">Diseñado para su sector</div>
+    <h2 class="section-h2">Se adapta de forma nativa<br><span class="grad-text">a su modelo de negocio</span></h2>
+    <p style="color:var(--slate); max-width:650px; margin: 16px auto 40px; font-size:16px; font-weight:600; line-height:1.7;">
+      No importa si vende servicios de alto valor, productos físicos o cursos en línea. Nuestra arquitectura modular se configura según las necesidades específicas de su industria.
+    </p>
+
+    <div class="organic-pills-container">
+      
+      <!-- Node 1 -->
+      <div class="organic-pill-node float-delay-1" onclick="window.location.href='https://hub.smartflow-suite.com/checkout'">
+        <span class="organic-node-icon">💼</span>
+        <div class="organic-node-text" style="text-align: left;">
+          <h4>Servicios Profesionales</h4>
+          <p>Agencias, abogados, consultores y contadores.</p>
+        </div>
+      </div>
+
+      <!-- Node 2 -->
+      <div class="organic-pill-node float-delay-2" onclick="window.location.href='https://hub.smartflow-suite.com/checkout'">
+        <span class="organic-node-icon">🏥</span>
+        <div class="organic-node-text" style="text-align: left;">
+          <h4>Clínicas y Salud</h4>
+          <p>Agende citas, envíe recordatorios y ordene expedientes.</p>
+        </div>
+      </div>
+
+      <!-- Node 3 -->
+      <div class="organic-pill-node float-delay-3" onclick="window.location.href='https://hub.smartflow-suite.com/checkout'">
+        <span class="organic-node-icon">🏡</span>
+        <div class="organic-node-text" style="text-align: left;">
+          <h4>Inmobiliarias</h4>
+          <p>Envíe fichas técnicas, controle fases de venta de propiedades.</p>
+        </div>
+      </div>
+
+      <!-- Node 4 -->
+      <div class="organic-pill-node float-delay-4" onclick="window.location.href='https://hub.smartflow-suite.com/checkout'">
+        <span class="organic-node-icon">🚗</span>
+        <div class="organic-node-text" style="text-align: left;">
+          <h4>Venta y Renta de Autos</h4>
+          <p>Cotice de forma rápida y envíe fotos de catálogos en PDF.</p>
+        </div>
+      </div>
+
+      <!-- Node 5 -->
+      <div class="organic-pill-node float-delay-1" onclick="window.location.href='https://hub.smartflow-suite.com/checkout'">
+        <span class="organic-node-icon">🎓</span>
+        <div class="organic-node-text" style="text-align: left;">
+          <h4>Educación e Infoproductos</h4>
+          <p>Soporte continuo a alumnos e inscripciones con links directos.</p>
+        </div>
+      </div>
+
+      <!-- Node 6 -->
+      <div class="organic-pill-node float-delay-2" onclick="window.location.href='https://hub.smartflow-suite.com/checkout'">
+        <span class="organic-node-icon">📦</span>
+        <div class="organic-node-text" style="text-align: left;">
+          <h4>E-commerce y Retail</h4>
+          <p>Notifique estados de pedido y guías de rastreo automatizadas.</p>
+        </div>
+      </div>
+
+      <!-- Node 7 -->
+      <div class="organic-pill-node float-delay-3" onclick="window.location.href='https://hub.smartflow-suite.com/checkout'">
+        <span class="organic-node-icon">📈</span>
+        <div class="organic-node-text" style="text-align: left;">
+          <h4>B2B y Equipos de Cuenta</h4>
+          <p>Gestione pipelines complejos de ventas corporativas.</p>
+        </div>
+      </div>
+
+      <!-- Node 8 -->
+      <div class="organic-pill-node float-delay-4" onclick="window.location.href='https://hub.smartflow-suite.com/checkout'">
+        <span class="organic-node-icon">🛠️</span>
+        <div class="organic-node-text" style="text-align: left;">
+          <h4>Servicios de Mantenimiento</h4>
+          <p>Instaladores de paneles solares, aire acondicionado, talleres.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ FAQ ═══════════ -->
+<section style="padding: 100px 5%; background: var(--bg-2);">
+  <div style="max-width: 800px; margin: 0 auto;">
+    <div style="text-align: center; margin-bottom: 56px;">
+      <div class="chip-label" style="justify-content:center;">Preguntas frecuentes</div>
+      <h2 class="section-h2">Respuestas directas<br><span class="grad-text">antes de que preguntes</span></h2>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 0;">
+
+      <details style="border-top: 1px solid var(--border); padding: 0;">
+        <summary style="padding: 22px 0; font-size: 17px; font-weight: 700; color: var(--text); cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
+          ¿El CRM gratis es realmente gratis? ¿Hay trampa?
+          <span style="flex-shrink:0; width:24px; height:24px; border-radius:50%; background:var(--blue-xlight); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:900; transition: transform .2s;">+</span>
+        </summary>
+        <p style="padding: 0 0 22px; color: var(--slate); font-size: 16px; line-height: 1.75;">No hay trampa. El CRM es gratis para siempre, con usuarios ilimitados y sin pedirte tarjeta de crédito. Solo pagas si decides agregar herramientas adicionales desde la tienda, y solo mientras las tengas activas.</p>
+      </details>
+
+      <details style="border-top: 1px solid var(--border); padding: 0;">
+        <summary style="padding: 22px 0; font-size: 17px; font-weight: 700; color: var(--text); cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
+          ¿Cómo funciona el modelo de cobro "a la carta"?
+          <span style="flex-shrink:0; width:24px; height:24px; border-radius:50%; background:var(--blue-xlight); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:900; transition: transform .2s;">+</span>
+        </summary>
+        <p style="padding: 0 0 22px; color: var(--slate); font-size: 16px; line-height: 1.75;">Exactamente como una suscripción modular. Todo negocio tiene el CRM base gratis. Si necesitas conectar WhatsApp, activas ese módulo por $19/mes. Si quieres cobrar con tarjetas, activas la Pasarela por $12/mes. Puedes prender y apagar módulos según tu temporada de ventas.</p>
+      </details>
+
+      <details style="border-top: 1px solid var(--border); padding: 0;">
+        <summary style="padding: 22px 0; font-size: 17px; font-weight: 700; color: var(--text); cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
+          ¿Pierdo mis conversaciones de WhatsApp al conectar la plataforma?
+          <span style="flex-shrink:0; width:24px; height:24px; border-radius:50%; background:var(--blue-xlight); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:900; transition: transform .2s;">+</span>
+        </summary>
+        <p style="padding: 0 0 22px; color: var(--slate); font-size: 16px; line-height: 1.75;">No. Las conversaciones que ya tienes en tu WhatsApp no se pierden. Desde el momento en que conectas SmartFlow Hub OS, los mensajes nuevos empiezan a llegar al CRM automáticamente. Tu historial anterior queda en tu WhatsApp como siempre.</p>
+      </details>
+
+      <details style="border-top: 1px solid var(--border); padding: 0;">
+        <summary style="padding: 22px 0; font-size: 17px; font-weight: 700; color: var(--text); cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
+          ¿Puedo usar mi propio número de WhatsApp actual?
+          <span style="flex-shrink:0; width:24px; height:24px; border-radius:50%; background:var(--blue-xlight); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:900; transition: transform .2s;">+</span>
+        </summary>
+        <p style="padding: 0 0 22px; color: var(--slate); font-size: 16px; line-height: 1.75;">Sí, puedes conectar tu número actual (sea personal o Business) escaneando el código QR en un par de segundos, tal como lo haces con WhatsApp Web. No necesitas comprar un número nuevo.</p>
+      </details>
+
+      <details style="border-top: 1px solid var(--border); padding: 0;">
+        <summary style="padding: 22px 0; font-size: 17px; font-weight: 700; color: var(--text); cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
+          ¿Cómo se activa el Agente Inteligente de IA?
+          <span style="flex-shrink:0; width:24px; height:24px; border-radius:50%; background:var(--blue-xlight); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:900; transition: transform .2s;">+</span>
+        </summary>
+        <p style="padding: 0 0 22px; color: var(--slate); font-size: 16px; line-height: 1.75;">Desde la tienda de SmartFlow activas el módulo de IA. Subes un documento Word, PDF, o dejas un enlace de tu web con las respuestas frecuentes y el tono que deseas. La IA entrenará en segundos y estará lista para responder por ti las 24 horas.</p>
+      </details>
+
+      <details style="border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 0;">
+        <summary style="padding: 22px 0; font-size: 17px; font-weight: 700; color: var(--text); cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
+          ¿Puedo cancelar cuando quiera?
+          <span style="flex-shrink:0; width:24px; height:24px; border-radius:50%; background:var(--blue-xlight); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:900; transition: transform .2s;">+</span>
+        </summary>
+        <p style="padding: 0 0 22px; color: var(--slate); font-size: 16px; line-height: 1.75;">Sí. Se desactiva al término del mes en curso. No hay penalidades, no hay permanencia mínima. Tu CRM y toda la información de tus clientes se mantiene intacta.</p>
+      </details>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ PANEL 10 — CTA FINAL ═══════════ -->
+<section style="padding: 100px 5%; background: linear-gradient(135deg, rgba(24,119,242,.08) 0%, rgba(16,185,129,.05) 100%); border-top: 1.5px solid rgba(24,119,242,.15); border-bottom: 1.5px solid rgba(24,119,242,.15);">
+  <div style="max-width: 800px; margin: 0 auto; text-align: center;">
+    <div class="chip-label" style="justify-content:center;">Comience Hoy Mismo</div>
+    <h2 class="section-h2" style="font-size: clamp(32px, 5vw, 44px); margin-bottom: 20px; font-weight: 950; color: #0A1628;">
+      Tome el control de su <span class="grad-text">WhatsApp hoy mismo</span>
+    </h2>
+    <p style="font-size: 18px; color: #475569; line-height: 1.75; margin-bottom: 36px; max-width: 680px; margin-left: auto; margin-right: auto; font-weight: 600;">
+      No pierda más clientes ni ventas por falta de seguimiento. Cree su cuenta gratis en 90 segundos y empiece a vender con orden y velocidad.
+    </p>
+    
+    <!-- Buttons -->
+    <div style="display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;">
+      <a href="https://hub.smartflow-suite.com/checkout" class="btn-hero-primary" style="padding: 16px 32px; font-size: 14px; text-decoration: none; border-radius: 12px; font-weight: 800; background: #1877F2; border-color: #1877F2; color: white;">Crear mi CRM gratis</a>
+      <a href="https://wa.me/50670131464" class="btn-hero-secondary" style="padding: 16px 32px; font-size: 14px; text-decoration: none; border-radius: 12px; font-weight: 800; display: inline-flex; align-items: center; gap: 8px; background: white; border-color: #CBD5E1; color: #0A1628;">
+        <span style="font-size:16px;">💬</span> Hablar con soporte
+      </a>
+    </div>
+
+    <!-- Microcopy -->
+    <p style="margin-top: 24px; font-size: 13.5px; color: #64748B; font-weight: 700; letter-spacing: 0.2px;">
+      Usuarios ilimitados · Configuración guiada · Sin contratos ni permanencia
+    </p>
+  </div>
+</section>
+
+<!-- ═══════════ MISSION ═══════════ -->
+<section class="mission-section" style="padding: 120px 5% 80px; background: white;">
+  <div class="mission-inner" style="max-width: 800px; margin: 0 auto; text-align: center;">
+    <div class="chip-label" style="justify-content:center;">Por qué existe SmartFlow Hub OS</div>
+    <h2 class="section-h2" style="font-size: clamp(32px, 5vw, 48px); margin-bottom: 32px; line-height: 1.1;">Las grandes empresas llevan años usando esto.<br><span class="grad-text">Ahora es tu turno.</span></h2>
+    <p style="font-size: 19px; line-height: 1.8; color: var(--slate); margin-bottom: 24px;">
+      Creemos que la taquería de la esquina, la clínica dental local y el agente inmobiliario independiente merecen las mismas herramientas que una corporación gigante.
+    </p>
+    <p style="font-size: 19px; line-height: 1.8; color: var(--slate);">
+      Sin pagar por usuario. Sin configuraciones que necesiten un técnico. <strong>SmartFlow Hub OS es para el que construye su negocio todos los días con lo que tiene.</strong>
+    </p>
+  </div>
+</section>
+
+<!-- ═══════════ CTA FINAL ═══════════ -->
+<section class="cta-section">
+  <div class="cta-orb-1"></div>
+  <div class="cta-orb-2"></div>
+  <div class="cta-orb-3"></div>
+  <div class="cta-inner">
+    <div class="cta-eyebrow">La democratización ha llegado</div>
+    <h2 class="cta-h2">Empieza hoy. Tu primer lead ya debería<br><span class="grad-text">estar en tu CRM.</span></h2>
+    <p class="cta-p">El CRM es gratis para siempre*. Cuando quieras agregar WhatsApp, el Agente IA o cualquier otra herramienta, la activas en un clic. Sin contratos, sin trampas, sin perder lo que ya tenías.</p>
+    <div class="cta-actions">
+      <a href="https://hub.smartflow-suite.com/checkout" class="btn-cta-main">
+        Crear mi cuenta gratis
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </a>
+    </div>
+    <p class="cta-note">Sin tarjeta de crédito · Sin contrato · Listo en 5 minutos · Soporte en español · Cancela cualquier herramienta cuando quieras</p>
+    <div class="cta-trust">
+      <div class="cta-trust-item"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Google Cloud · Datos encriptados</div>
+      <div class="cta-trust-item"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> CRM gratis para siempre*</div>
+      <div class="cta-trust-item"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Cancela herramientas cuando quieras</div>
+      <div class="cta-trust-item"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Soporte en español 7 días</div>
+    </div>
+    <div style="margin-top: 40px; font-size: 11px; color: rgba(255,255,255,0.5); line-height: 1.6; max-width: 700px; margin-left: auto; margin-right: auto;">
+      * Sujeto a los Términos de Servicio vigentes. SmartFlow Hub OS se reserva el derecho de modificar planes con previo aviso de 30 días. <br>
+      * Métricas basadas en casos de estudio internos con configuración óptima. Resultados pueden variar según industria y tiempo de respuesta humano. <br>
+      WhatsApp Business API requiere verificación de negocio con Meta. El proceso toma entre 24–72 hrs hábiles. <br>
+      Google Cloud es una marca registrada de Google LLC. SmartFlow Hub OS utiliza su infraestructura como proveedor de servicios.
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ FOOTER ═══════════ -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-top">
+      <div class="footer-brand">
+        <div class="footer-logo">SmartFlow <span>Hub OS</span></div>
+        <div class="footer-tagline">La plataforma que crece con tu negocio. Para cualquier nicho, en cualquier etapa.</div>
+        <div style="margin-top: 20px; font-size: 12px; color: #94A3B8; line-height: 1.5;">
+          <strong>Eduardo Alfaro Rodriguez</strong><br>
+          Identificación: 109960811<br>
+          San José, Costa Rica<br>
+          juridico@smartflow-suite.com
+        </div>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <h4>Plataforma</h4>
+          <a href="#como">Cómo funciona</a>
+          <a href="#herramientas">Herramientas</a>
+          <a href="#negocios">Para tu negocio</a>
+          <a href="https://bloghub.smartflow-suite.com" target="_blank" style="color: #1877F2; font-weight: 800; display: inline-flex; align-items: center; gap: 4px;">
+            <span>Blog Oficial</span>
+            <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" style="display:inline-block;"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg>
+          </a>
+          <a href="https://hub.smartflow-suite.com">Acceder al Hub</a>
+        </div>
+        <div class="footer-col">
+          <h4>Herramientas</h4>
+          <a href="/#precios">CRM Base (Gratis)*</a>
+          <a href="/#superpoderes">WhatsApp Business API</a>
+          <a href="/#superpoderes">Agente IA 24/7</a>
+          <a href="/#herramientas">Cotizaciones PDF</a>
+          <a href="/#herramientas">Links de Pago</a>
+        </div>
+        <div class="footer-col">
+          <h4>Empresa</h4>
+          <a href="mailto:hola@hubos.smartflow-suite.com">Contacto</a>
+          <a href="/terminos.html">Soporte Legal</a>
+          <a href="https://hubos.smartflow-suite.com">SmartFlow Hub OS</a>
+          <a href="/terminos.html">Términos</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div class="footer-copy">© 2026 SmartFlow Hub OS. Todos los derechos reservados.</div>
+      <div class="footer-legal">
+        <a href="/privacidad.html">Privacidad</a>
+        <a href="/terminos.html">Términos</a>
+        <a href="/cookies.html">Cookies</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- Cookie Banner -->
+<div id="cookieBanner" style="position: fixed; bottom: 20px; left: 20px; right: 20px; background: white; border: 1px solid #E2E8F0; padding: 20px; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); z-index: 9999; display: none; align-items: center; justify-content: space-between; gap: 20px; border-left: 5px solid #1877F2;">
+  <div style="font-size: 14px; color: #475569; line-height: 1.5;">
+    Utilizamos cookies para mejorar su experiencia y analizar el tráfico. Al continuar navegando, acepta nuestra <a href="/cookies.html" style="color: #1877F2; font-weight: 700; text-decoration: none;">Política de Cookies</a>.
+  </div>
+  <button onclick="acceptCookies()" style="background: #1877F2; color: white; border: none; padding: 10px 24px; border-radius: 8px; font-weight: 800; cursor: pointer; white-space: nowrap;">Aceptar todo</button>
+</div>
+
+<script>
+
+  function acceptCookies() {
+    localStorage.setItem('cookiesAccepted', 'true');
+    document.getElementById('cookieBanner').style.display = 'none';
+  }
+
+  window.onload = function() {
+    if (!localStorage.getItem('cookiesAccepted')) {
+      document.getElementById('cookieBanner').style.display = 'flex';
+    }
+  };
+
+  // ═══ STICKY CTA BAR ═══
+  const stickyCta = document.getElementById('stickyCta');
+  if (stickyCta) {
+    window.addEventListener('scroll', () => {
+      stickyCta.classList.toggle('visible', window.scrollY > 500);
+    }, { passive: true });
+  }
+
+  // ═══ EXIT INTENT POPUP ═══
+  (function() {
+    let exitShown = false;
+    function showExitPopup() {
+      if (exitShown || localStorage.getItem('exitOfferShown')) return;
+      exitShown = true;
+      document.getElementById('exitPopup').classList.add('show');
+    }
+    // Desktop: mouse leaves viewport hacia arriba
+    document.addEventListener('mouseleave', (e) => {
+      if (e.clientY <= 0) showExitPopup();
+    });
+    // Mobile: 40s de permanencia sin scroll activo
+    let mobileTimer = setTimeout(() => {
+      if (!exitShown) showExitPopup();
+    }, 40000);
+    window.addEventListener('scroll', () => clearTimeout(mobileTimer), { once: true, passive: true });
+  })();
+
+  function closeExitPopup() {
+    document.getElementById('exitPopup').classList.remove('show');
+    localStorage.setItem('exitOfferShown', '1');
+  }
+
+  // Cerrar popup con Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeExitPopup();
+  });
+</script>
+
+<!-- ═══ WHATSAPP FLOAT ═══ -->
+<a class="wa-float" href="https://wa.me/50661139919?text=Hola%2C%20vi%20SmartFlow%20Hub%20OS%20y%20quisiera%20saber%20m%C3%A1s" target="_blank" rel="noopener" aria-label="Chatear por WhatsApp">
+  <div class="wa-float-tooltip">¿Tienes dudas? Escríbenos</div>
+  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.890-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>
+</a>
+
+<!-- ═══ EXIT INTENT POPUP ═══ -->
+<div class="exit-overlay" id="exitPopup" role="dialog" aria-modal="true">
+  <div class="exit-modal">
+    <button class="exit-close" onclick="closeExitPopup()" aria-label="Cerrar">✕</button>
+
+    <div class="exit-badge">🎁 Solo en esta pantalla — 15% de descuento</div>
+    <h3 class="exit-h">El CRM es gratis. Elige tu power-up.</h3>
+    <p class="exit-p">Paquetes pensados para empezar fuerte. El descuento se aplica solo aquí.</p>
+
+    <div class="exit-packs">
+
+      <!-- Pack Esencial -->
+      <div class="exit-pack">
+        <div class="exit-pack-name">Pack Esencial</div>
+        <div class="exit-pack-tools">
+          <div class="exit-pack-tool">CRM Base (gratis)</div>
+          <div class="exit-pack-tool">WhatsApp Coexistente</div>
+          <div class="exit-pack-tool">Agente IA 24/7</div>
+        </div>
+        <div class="exit-pack-price-normal">Normal $118/mes</div>
+        <div class="exit-pack-price-now">$100<span>/mes</span></div>
+        <a href="https://hub.smartflow-suite.com/checkout?pack=esencial&code=SMARTFLOW15" class="exit-pack-btn" onclick="closeExitPopup()">Activar Pack →</a>
+      </div>
+
+      <!-- Pack Equipo — Popular -->
+      <div class="exit-pack popular">
+        <div class="exit-pack-badge">⭐ Más Popular</div>
+        <div class="exit-pack-name">Pack Equipo</div>
+        <div class="exit-pack-tools">
+          <div class="exit-pack-tool">CRM Base (gratis)</div>
+          <div class="exit-pack-tool">WhatsApp Coexistente</div>
+          <div class="exit-pack-tool">Agente IA 24/7</div>
+          <div class="exit-pack-tool">Multi-Agente</div>
+        </div>
+        <div class="exit-pack-price-normal">Normal $133/mes</div>
+        <div class="exit-pack-price-now">$113<span>/mes</span></div>
+        <a href="https://hub.smartflow-suite.com/checkout?pack=equipo&code=SMARTFLOW15" class="exit-pack-btn" onclick="closeExitPopup()">Activar Pack →</a>
+      </div>
+
+      <!-- Stack Completo -->
+      <div class="exit-pack">
+        <div class="exit-pack-name">Stack Completo</div>
+        <div class="exit-pack-tools">
+          <div class="exit-pack-tool">Todas las herramientas</div>
+          <div class="exit-pack-tool">Tope $197/mes incluido</div>
+          <div class="exit-pack-tool">Sin límite de módulos</div>
+        </div>
+        <div class="exit-pack-price-normal">Normal $197/mes</div>
+        <div class="exit-pack-price-now">$167<span>/mes</span></div>
+        <a href="https://hub.smartflow-suite.com/checkout?pack=completo&code=SMARTFLOW15" class="exit-pack-btn" onclick="closeExitPopup()">Activar Stack →</a>
+      </div>
+
+    </div>
+
+    <div class="exit-promo-note">
+      Usa el código <code>SMARTFLOW15</code> al hacer checkout · Solo válido en esta sesión
+    </div>
+    <a href="https://hub.smartflow-suite.com/checkout" class="exit-skip-link" onclick="closeExitPopup()">Prefiero solo el plan gratis o escoger mi propio stack</a>
+  </div>
+</div>
+
+</body>
+</html>

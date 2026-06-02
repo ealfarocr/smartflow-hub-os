@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { AuthService } from '@/services/AuthService';
-import { Sun, Mail, Lock, Loader2, Globe } from 'lucide-react';
+import { Mail, Lock, Loader2, Globe } from 'lucide-react';
 
 export const LoginView = () => {
   const { isAuthenticated, user, memberships } = useAuthStore();
@@ -18,9 +18,9 @@ export const LoginView = () => {
      return <Navigate to="/" replace />;
   }
 
-  // Redirigir a ventana de espera si está autenticado pero no tiene membresías (Acceso pendiente)
+  // Redirigir a onboarding si está autenticado pero no tiene membresías (Nuevo usuario)
   if (isAuthenticated && user && memberships.length === 0) {
-    return <Navigate to="/access-pending" replace />;
+    return <Navigate to="/onboarding" replace />;
   }
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -117,13 +117,10 @@ export const LoginView = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="flex justify-center text-primary-600 dark:text-primary-500 mb-6">
-          <Sun className="w-12 h-12" />
+      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
+        <div className="flex justify-center mb-8">
+          <img src="/brand/logo-smartflow-blue.png" alt="SmartFlow Hub Logo" className="h-16 w-auto object-contain dark:brightness-200" />
         </div>
-        <h2 className="text-center text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-          Paneles Solares MX
-        </h2>
         <p className="mt-2 text-center text-sm text-slate-600 dark:text-slate-400">
           {view === 'login' ? 'Iniciar sesión en tu portal corporativo' : 'Crear tu cuenta corporativa'}
         </p>
@@ -135,18 +132,18 @@ export const LoginView = () => {
           <button
             onClick={handleGoogleLogin}
             disabled={isProcessing}
-            className="w-full flex items-center justify-center gap-3 px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-lg shadow-sm bg-white dark:bg-slate-800 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors mb-6"
+            className="w-full flex items-center justify-center gap-4 px-6 py-5 bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-3xl shadow-xl hover:shadow-2xl hover:scale-[1.02] active:scale-[0.98] transition-all group mb-8"
           >
-            {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Globe className="w-5 h-5 text-blue-500" />}
-            Continuar con Google
+            {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : <img src="https://www.google.com/favicon.ico" className="w-6 h-6" alt="Google" />}
+            <span className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Continuar con Google</span>
           </button>
 
-          <div className="relative mb-6">
+          <div className="relative mb-8">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-200 dark:border-slate-800"></div>
+              <div className="w-full border-t-2 border-slate-100 dark:border-slate-800"></div>
             </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-white dark:bg-slate-900 text-slate-500">o usa tu correo corporativo</span>
+            <div className="relative flex justify-center text-[10px] font-black uppercase tracking-[0.2em]">
+              <span className="px-4 bg-white dark:bg-slate-900 text-slate-400">o usa tu email corporativo</span>
             </div>
           </div>
 
@@ -183,7 +180,7 @@ export const LoginView = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="appearance-none block w-full pl-10 px-3 py-2.5 border border-slate-300 dark:border-slate-700 rounded-lg shadow-sm placeholder-slate-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  placeholder="admin@panelessolares.mx"
+                  placeholder="admin@smartflow-suite.com"
                 />
               </div>
             </div>
@@ -209,7 +206,7 @@ export const LoginView = () => {
               <button
                 type="submit"
                 disabled={isProcessing}
-                className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-[#1877F2] hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : view === 'login' ? 'Acceder al Sistema' : 'Crear Cuenta'}
               </button>
@@ -219,7 +216,7 @@ export const LoginView = () => {
           <div className="mt-6 text-center">
             <button
               onClick={() => setView(view === 'login' ? 'register' : 'login')}
-              className="text-sm font-medium text-primary-600 hover:text-primary-500 transition-colors"
+              className="text-sm font-medium text-[#1877F2] hover:text-[#1877F2] transition-colors"
             >
               {view === 'login' ? '¿Ya fuiste invitado? Crea tu cuenta aquí' : '¿Ya tienes cuenta? Inicia sesión'}
             </button>
@@ -227,7 +224,13 @@ export const LoginView = () => {
         </div>
         
         <p className="text-center text-xs text-slate-400 mt-6 tracking-widest uppercase">
-           Paneles Solares MX • v6.2
+           SmartFlow Hub OS • v6.2
+        </p>
+        <p className="text-center text-[10px] text-slate-400 mt-2">
+          Al ingresar aceptas nuestra{' '}
+          <a href="https://smartflow-suite.com/privacidad" target="_blank" rel="noreferrer" className="underline hover:text-slate-600">Política de Privacidad</a>
+          {' '}y el uso de{' '}
+          <a href="https://smartflow-suite.com/cookies" target="_blank" rel="noreferrer" className="underline hover:text-slate-600">Cookies</a>.
         </p>
       </div>
     </div>

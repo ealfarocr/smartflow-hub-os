@@ -17,9 +17,18 @@ const db = getFirestore(app);
 
 async function checkData() {
   try {
-    console.log("Iniciando sesión con admin@alpha.com...");
-    await signInWithEmailAndPassword(auth, "admin@alpha.com", "prueba123");
-    console.log("Sesión iniciada correctamente.");
+    // SEGURIDAD: credenciales movidas a variables de entorno. Nunca commitear passwords.
+    // Uso: TEST_USER_EMAIL=... TEST_USER_PASSWORD=... node scripts/check_frontend.mjs
+    const email = process.env.TEST_USER_EMAIL;
+    const password = process.env.TEST_USER_PASSWORD;
+    if (!email || !password) {
+      console.error("Configura TEST_USER_EMAIL y TEST_USER_PASSWORD antes de ejecutar.");
+      process.exit(1);
+    }
+
+    console.log(`Iniciando sesion con ${email}...`);
+    await signInWithEmailAndPassword(auth, email, password);
+    console.log("Sesion iniciada correctamente.");
 
     console.log("Obteniendo últimas conversaciones...");
     const q = query(

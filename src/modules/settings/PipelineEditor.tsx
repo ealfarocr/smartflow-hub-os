@@ -81,11 +81,11 @@ export const PipelineEditor: React.FC<Props> = ({ stages, onChange }) => {
                   } else {
                     updateStage(stage.id, { isDefault: false });
                   }
-                }} className="rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
+                }} className="rounded border-slate-300 text-[#1877F2] focus:ring-primary-500" />
                 <span className="text-slate-500 dark:text-slate-400 whitespace-nowrap">Default</span>
               </label>
               <label className="flex items-center gap-1.5 cursor-pointer" title="Etapa de cierre (ganada/perdida)">
-                <input type="checkbox" checked={stage.isClosed} onChange={e => updateStage(stage.id, { isClosed: e.target.checked })} className="rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
+                <input type="checkbox" checked={stage.isClosed} onChange={e => updateStage(stage.id, { isClosed: e.target.checked })} className="rounded border-slate-300 text-[#1877F2] focus:ring-primary-500" />
                 <span className="text-slate-500 dark:text-slate-400 whitespace-nowrap">Cierre</span>
               </label>
             </div>
@@ -105,7 +105,7 @@ export const PipelineEditor: React.FC<Props> = ({ stages, onChange }) => {
         ))}
       </div>
 
-      <button onClick={addStage} className="w-full border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg py-3 text-sm font-medium text-slate-500 hover:text-primary-600 hover:border-primary-400 transition-colors flex items-center justify-center gap-2">
+      <button onClick={addStage} className="w-full border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg py-3 text-sm font-medium text-slate-500 hover:text-[#1877F2] hover:border-primary-400 transition-colors flex items-center justify-center gap-2">
         <Plus className="w-4 h-4" /> Agregar Etapa
       </button>
     </div>

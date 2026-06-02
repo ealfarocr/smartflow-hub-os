@@ -8,9 +8,12 @@ interface LeadState {
   error: string | null;
   
   // Actions
+  reset: () => void;
   subscribe: (tenantId: string) => () => void;
   moveLead: (tenantId: string, id: string, sourceStage: CRMStage, newStage: CRMStage, newOrder: number) => Promise<void>;
   createLead: (tenantId: string, data: Partial<Lead>) => Promise<void>;
+  updateLead: (id: string, data: Partial<Lead>) => Promise<void>;
+  deleteLead: (id: string) => Promise<void>;
   seedLeads: (tenantId: string) => Promise<void>;
 }
 
@@ -19,8 +22,13 @@ export const useLeadStore = create<LeadState>((set, get) => ({
   isLoading: true,
   error: null,
 
+  reset: () => set({ leads: [], isLoading: false, error: null }),
+
   subscribe: (tenantId) => {
-    set({ isLoading: true, error: null });
+    // Solo mostramos loading si no tenemos datos previos (evita delay en navegación)
+    if (get().leads.length === 0) {
+      set({ isLoading: true, error: null });
+    }
     const unsubscribe = LeadService.subscribeToLeads(tenantId, 
       (leads) => {
         set({ leads, isLoading: false });
@@ -62,6 +70,14 @@ export const useLeadStore = create<LeadState>((set, get) => ({
 
   createLead: async (tenantId: string, data: Partial<Lead>) => {
     await LeadService.createLead(tenantId, data);
+  },
+
+  updateLead: async (id: string, data: Partial<Lead>) => {
+    await LeadService.updateLead(id, data);
+  },
+
+  deleteLead: async (id: string) => {
+    await LeadService.deleteLead(id);
   },
 
   seedLeads: async (tenantId: string) => {

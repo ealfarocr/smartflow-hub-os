@@ -34,89 +34,148 @@ service cloud.firestore {
       return isAuthenticated() && isAtLeast(tenantId, 'Admin');
     }
 
+    // Super Admin: tiene isSuperAdmin == true en su documento /users/{uid}
+    // Agregamos UID y Email como fallbacks para asegurar acceso total al creador
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        request.auth.uid == 'qsiEuc1lBWUOkjUQRiYvsRf3Syn2' ||
+        request.auth.token.email == 'publicidadynegociosenlinea@gmail.com' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isSuperAdmin == true
+      );
+    }
+
     match /memberships/{membershipId} {
-      // Lectura: Mi propia membresía (por UID o por Email si no estoy logueado/vínculo pendiente) 
-      // o Admins del mismo tenant
       allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || 
+        resource.data.userId == request.auth.uid ||
         resource.data.email == request.auth.token.email ||
-        isTenantAdmin(resource.data.tenantId)
+        isTenantAdmin(resource.data.tenantId) ||
+        isSuperAdmin()
       );
-      
-      // Creación: Solo Admins pueden invitar
-      allow create: if isAuthenticated() && isTenantAdmin(request.resource.data.tenantId);
-      
-      // Actualización: 
-      // 1. Vinculación inicial (el usuario se vincula a si mismo si el email coincide)
-      // 2. Gestión de Admin (cambio de rol/status)
-      allow update: if isAuthenticated() && (
-        (request.resource.data.userId == request.auth.uid && resource.data.email == request.auth.token.email) ||
-        isTenantAdmin(resource.data.tenantId)
+      // Un usuario autenticado puede crear su propia membresía como Owner (auto-registro)
+      allow create: if isAuthenticated() && (
+        (request.resource.data.userId == request.auth.uid && request.resource.data.role == 'Owner') ||
+        isTenantAdmin(request.resource.data.tenantId) ||
+        isSuperAdmin()
       );
-      
-      allow delete: if isAuthenticated() && isTenantAdmin(resource.data.tenantId) && resource.data.role != 'Owner';
+      allow update, delete: if isTenantAdmin(request.resource.data.tenantId || resource.data.tenantId) || isSuperAdmin();
     }
 
     match /users/{userId} {
-      allow read: if isAuthenticated(); 
-      allow write: if isAuthenticated() && request.auth.uid == userId;
+      // Endurecido: un usuario solo puede leer su propio perfil; SuperAdmin puede leer cualquiera.
+      // Antes: cualquier usuario autenticado podía leer todos los perfiles (PII expuesta).
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+      allow write: if (isAuthenticated() && request.auth.uid == userId) || isSuperAdmin();
     }
 
     match /tenants/{tenantId} {
-      allow read: if isTenantMember(tenantId);
-      allow write: if isTenantAdmin(tenantId);
+      // Endurecido: lectura solo a miembros del tenant o SuperAdmin.
+      // Antes: cualquiera con `request.query.limit <= 5` podía leer datos de tenants (incluye ownerEmail).
+      // La verificación de disponibilidad de nombre debe migrar a una Cloud Function.
+      allow read: if isTenantMember(tenantId) || isSuperAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if isTenantAdmin(tenantId) || isSuperAdmin();
+    }
+
+    match /available_tools/{toolId} {
+      allow read: if true; // Público para el Checkout/Marketplace
+      allow write: if isSuperAdmin();
     }
 
     match /leads/{leadId} {
-      allow read: if isTenantMember(resource.data.tenantId);
-      allow create: if isTenantMember(request.resource.data.tenantId);
-      allow update: if isTenantMember(resource.data.tenantId) 
-                   && isTenantMember(request.resource.data.tenantId);
-      allow delete: if isTenantAdmin(resource.data.tenantId);
+      allow read: if isTenantMember(resource.data.tenantId) || isSuperAdmin();
+      allow create: if isTenantMember(request.resource.data.tenantId) || isSuperAdmin();
+      allow update: if isTenantMember(resource.data.tenantId) || isSuperAdmin();
+      allow delete: if isTenantAdmin(resource.data.tenantId) || isSuperAdmin();
     }
 
     match /quotes/{quoteId} {
-      allow read: if isTenantMember(resource.data.tenantId);
-      allow create: if isTenantMember(request.resource.data.tenantId);
-      allow update: if isTenantMember(resource.data.tenantId) 
-                   && isTenantMember(request.resource.data.tenantId);
-      allow delete: if isTenantAdmin(resource.data.tenantId);
+      allow read: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
+      allow create: if isSuperAdmin() || isTenantMember(request.resource.data.tenantId);
+      allow update: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
+      allow delete: if isSuperAdmin() || isTenantAdmin(resource.data.tenantId);
     }
 
-    match /settings/{docId} { 
-      allow read: if isTenantMember(docId);
-      allow write: if isTenantAdmin(docId);
+    match /settings/{docId} {
+      allow read: if isTenantMember(docId) || isSuperAdmin() || 
+        (isAuthenticated() && exists(/databases/$(database)/documents/tenants/$(docId)) && 
+         get(/databases/$(database)/documents/tenants/$(docId)).data.createdBy == request.auth.uid);
+      allow write: if isTenantAdmin(docId) || isSuperAdmin() ||
+        (isAuthenticated() &&
+          exists(/databases/$(database)/documents/tenants/$(docId)) &&
+          get(/databases/$(database)/documents/tenants/$(docId)).data.createdBy == request.auth.uid);
     }
     
     match /packages/{pkgId} {
-      allow read: if isTenantMember(resource.data.tenantId);
-      allow create: if isTenantAdmin(request.resource.data.tenantId);
-      allow update, delete: if isTenantAdmin(resource.data.tenantId);
+      allow read: if isTenantMember(resource.data.tenantId) || isSuperAdmin();
+      allow create, update, delete: if isTenantAdmin(request.resource.data.tenantId || resource.data.tenantId) || isSuperAdmin();
+    }
+
+    match /catalog/{itemId} {
+      allow read: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
+      allow create: if isSuperAdmin() || isTenantMember(request.resource.data.tenantId);
+      allow update: if isSuperAdmin() || isTenantMember(resource.data.tenantId) || isTenantMember(request.resource.data.tenantId);
+      allow delete: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
     }
     
     match /agenda_items/{itemId} {
-      allow create: if isTenantMember(request.resource.data.tenantId);
-      allow read, update: if isTenantMember(resource.data.tenantId);
-      allow delete: if isTenantMember(resource.data.tenantId);
+      allow read: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
+      allow create: if isSuperAdmin() || isTenantMember(request.resource.data.tenantId);
+      allow update: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
+      allow delete: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
     }
 
     match /conversations/{conversationId} {
-      allow read: if isTenantMember(resource.data.tenantId);
-      allow create: if isTenantMember(request.resource.data.tenantId);
-      allow update: if isTenantMember(resource.data.tenantId) 
-                   && isTenantMember(request.resource.data.tenantId);
+      allow read, create, update: if isTenantMember(resource.data.tenantId || request.resource.data.tenantId) || isSuperAdmin();
       
       match /messages/{messageId} {
-        allow read, write: if isTenantMember(get(/databases/$(database)/documents/conversations/$(conversationId)).data.tenantId);
+        allow read, write: if isTenantMember(get(/databases/$(database)/documents/conversations/$(conversationId)).data.tenantId) || isSuperAdmin();
       }
     }
     
     match /integrations/{integrationId} {
-      allow read: if isTenantAdmin(resource.data.tenantId);
-      allow create: if isTenantAdmin(request.resource.data.tenantId);
-      allow update: if isTenantAdmin(resource.data.tenantId) 
-                   && isTenantAdmin(request.resource.data.tenantId);
-      allow delete: if isTenantAdmin(resource.data.tenantId);
+      allow read, create, update, delete: if isTenantAdmin(resource.data.tenantId || request.resource.data.tenantId) || isSuperAdmin();
+    }
+
+    // Conexiones de marketing (Facebook Page Access Token, Instagram Business, Blog).
+    // Doc ID == tenantId. Solo Admin/Owner del tenant o SuperAdmin pueden leer/escribir.
+    // Antes estaba en settings/{tenantId}.marketingConnections, donde cualquier miembro
+    // (incluidos Asesor Comercial y Técnico) podía leer los Page Access Tokens.
+    match /marketing_connections/{tenantId} {
+      allow read, write: if isTenantAdmin(tenantId) || isSuperAdmin();
+    }
+
+    match /user_presence/{presenceId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
+      allow create: if isSuperAdmin() || isTenantMember(request.resource.data.tenantId);
+      allow update: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
+      allow delete: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
+    }
+
+    match /payment_requests/{requestId} {
+      allow read: if isAuthenticated() && (isTenantMember(resource.data.tenantId) || isSuperAdmin());
+      allow create, update: if isTenantMember(request.resource.data.tenantId || resource.data.tenantId) || isSuperAdmin();
+      allow delete: if isTenantAdmin(resource.data.tenantId) || isSuperAdmin();
+    }
+
+    match /admin_emails/{emailId} {
+      allow read, update, delete: if isSuperAdmin();
+      allow create: if isAuthenticated();
+    }
+
+    match /landing_blog_posts/{postId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // Colección interna de deduplicación de mensajes WhatsApp.
+    // Solo escribible por Cloud Functions vía Admin SDK — denegado a cualquier cliente.
+    match /whatsapp_message_dedup/{wamid} {
+      allow read, write: if false;
     }
   }
 }

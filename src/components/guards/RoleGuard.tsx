@@ -7,10 +7,15 @@ interface RoleGuardProps {
 }
 
 export const RoleGuard = ({ allowedRoles }: RoleGuardProps) => {
-  const { activeMembership } = useAuthStore();
+  const { activeMembership, user } = useAuthStore();
 
   if (!activeMembership) {
     return <Navigate to="/switch-tenant" replace />;
+  }
+
+  // SI ES SUPER ADMIN (EDUARDO), TIENE ACCESO TOTAL SIEMPRE
+  if (user?.isSuperAdmin) {
+    return <Outlet />;
   }
 
   if (!allowedRoles.includes(activeMembership.role)) {

@@ -11,6 +11,7 @@ interface ConversationState {
   errorInbox: string | null;
   errorMessages: string | null;
   
+  reset: () => void;
   setActiveConversation: (id: string | null) => void;
   subscribeInbox: (tenantId: string) => () => void;
   subscribeMessages: (conversationId: string) => () => void;
@@ -26,10 +27,12 @@ interface ConversationState {
     components?: any[]
   ) => Promise<void>;
   markAsRead: (conversationId: string) => Promise<void>;
+  assignAgent: (conversationId: string, advisorId: string) => Promise<void>;
+  toggleBot: (conversationId: string, enabled: boolean) => Promise<void>;
   seedConversations: (tenantId: string, advisorId: string) => Promise<void>;
 }
 
-export const useConversationStore = create<ConversationState>((set) => ({
+export const useConversationStore = create<ConversationState>((set, get) => ({
   conversations: [],
   activeConversation: null,
   activeMessages: [],
@@ -38,14 +41,26 @@ export const useConversationStore = create<ConversationState>((set) => ({
   errorInbox: null,
   errorMessages: null,
 
-  setActiveConversation: (id) => set({ 
+  reset: () => set({
+    conversations: [],
+    activeConversation: null,
+    activeMessages: [],
+    isLoadingInbox: false,
+    isLoadingMessages: false,
+    errorInbox: null,
+    errorMessages: null,
+  }),
+
+  setActiveConversation: (id) => set({
     activeConversation: id,
-    activeMessages: id ? [] : [], // Clear messages when switching or closing
+    activeMessages: [],
     errorMessages: null
   }),
 
   subscribeInbox: (tenantId) => {
-    set({ isLoadingInbox: true, errorInbox: null });
+    if (get().conversations.length === 0) {
+      set({ isLoadingInbox: true, errorInbox: null });
+    }
     return ConversationService.subscribeToInbox(tenantId, 
       (conversations) => {
         set({ conversations, isLoadingInbox: false });
@@ -69,11 +84,34 @@ export const useConversationStore = create<ConversationState>((set) => ({
   },
 
   sendMessage: async (conversationId, text, sender, tenantId, mediaUrl, mediaFilename, templateName, languageCode, components) => {
-    await ConversationService.sendMessage(conversationId, text, sender, tenantId, mediaUrl, mediaFilename, templateName, languageCode, components);
+    // Buscar la fuente en las conversaciones cargadas
+    const { conversations } = useConversationStore.getState();
+    const source = conversations.find(c => c.id === conversationId)?.source || 'whatsapp';
+    
+    await ConversationService.sendMessage(
+      conversationId, 
+      text, 
+      sender, 
+      tenantId, 
+      mediaUrl, 
+      mediaFilename, 
+      templateName, 
+      languageCode, 
+      components,
+      source
+    );
   },
 
   markAsRead: async (conversationId) => {
     await ConversationService.markAsRead(conversationId);
+  },
+  
+  assignAgent: async (conversationId, advisorId) => {
+    await ConversationService.assignAgent(conversationId, advisorId);
+  },
+
+  toggleBot: async (conversationId, enabled) => {
+    await ConversationService.toggleBot(conversationId, enabled);
   },
 
   seedConversations: async (tenantId, advisorId) => {

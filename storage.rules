@@ -8,26 +8,75 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    
-    // Función helper para tenant (si la data trae tenant)
-    // Para storage, el upload no envía custom metadata automáticamente a menos que lo configuremos.
-    // Requeriremos que estén logueados al menos.
 
+    // Cotizaciones PDF — solo usuarios autenticados, max 10MB, solo PDF.
+    // Nota: las Storage Rules no permiten consultar Firestore para validar membresia
+    // tenant a tenant. Por eso aqui solo se valida autenticacion + tipo MIME + tamano.
+    // Aislamiento tenant-a-tenant se complementa a nivel de aplicacion (Cloud Functions
+    // y Firestore) que controlan acceso a las URLs y referencias.
+    // Los enlaces compartidos via getDownloadURL llevan token y bypasean estas reglas,
+    // lo cual es el comportamiento esperado para enviar el PDF al cliente via WhatsApp.
     match /quotes/{tenantId}/{fileName} {
-      // Permitir escribir si está autenticado. Para estricto tenant check, firebase auth uid y custom claims idealmente. 
-      // Siendo MVP seguro, request.auth != null
-      allow write: if request.auth != null;
-      // Permitir lectura a cualquiera con la URL (aunque el token soluciona esto, dejémoslo accesible para Meta si lee el raw link)
-      allow read: if true; 
+      allow write: if request.auth != null
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType == 'application/pdf';
+      allow read: if request.auth != null;
     }
 
+    // Logos — lectura publica (se usan en PDFs, branding y previews externos).
     match /logos/{tenantId}/{fileName} {
-      // Solo imágenes, máximo 2MB
       allow write: if request.auth != null
                    && request.resource.size < 2 * 1024 * 1024
                    && request.resource.contentType.matches('image/.*');
-      // Lectura pública para renderizar en PDFs y branding
       allow read: if true;
+    }
+
+    // Catalogo de productos — lectura publica (cotizaciones, WhatsApp).
+    match /catalog/{tenantId}/{fileName} {
+      allow write: if request.auth != null
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow read: if true;
+    }
+
+    // Adjuntos admin — solo autenticados, max 10MB.
+    match /admin_attachments/{fileName} {
+      allow write: if request.auth != null && request.resource.size < 10 * 1024 * 1024;
+      allow read: if request.auth != null;
+    }
+
+    // Documentos de entrenamiento del Agente IA — solo autenticados, max 5MB,
+    // restringir tipos MIME comunes para evitar abuso de almacenamiento.
+    match /tenants/{tenantId}/ai-agent/{type}/{fileName} {
+      allow write: if request.auth != null
+                   && request.resource.size < 5 * 1024 * 1024
+                   && (
+                        request.resource.contentType == 'application/pdf'
+                     || request.resource.contentType == 'text/plain'
+                     || request.resource.contentType == 'application/json'
+                     || request.resource.contentType.matches('image/.*')
+                   );
+      allow read: if request.auth != null;
+    }
+
+    // Adjuntos de chat (asesor humano enviando archivos al cliente)
+    match /chat-attachments/{tenantId}/{fileName} {
+      allow write: if request.auth != null
+                   && request.resource.size < 20 * 1024 * 1024;
+      allow read: if true;
+    }
+
+    // Biblioteca de medios del Agente IA (archivos que el bot puede enviar)
+    match /media-library/{tenantId}/{fileName} {
+      allow write: if request.auth != null
+                   && request.resource.size < 20 * 1024 * 1024;
+      allow read: if true;
+    }
+
+    // Medios de WhatsApp entrantes (audio, imágenes) — solo escritura desde servidor (Admin SDK), lectura pública.
+    match /whatsapp-media/{tenantId}/{fileName} {
+      allow read: if true;
+      allow write: if false;
     }
 
     // Default deny

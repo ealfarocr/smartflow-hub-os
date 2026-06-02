@@ -123,7 +123,7 @@ export const AgendaModal = ({ isOpen, onClose, initialData, forcedLead }: Agenda
         </div>
         <div className="p-6 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-3 bg-slate-50 dark:bg-slate-900/50">
           <button onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">Cancelar</button>
-          <button type="submit" form="agenda-form" className="px-5 py-2.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors shadow-lg shadow-primary-500/30">
+          <button type="submit" form="agenda-form" className="px-5 py-2.5 text-sm font-medium text-white bg-[#1877F2] hover:bg-primary-700 rounded-lg transition-colors shadow-lg shadow-primary-500/30">
             {isEdit ? 'Guardar Cambios' : 'Guardar Actividad'}
           </button>
         </div>

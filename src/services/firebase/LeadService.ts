@@ -8,7 +8,8 @@ import {
   getDocs,
   orderBy,
   serverTimestamp,
-  addDoc
+  addDoc,
+  updateDoc
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Lead, CRMStage } from '@/types';
@@ -95,9 +96,10 @@ export const LeadService = {
 
       newDestLeads.forEach((l, idx) => {
         if (l.id === leadId) {
-          transaction.update(doc(db, 'leads', l.id), { 
-            stage: destStage, 
+          transaction.update(doc(db, 'leads', l.id), {
+            stage: destStage,
             orderIndex: idx,
+            lastActivity: new Date().toISOString(),
             updatedAt: serverTimestamp()
           });
         } else if (l.orderIndex !== idx) {
@@ -125,9 +127,21 @@ export const LeadService = {
    */
   seedSampleLeads: async (tenantId: string) => {
     const samples = [
-      { name: 'Juan Perez', phone: '5511223344', city: 'Ciudad de México', keyData: '$150,000 MX', stage: 'Nuevo', orderIndex: 0 },
-      { name: 'Maria Garcia', phone: '5566778899', city: 'Monterrey', keyData: '$85,000 MX', stage: 'Nuevo', orderIndex: 1 },
-      { name: 'Pedro Lopez', phone: '5544332211', city: 'Guadalajara', keyData: '$220,000 MX', stage: 'Seguimiento', orderIndex: 0 },
+      { 
+        name: 'Juan Perez', phone: '5511223344', city: 'Ciudad de México', keyData: '$150,000 MX', 
+        stage: 'Nuevo', orderIndex: 0,
+        aiPropensity: 92, aiSentiment: 'positive', aiNextStep: 'Enviar link de pago'
+      },
+      { 
+        name: 'Maria Garcia', phone: '5566778899', city: 'Monterrey', keyData: '$85,000 MX', 
+        stage: 'Nuevo', orderIndex: 1,
+        aiPropensity: 55, aiSentiment: 'neutral', aiNextStep: 'Enviar ficha técnica'
+      },
+      { 
+        name: 'Pedro Lopez', phone: '5544332211', city: 'Guadalajara', keyData: '$220,000 MX', 
+        stage: 'Seguimiento', orderIndex: 0,
+        aiPropensity: 22, aiSentiment: 'critical', aiIsCold: true, aiNextStep: 'Mensaje de recuperación'
+      },
     ];
 
     for (const s of samples) {
@@ -138,5 +152,25 @@ export const LeadService = {
         updatedAt: serverTimestamp()
       });
     }
+  },
+
+  /**
+   * Actualiza un lead por ID.
+   */
+  updateLead: async (leadId: string, data: Partial<Lead>) => {
+    const docRef = doc(db, 'leads', leadId);
+    await updateDoc(docRef, {
+      ...data,
+      updatedAt: serverTimestamp()
+    });
+  },
+
+  /**
+   * Elimina un lead por ID.
+   */
+  deleteLead: async (leadId: string) => {
+    const { deleteDoc } = await import('firebase/firestore');
+    const docRef = doc(db, 'leads', leadId);
+    await deleteDoc(docRef);
   }
 };

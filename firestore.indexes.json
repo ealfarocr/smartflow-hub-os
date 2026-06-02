@@ -49,6 +49,22 @@
         { "fieldPath": "sender", "order": "ASCENDING" },
         { "fieldPath": "timestamp", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "integrations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "platformId", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "integrations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tenantId", "order": "ASCENDING" },
+        { "fieldPath": "provider", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

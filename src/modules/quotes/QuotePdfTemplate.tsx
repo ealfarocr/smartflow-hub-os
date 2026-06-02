@@ -32,8 +32,20 @@ export const QuotePdfTemplate: React.FC<Props> = ({ quote, lead, settings }) => 
   const address = s?.company?.physicalAddress || '';
   const website = s?.company?.website || '';
   const taxRate = s?.commercial?.taxRatePercent ?? D.taxRate;
-  const currency = s?.commercial?.currency || D.currency;
+  const currency = quote.currency || s?.commercial?.currency || D.currency;
   const paymentTerms = s?.commercial?.defaultPaymentTerms || '';
+
+  const getCurrencySymbol = (currencyCode?: string) => {
+    switch (currencyCode) {
+      case 'CRC': return '₡';
+      case 'EUR': return '€';
+      case 'GBP': return '£';
+      case 'JPY': return '¥';
+      case 'CHF': return 'CHF';
+      case 'BRL': return 'R$';
+      default: return '$';
+    }
+  };
 
   // Light tint of primary for backgrounds (simple opacity approach via hex)
   const primaryLight = pc + '18'; // ~10% opacity
@@ -230,43 +242,66 @@ export const QuotePdfTemplate: React.FC<Props> = ({ quote, lead, settings }) => 
         <div style={{ backgroundColor: primaryLight, borderRadius: '12px', padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: `1px solid ${primaryMid}` }}>
           <div>
             <p style={{ fontSize: '14px', fontWeight: 600, color: sc, margin: 0 }}>Ahorro Bimestral Proyectado</p>
-            <p style={{ fontSize: '30px', fontWeight: 900, color: pc, marginTop: '4px', marginBottom: 0 }}>${quote.savingsEstimado?.toLocaleString('es-MX')} {currency}</p>
+            <p style={{ fontSize: '30px', fontWeight: 900, color: pc, marginTop: '4px', marginBottom: 0 }}>{getCurrencySymbol(currency)}{quote.savingsEstimado?.toLocaleString('es-MX')} {currency}</p>
           </div>
           <FileText size={64} color={primaryMid} />
         </div>
 
-        {/* Financial table */}
+        {/* Financial table (Itemized for Multi-niche) */}
         <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden' }}>
           <table style={{ width: '100%', fontSize: '14px', textAlign: 'left', borderCollapse: 'collapse' }}>
             <thead style={{ backgroundColor: '#f8fafc', color: '#64748b' }}>
               <tr>
-                <th style={{ padding: '16px 24px', fontWeight: 600, textTransform: 'uppercase', fontSize: '12px', letterSpacing: '1px' }}>Concepto</th>
-                <th style={{ padding: '16px 24px', fontWeight: 600, textTransform: 'uppercase', fontSize: '12px', letterSpacing: '1px', textAlign: 'right' }}>Monto</th>
+                <th style={{ padding: '16px 24px', fontWeight: 600, textTransform: 'uppercase', fontSize: '12px', letterSpacing: '1px' }}>Concepto / Partida</th>
+                <th style={{ padding: '16px 24px', fontWeight: 600, textTransform: 'uppercase', fontSize: '12px', letterSpacing: '1px', width: '100px', textAlign: 'center' }}>Cant.</th>
+                <th style={{ padding: '16px 24px', fontWeight: 600, textTransform: 'uppercase', fontSize: '12px', letterSpacing: '1px', width: '150px', textAlign: 'right' }}>Precio Unit.</th>
+                <th style={{ padding: '16px 24px', fontWeight: 600, textTransform: 'uppercase', fontSize: '12px', letterSpacing: '1px', width: '150px', textAlign: 'right' }}>Importe</th>
               </tr>
             </thead>
             <tbody>
-              <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                <td style={{ padding: '16px 24px', fontWeight: 500, color: '#0f172a' }}>Subtotal del Sistema</td>
-                <td style={{ padding: '16px 24px', fontWeight: 500, color: '#0f172a', textAlign: 'right' }}>${quote.subtotal?.toLocaleString('es-MX')}</td>
-              </tr>
-              {Number(quote.discount) > 0 && (
+              {quote.items && quote.items.length > 0 ? (
+                quote.items.map((item, idx) => (
+                  <tr key={item.id || idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                    <td style={{ padding: '16px 24px', fontWeight: 500, color: '#0f172a' }}>{item.description}</td>
+                    <td style={{ padding: '16px 24px', fontWeight: 500, color: '#0f172a', textAlign: 'center' }}>{item.quantity}</td>
+                    <td style={{ padding: '16px 24px', fontWeight: 500, color: '#0f172a', textAlign: 'right' }}>{getCurrencySymbol(currency)}{item.rate?.toLocaleString('es-MX')}</td>
+                    <td style={{ padding: '16px 24px', fontWeight: 600, color: '#0f172a', textAlign: 'right' }}>{getCurrencySymbol(currency)}{item.amount?.toLocaleString('es-MX')}</td>
+                  </tr>
+                ))
+              ) : (
                 <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                  <td style={{ padding: '16px 24px', fontWeight: 500, color: '#0f172a' }}>Descuento Comercial</td>
-                  <td style={{ padding: '16px 24px', fontWeight: 500, color: '#ef4444', textAlign: 'right' }}>-${quote.discount?.toLocaleString('es-MX')}</td>
+                  <td style={{ padding: '16px 24px', fontWeight: 500, color: '#0f172a' }}>{quote.systemRecommended || 'Servicio o Sistema Estándar'}</td>
+                  <td style={{ padding: '16px 24px', fontWeight: 500, color: '#0f172a', textAlign: 'center' }}>1</td>
+                  <td style={{ padding: '16px 24px', fontWeight: 500, color: '#0f172a', textAlign: 'right' }}>{getCurrencySymbol(currency)}{quote.subtotal?.toLocaleString('es-MX')}</td>
+                  <td style={{ padding: '16px 24px', fontWeight: 600, color: '#0f172a', textAlign: 'right' }}>{getCurrencySymbol(currency)}{quote.subtotal?.toLocaleString('es-MX')}</td>
                 </tr>
               )}
-              <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                <td style={{ padding: '16px 24px', fontWeight: 500, color: '#0f172a' }}>IVA ({taxRate}%)</td>
-                <td style={{ padding: '16px 24px', fontWeight: 500, color: '#0f172a', textAlign: 'right' }}>${quote.taxes?.toLocaleString('es-MX')}</td>
-              </tr>
             </tbody>
-            <tfoot style={{ backgroundColor: '#f8fafc' }}>
-              <tr>
-                <td style={{ padding: '24px', fontWeight: 700, fontSize: '18px', color: '#0f172a', textAlign: 'right' }}>INVERSIÓN TOTAL</td>
-                <td style={{ padding: '24px', fontWeight: 900, fontSize: '24px', color: pc, textAlign: 'right' }}>${quote.total?.toLocaleString('es-MX')} {currency}</td>
-              </tr>
-            </tfoot>
           </table>
+        </div>
+
+        {/* Totals Summary */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
+          <div style={{ width: '350px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#64748b' }}>
+              <span>Subtotal</span>
+              <span style={{ fontWeight: 600, color: '#0f172a' }}>{getCurrencySymbol(currency)}{quote.subtotal?.toLocaleString('es-MX')}</span>
+            </div>
+            {Number(quote.discount) > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#ef4444' }}>
+                <span>Descuento</span>
+                <span style={{ fontWeight: 600 }}>-{getCurrencySymbol(currency)}{quote.discount?.toLocaleString('es-MX')}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#64748b' }}>
+              <span>IVA ({taxRate}%)</span>
+              <span style={{ fontWeight: 600, color: '#0f172a' }}>{getCurrencySymbol(currency)}{quote.taxes?.toLocaleString('es-MX')}</span>
+            </div>
+            <div style={{ borderTop: '2px solid #e2e8f0', paddingTop: '12px', marginTop: '4px', display: 'flex', justifyContent: 'space-between', fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>
+              <span>Inversión Total</span>
+              <span style={{ fontSize: '20px', fontWeight: 900, color: pc }}>{getCurrencySymbol(currency)}{quote.total?.toLocaleString('es-MX')} {currency}</span>
+            </div>
+          </div>
         </div>
 
         {/* Terms + Payment terms */}

@@ -6,18 +6,27 @@ interface SettingsState extends TenantSettings {
   
   // Actions
   subscribe: (tenantId: string) => () => void;
-  updateSettings: (tenantId: string, settings: TenantSettings, userId?: string) => Promise<void>;
+  updateSettings: (tenantId: string, settings: Partial<TenantSettings>, userId?: string) => Promise<void>;
 }
 
 const defaultSettings: TenantSettings = {
   company: {
-    legalName: 'Paneles Solares MX',
+    legalName: 'SmartFlow Hub OS',
     tradeName: '',
     taxId: '',
     phone: '',
     email: '',
     physicalAddress: '',
     website: '',
+  },
+  aiAgentConfig: {
+    apiKey: '',
+    knowledgeFiles: [],
+    productFiles: [],
+  },
+  multiAgentConfig: {
+    isAutoDistributionEnabled: false,
+    includedUserIds: [],
   },
   branding: {
     logoUrl: '',
@@ -34,7 +43,7 @@ const defaultSettings: TenantSettings = {
     defaultPaymentTerms: '',
   },
   templates: {
-    welcomeMessage: 'Hola {{leadName}}, gracias por contactar a {{companyName}}. Con gusto podemos ayudarte a evaluar una solución de paneles solares para tu consumo. ¿Tienes a mano tu recibo eléctrico reciente?',
+    welcomeMessage: 'Hola {{leadName}}, gracias por contactar a {{companyName}}. Con gusto podemos brindarte información sobre nuestros servicios. ¿Cómo podemos ayudarte hoy?',
     quoteMessage: 'Hola {{leadName}}, te compartimos tu cotización {{quoteNumber}}. El ahorro estimado es de {{savings}} MXN. Puedes revisar la propuesta y decirnos si deseas agendar una visita técnica.',
     meetingReminder: 'Hola {{leadName}}, te recordamos nuestra reunión o visita técnica programada. Si necesitas ajustar el horario, puedes responder este mensaje.',
     followUpMessage: 'Hola {{leadName}}, ¿pudiste revisar la propuesta que te enviamos? Quedo al pendiente para resolver tus dudas o ayudarte con el siguiente paso.',
@@ -48,6 +57,24 @@ const defaultSettings: TenantSettings = {
       { id: 'perdido', label: 'Perdido', order: 4, color: '#ef4444', isDefault: false, isClosed: true },
     ],
   },
+  features: {
+    hasCrm: true,
+    hasQuotes: false,
+    hasPackages: false,
+    hasAgenda: false,
+    hasCatalog: false,
+    hasIntegrations: false,
+    hasAiAgent: false,
+    hasMultiAgent: false,
+    hasQualityAuditor: false,
+    hasPaymentLinks: false,
+  },
+  onboarding: {
+    dismissedNotificationIds: [],
+  },
+  tasks: {
+    sections: [],
+  },
   whatsappTemplates: [
     {
       id: 'tpl-1',
@@ -55,7 +82,7 @@ const defaultSettings: TenantSettings = {
       metaTemplateName: 'seguimiento_cotizacion_solar',
       category: 'UTILITY',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, te contactamos de {{2}} para dar seguimiento a tu cotización de paneles solares {{3}}. ¿Tienes alguna duda sobre la propuesta o te gustaría que revisemos juntos el siguiente paso?',
+      bodyPreview: 'Hola {{1}}, te contactamos de {{2}} para dar seguimiento a tu solicitud {{3}}. ¿Tienes alguna duda sobre la propuesta o te gustaría que revisemos juntos el siguiente paso?',
       variables: ['Nombre del cliente', 'Empresa', 'Número de cotización'],
       isActive: true,
     },
@@ -65,7 +92,7 @@ const defaultSettings: TenantSettings = {
       metaTemplateName: 'reactivacion_conversacion_solar',
       category: 'UTILITY',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, anteriormente nos contactaste en {{2}} para recibir información sobre paneles solares. Si aún deseas continuar, podemos ayudarte a retomar tu solicitud.',
+      bodyPreview: 'Hola {{1}}, anteriormente nos contactaste en {{2}} para recibir información. Si aún deseas continuar, podemos ayudarte a retomar tu solicitud.',
       variables: ['Nombre del cliente', 'Empresa'],
       isActive: true,
     },
@@ -105,7 +132,7 @@ const defaultSettings: TenantSettings = {
       metaTemplateName: 'solicitud_recibo_electrico',
       category: 'UTILITY',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, para preparar una propuesta más precisa de paneles solares con {{2}}, necesitamos revisar tu recibo eléctrico reciente. Puedes responder este mensaje adjuntando una imagen o PDF.',
+      bodyPreview: 'Hola {{1}}, para preparar una propuesta más precisa con {{2}}, necesitamos que nos compartas más información. Puedes responder este mensaje adjuntando una imagen o PDF.',
       variables: ['Nombre del cliente', 'Empresa'],
       isActive: true,
     },
@@ -125,7 +152,7 @@ const defaultSettings: TenantSettings = {
       metaTemplateName: 'propuesta_pendiente_revision_solar',
       category: 'UTILITY',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, te escribimos de {{2}} para confirmar si pudiste revisar la propuesta de paneles solares {{3}}. Si tienes dudas, podemos ayudarte a revisarla.',
+      bodyPreview: 'Hola {{1}}, te escribimos de {{2}} para confirmar si pudiste revisar nuestra propuesta {{3}}. Si tienes dudas, podemos ayudarte a revisarla.',
       variables: ['Nombre del cliente', 'Empresa', 'Número de cotización'],
       isActive: true,
     },
@@ -135,7 +162,7 @@ const defaultSettings: TenantSettings = {
       metaTemplateName: 'agendar_llamada_seguimiento_solar',
       category: 'UTILITY',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, podemos agendar una llamada breve con {{2}} para revisar tu cotización de paneles solares y resolver tus dudas. Indícanos qué horario te funciona mejor.',
+      bodyPreview: 'Hola {{1}}, podemos agendar una llamada breve con {{2}} para revisar tu propuesta y resolver tus dudas. Indícanos qué horario te funciona mejor.',
       variables: ['Nombre del cliente', 'Empresa'],
       isActive: true,
     },
@@ -155,7 +182,7 @@ const defaultSettings: TenantSettings = {
       metaTemplateName: 'beneficios_energia_solar',
       category: 'MARKETING',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, en {{2}} podemos ayudarte a evaluar si un sistema de paneles solares se adapta a tu consumo eléctrico. Si te interesa, podemos revisar tu caso y orientarte con una propuesta.',
+      bodyPreview: 'Hola {{1}}, en {{2}} podemos ayudarte con nuestros servicios. Si te interesa, podemos revisar tu caso y orientarte con una propuesta.',
       variables: ['Nombre del cliente', 'Empresa'],
       isActive: true,
     },
@@ -172,20 +199,30 @@ const defaultSettings: TenantSettings = {
   ],
 };
 
+// Listener activo — se cancela antes de crear uno nuevo para evitar race conditions
+let _activeSettingsUnsub: (() => void) | null = null;
+
 export const useSettingsStore = create<SettingsState>((set) => ({
   ...defaultSettings,
   isLoading: true,
-  
+
   subscribe: (tenantId) => {
+    // Cancelar listener anterior antes de suscribir al nuevo tenant
+    if (_activeSettingsUnsub) {
+      _activeSettingsUnsub();
+      _activeSettingsUnsub = null;
+    }
     set({ isLoading: true });
+
     const unsubscribe = SettingsService.subscribeToSettings(tenantId, (settings) => {
       if (settings) {
         set({ ...settings, isLoading: false });
       } else {
-        // Si no existe, usamos los defaults pero ya no estamos cargando
         set({ ...defaultSettings, isLoading: false });
       }
     });
+
+    _activeSettingsUnsub = unsubscribe;
     return unsubscribe;
   },
   

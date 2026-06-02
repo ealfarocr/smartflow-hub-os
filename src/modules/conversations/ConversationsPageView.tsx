@@ -2,68 +2,91 @@ import { useEffect, useRef, useState } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { useSearchParams } from 'react-router-dom';
+import { useLeadStore } from '@/stores/leadStore';
+import { MessageSquare } from 'lucide-react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useWhatsappWindow } from '@/hooks/useWhatsappWindow';
 import {
   Search, Send, Phone, MoreVertical, UserCircle,
   MessageSquareText, Loader2, CheckCheck, AlertCircle,
-  Clock, FileText, X, LayoutTemplate
+  LayoutTemplate, ArrowLeft, Zap, CreditCard,
+  Camera, Globe, Sparkles, UserPlus, Package,
+  FileText, Download, X, Bot, Settings2, Paperclip, Mic, Play,
 } from 'lucide-react';
+import { useTeam } from '@/hooks/useTeam';
+import { CreatePaymentLinkModal } from '@/modules/payments/CreatePaymentLinkModal';
 import { WhatsappWindowBadge } from './WhatsappWindowBadge';
 import { WhatsappWindowBanner, WhatsappWindowHint } from './WhatsappWindowBanner';
 import { TemplateSelector, TemplateComponent } from './TemplateSelector';
-import { WhatsappTemplate } from '@/types';
+import { WhatsappUsageStats } from './WhatsappUsageStats';
+import { TemplateCreditsModal } from './TemplateCreditsModal';
+import { WhatsappTemplate, TenantRecord, WhatsappQuota, CatalogItem } from '@/types';
+import { useUIStore } from '@/stores/uiStore';
+import { TenantService } from '@/services/firebase/TenantService';
+import { WhatsappConnectionModal } from './WhatsappConnectionModal';
+import { CatalogService } from '@/services/firebase/CatalogService';
 
 export const ConversationsPageView = () => {
   const {
-    conversations,
-    activeConversation,
-    activeMessages,
-    setActiveConversation,
-    subscribeInbox,
-    subscribeMessages,
-    sendMessage,
-    markAsRead,
-    seedConversations,
-    isLoadingInbox,
-    isLoadingMessages,
-    errorInbox,
-    errorMessages
+    conversations, activeConversation, activeMessages,
+    setActiveConversation, subscribeInbox, subscribeMessages,
+    sendMessage, markAsRead, assignAgent, toggleBot, isLoadingInbox
   } = useConversationStore();
-  const { activeMembership, user } = useAuthStore();
-  const { whatsappTemplates } = useSettingsStore();
-  const [inputText, setInputText] = useState('');
-  const [isSeeding, setIsSeeding] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [searchParams] = useSearchParams();
-  const leadIdQuery = searchParams.get('leadId');
-  const draftMessageQuery = searchParams.get('draftMessage');
-  const mediaUrlQuery = searchParams.get('mediaUrl');
-  const mediaFilenameQuery = searchParams.get('mediaFilename');
-  const hasLoadedDraft = useRef(false);
-  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
-  const [mediaFilename, setMediaFilename] = useState<string | null>(null);
-  const [leadNotFoundWarning, setLeadNotFoundWarning] = useState(false);
-  const [showTemplateSelector, setShowTemplateSelector] = useState(false);
+  const { activeMembership } = useAuthStore();
+  const { whatsappTemplates, templates: quickTemplates, company } = useSettingsStore();
+  const { leads } = useLeadStore();
+  const [showQuickTemplates, setShowQuickTemplates] = useState(false);
+  const { addToast } = useUIStore();
 
-  // ─── Ventana WhatsApp 24h ──────────────────────────────────────────────────
-  const windowInfo = useWhatsappWindow(activeMessages);
+  const [inputText, setInputText]   = useState('');
+  const [isSending, setIsSending]   = useState(false);
+  const messagesEndRef               = useRef<HTMLDivElement>(null);
+  const [searchParams]               = useSearchParams();
+  const navigate                     = useNavigate();
+  const leadIdQuery                  = searchParams.get('leadId');
+  const draftMessageQuery            = searchParams.get('draftMessage');
+  const mediaUrlQuery                = searchParams.get('mediaUrl');
+  const mediaFilenameQuery           = searchParams.get('mediaFilename');
+  const hasLoadedDraft               = useRef(false);
+  const [mediaUrl, setMediaUrl]             = useState<string | null>(null);
+  const [mediaFilename, setMediaFilename]   = useState<string | null>(null);
+  const [showTemplateSelector, setShowTemplateSelector] = useState(false);
+  const [showConnectionModal, setShowConnectionModal]   = useState(false);
+  const [tenantData, setTenantData]                     = useState<TenantRecord | null>(null);
+  const [search, setSearch]                             = useState('');
+
+  const defaultQuota: WhatsappQuota = {
+    dailyTemplatesTotal: 10, dailyTemplatesUsed: 0,
+    monthlyTemplatesTotal: 300, monthlyTemplatesUsed: 0,
+    maxTemplateSlots: 10, currentTemplateSlots: 0,
+  };
+  const activeQuota = tenantData?.whatsappQuota || defaultQuota;
+
+  const { team }     = useTeam(activeMembership?.tenantId);
+  const windowInfo   = useWhatsappWindow(activeMessages);
   const isWindowExpired = windowInfo.status === 'expired';
 
-  // ─── Lead query redirect ───────────────────────────────────────────────────
+  const [showCreditsModal, setShowCreditsModal]   = useState(false);
+  const [showPaymentModal, setShowPaymentModal]   = useState(false);
+  const [showCatalogDrawer, setShowCatalogDrawer] = useState(false);
+  const [catalogItems, setCatalogItems]           = useState<CatalogItem[]>([]);
+  const [catalogSearch, setCatalogSearch]         = useState('');
+  const [selectedCatalogItemForPayment, setSelectedCatalogItemForPayment] = useState<CatalogItem | null>(null);
+  const [isUploading, setIsUploading]             = useState(false);
+  const fileInputRef                              = useRef<HTMLInputElement>(null);
+  const audioFileInputRef                         = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!activeMembership?.tenantId) return;
+    const u1 = CatalogService.subscribeToCatalog(activeMembership.tenantId, setCatalogItems);
+    const u2 = TenantService.subscribeToTenant(activeMembership.tenantId, setTenantData);
+    return () => { u1(); u2(); };
+  }, [activeMembership?.tenantId]);
+
   useEffect(() => {
     if (leadIdQuery && conversations.length > 0 && !isLoadingInbox) {
       const conv = conversations.find(c => c.leadId === leadIdQuery);
-      if (conv) {
-        if (conv.id !== activeConversation) {
-          setActiveConversation(conv.id);
-        }
-        setLeadNotFoundWarning(false);
-      } else {
-        setLeadNotFoundWarning(true);
-      }
+      if (conv && conv.id !== activeConversation) setActiveConversation(conv.id);
     }
   }, [leadIdQuery, conversations, activeConversation, setActiveConversation, isLoadingInbox]);
 
@@ -72,7 +95,7 @@ export const ConversationsPageView = () => {
   useEffect(() => {
     if (draftMessageQuery && activeChat && !hasLoadedDraft.current) {
       setInputText(draftMessageQuery);
-      if (mediaUrlQuery) setMediaUrl(mediaUrlQuery);
+      if (mediaUrlQuery)    setMediaUrl(mediaUrlQuery);
       if (mediaFilenameQuery) setMediaFilename(mediaFilenameQuery);
       hasLoadedDraft.current = true;
     }
@@ -80,362 +103,617 @@ export const ConversationsPageView = () => {
 
   useEffect(() => {
     if (activeMembership?.tenantId) {
-      const unsubscribe = subscribeInbox(activeMembership.tenantId);
-      return () => unsubscribe();
+      const u = subscribeInbox(activeMembership.tenantId);
+      return () => u();
     }
   }, [activeMembership?.tenantId, subscribeInbox]);
 
   useEffect(() => {
-    if (activeConversation) {
-      const unsubscribe = subscribeMessages(activeConversation);
-      const activeChat = conversations.find(c => c.id === activeConversation);
-      if (activeChat && activeChat.unreadCount > 0) {
-        markAsRead(activeConversation);
-      }
-      return () => unsubscribe();
-    }
-  }, [activeConversation, subscribeMessages, conversations.find(c => c.id === activeConversation)?.unreadCount]);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+    if (!activeConversation) return;
+    const u = subscribeMessages(activeConversation);
+    const cur = conversations.find(c => c.id === activeConversation);
+    if (cur && cur.unreadCount > 0) markAsRead(activeConversation);
+    return () => u();
+  }, [activeConversation, subscribeMessages, conversations, markAsRead]);
 
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeMessages]);
 
-  // ─── Send free message ─────────────────────────────────────────────────────
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeConversation || !activeMembership?.tenantId || isSending) return;
-
-    const cleanText = inputText
-      .replace(/[\u200B-\u200D\uFEFF]/g, '')
-      .replace(/\r\n/g, '\n')
-      .trim();
-
+    const cleanText = inputText.replace(/[​-‍﻿]/g, '').replace(/\r\n/g, '\n').trim();
     if (!cleanText && !mediaUrl) return;
-
     setIsSending(true);
-    setSendError(null);
     try {
       await sendMessage(activeConversation, cleanText, 'advisor', activeMembership.tenantId, mediaUrl, mediaFilename);
-      setInputText('');
-      setMediaUrl(null);
-      setMediaFilename(null);
-    } catch (error: any) {
-      console.error('Error enviando mensaje:', error);
-      const code = error?.code || '';
-      const msg = error?.message || '';
+      setInputText(''); setMediaUrl(null); setMediaFilename(null);
+    } catch { addToast('Error al enviar mensaje', 'error'); }
+    finally { setIsSending(false); }
+  };
 
-      if (code.includes('failed-precondition') || msg.toLowerCase().includes('index')) {
-        setSendError('Error de infraestructura: Falta un índice de Firestore. Contacta al administrador.');
-      } else if (code.includes('deadline-exceeded') || msg.includes('24 horas')) {
-        setSendError('Ventana de 24h vencida. Usa una plantilla aprobada.');
-      } else if (code.includes('unauthenticated')) {
-        setSendError('Tu sesión expiró. Recarga la página e inicia sesión de nuevo.');
-      } else if (code.includes('permission-denied')) {
-        setSendError('No tienes permisos para enviar mensajes en este tenant.');
-      } else if (code.includes('not-found')) {
-        setSendError('Conversación no encontrada. Es posible que haya sido eliminada.');
-      } else if (msg) {
-        setSendError(msg);
-      } else {
-        setSendError('Error interno al enviar el mensaje. Revisa la consola para más detalles.');
-      }
+  const handleSendTemplate = async (template: WhatsappTemplate, components: TemplateComponent[]) => {
+    if (!activeConversation || !activeMembership?.tenantId) return;
+    await sendMessage(activeConversation, `[Plantilla: ${template.name}]`, 'advisor',
+      activeMembership.tenantId, null, null, template.metaTemplateName, template.languageCode, components);
+  };
+
+  const handleFileUpload = async (file: File) => {
+    if (!activeMembership?.tenantId) return;
+    setIsUploading(true);
+    try {
+      const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+      const { storage } = await import('@/lib/firebase');
+      const path = `chat-attachments/${activeMembership.tenantId}/${Date.now()}-${file.name}`;
+      const storageRef = ref(storage, path);
+      await uploadBytes(storageRef, file, { contentType: file.type });
+      const url = await getDownloadURL(storageRef);
+      setMediaUrl(url);
+      setMediaFilename(file.name);
+    } catch {
+      addToast('Error al subir archivo', 'error');
     } finally {
-      setIsSending(false);
+      setIsUploading(false);
     }
   };
 
-  // ─── Send template ─────────────────────────────────────────────────────────
-  const handleSendTemplate = async (template: WhatsappTemplate, components: TemplateComponent[]) => {
-    if (!activeConversation || !activeMembership?.tenantId) return;
-    await sendMessage(
-      activeConversation,
-      `[Plantilla: ${template.name}]`,
-      'advisor',
-      activeMembership.tenantId,
-      null,
-      null,
-      template.metaTemplateName,
-      template.languageCode,
-      components
+  const getSourceIcon = (source: string) => {
+    if (source === 'instagram') return <Camera className="w-3.5 h-3.5 text-pink-500" />;
+    if (source === 'facebook')  return <Globe className="w-3.5 h-3.5 text-blue-600" />;
+    return (
+      <div className="flex items-center gap-1">
+        <Phone className="w-3.5 h-3.5 text-emerald-500" />
+        <span className="text-[7px] font-black bg-emerald-500/10 text-emerald-600 px-1 rounded uppercase tracking-tighter">Business</span>
+      </div>
     );
   };
 
-  const handleSeed = async () => {
-    if (!activeMembership?.tenantId || !user?.id) return;
-    setIsSeeding(true);
-    try {
-      await seedConversations(activeMembership.tenantId, user.id);
-    } finally {
-      setIsSeeding(false);
-    }
-  };
+  const scoreColor = (s: number) => s > 70 ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
+    : s > 30 ? 'text-amber-600 bg-amber-50 border-amber-200'
+    : 'text-red-600 bg-red-50 border-red-200';
+
+  const filteredConvs = conversations.filter(c =>
+    c.contactName?.toLowerCase().includes(search.toLowerCase()) ||
+    c.lastMessage?.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
-    <div className="h-[calc(100vh-8rem)] bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex overflow-hidden">
+    <div className="h-[calc(100dvh-4rem)] md:h-[calc(100vh-8rem)] flex overflow-hidden rounded-2xl shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
 
-      {/* ─── Sidebar de Chats ─────────────────────────────────────────────────── */}
-      <div className="w-80 border-r border-slate-200 dark:border-slate-700 flex flex-col bg-slate-50 dark:bg-slate-800/50">
-        <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+      {/* ── Sidebar ── */}
+      <div className={`${activeChat ? 'hidden md:flex' : 'flex'} w-full md:w-72 flex-col border-r border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900`}>
+
+        {/* Sidebar header */}
+        <div className="px-4 pt-4 pb-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">WhatsApp Business</span>
+            </div>
+            <button onClick={() => setShowConnectionModal(true)}
+              className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors" title="Configurar">
+              <Settings2 className="w-3.5 h-3.5 text-slate-400" />
+            </button>
+          </div>
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
             <input
-              type="text"
+              type="text" value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Buscar conversación..."
-              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium outline-none focus:border-[#1877F2]/50 transition-colors"
             />
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto relative">
+
+        {/* Conversation list */}
+        <div className="flex-1 overflow-y-auto scrollbar-hide">
           {isLoadingInbox && (
-            <div className="absolute inset-0 bg-white/50 dark:bg-slate-900/50 flex items-center justify-center z-10">
-              <Loader2 className="w-6 h-6 text-primary-500 animate-spin" />
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-5 h-5 text-[#1877F2] animate-spin" />
             </div>
           )}
-          {conversations.length === 0 && !isLoadingInbox && (
-            <div className="p-8 text-center">
-              <p className="text-slate-500 text-sm italic mb-4">No hay conversaciones activas</p>
-              <button
-                onClick={handleSeed}
-                disabled={isSeeding}
-                className="text-xs font-semibold text-primary-600 hover:text-primary-700 bg-primary-50 dark:bg-primary-900/20 px-3 py-1.5 rounded-full transition-colors flex items-center justify-center mx-auto"
-              >
-                {isSeeding ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <MessageSquareText className="w-3 h-3 mr-2" />}
-                Cargar Chats de Prueba
-              </button>
+          {filteredConvs.length === 0 && !isLoadingInbox && (
+            <div className="px-4 py-10 text-center">
+              <MessageSquareText className="w-8 h-8 text-slate-200 dark:text-slate-700 mx-auto mb-2" />
+              <p className="text-xs text-slate-400">Sin conversaciones</p>
             </div>
           )}
-          {errorInbox && (
-            <div className="p-4 bg-red-50 dark:bg-red-900/20 border-b border-red-100 dark:border-red-800">
-              <div className="flex items-center text-red-600 dark:text-red-400 text-xs font-medium">
-                <AlertCircle className="w-4 h-4 mr-2 shrink-0" />
-                <span>Error: {errorInbox.includes('index') ? 'Índice faltante' : errorInbox}</span>
-              </div>
-            </div>
-          )}
-          {conversations.map(conv => (
-            <div
-              key={conv.id}
-              onClick={() => setActiveConversation(conv.id)}
-              className={`p-4 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border-b border-slate-100 dark:border-slate-700/50 ${
-                activeConversation === conv.id ? 'bg-primary-50 dark:bg-primary-900/20' : ''
+          {filteredConvs.map(conv => {
+            const unread = (conv.unreadCount || 0) > 0;
+            const lead = leads.find(l => l.id === conv.leadId);
+            const leadStage = lead?.stage || '';
+            const isSeguimiento = leadStage === 'Seguimiento';
+            const isAgendado = leadStage === 'Agendado';
+            return (
+            <div key={conv.id} onClick={() => setActiveConversation(conv.id)}
+              className={`px-4 py-3 cursor-pointer border-b border-slate-100 dark:border-slate-700/50 transition-all ${
+                activeConversation === conv.id
+                  ? 'bg-[#1877F2]/8 border-l-2 border-l-[#1877F2]'
+                  : unread
+                    ? 'bg-white dark:bg-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800 border-l-2 border-l-[#1877F2]'
+                    : 'hover:bg-white dark:hover:bg-slate-800 border-l-2 border-l-transparent'
               }`}
             >
-              <div className="flex justify-between items-start mb-1">
-                <span className="font-medium text-slate-900 dark:text-slate-100 truncate mr-2">{conv.contactName}</span>
-                <div className="flex flex-col items-end shrink-0 gap-1">
-                  <span className="text-xs text-slate-500">
-                    {conv.lastMessageDate ? new Date(conv.lastMessageDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
-                  </span>
-                  {conv.unreadCount > 0 && (
-                    <span className="bg-primary-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[1.2rem] text-center">
-                      {conv.unreadCount}
+              <div className="flex items-start gap-2.5">
+                <div className="relative shrink-0 mt-0.5">
+                  <div className="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center">
+                    <UserCircle className="w-5 h-5 text-slate-400" />
+                  </div>
+                  {conv.aiSentiment && (
+                    <span className="absolute -top-1 -right-1 text-[10px] leading-none">
+                      {conv.aiSentiment === 'positive' ? '😊' : conv.aiSentiment === 'critical' ? '😡' : '😐'}
                     </span>
                   )}
                 </div>
-              </div>
-              <p className="text-sm text-slate-500 dark:text-slate-400 truncate flex items-center mb-1.5">
-                {conv.lastMessageSender === 'advisor' && <span className="mr-1 text-[10px] opacity-50">Tú:</span>}
-                {conv.lastMessage || 'Nuevo chat'}
-              </p>
-              {/* ← Badge ventana WhatsApp */}
-              <WhatsappWindowBadge
-                lastInboundDate={
-                  // Prefer dedicated lastInboundDate; fall back to lastMessageDate if last sender was lead
-                  conv.lastInboundDate ||
-                  (conv.lastMessageSender === 'lead' ? conv.lastMessageDate : null)
-                }
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ─── Panel Principal ──────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col bg-[#efeae2] dark:bg-[#0b141a]">
-        {activeChat ? (
-          <>
-            {/* Header del Chat */}
-            <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3 shrink-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <UserCircle className="h-10 w-10 text-slate-400 mr-3 shrink-0" />
-                  <div>
-                    <h2 className="font-semibold text-slate-800 dark:text-slate-100">{activeChat.contactName}</h2>
-                    <p className="text-xs text-slate-500">{activeChat.phoneE164 || activeChat.phoneRaw}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  {/* ← Banner ventana WhatsApp */}
-                  {!isLoadingMessages && (
-                    <WhatsappWindowBanner windowInfo={windowInfo} />
-                  )}
-                  <button className="text-slate-500 hover:text-primary-600 transition-colors">
-                    <Phone className="h-5 w-5" />
-                  </button>
-                  <button className="text-slate-500 hover:text-primary-600 transition-colors">
-                    <MoreVertical className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Mensajes */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 relative">
-              {errorMessages && (
-                <div className="absolute inset-x-0 top-0 p-4 bg-red-50/90 dark:bg-red-900/40 backdrop-blur-sm z-20 flex items-center justify-center border-b border-red-100 dark:border-red-800">
-                  <AlertCircle className="w-5 h-5 text-red-500 mr-2" />
-                  <p className="text-xs text-red-700 dark:text-red-300 font-medium">
-                    {errorMessages.includes('index') ? 'Error al cargar mensajes: Falta índice compuesto.' : errorMessages}
-                  </p>
-                </div>
-              )}
-              {isLoadingMessages && (
-                <div className="absolute inset-0 bg-[#efeae2]/50 dark:bg-[#0b141a]/50 flex items-center justify-center z-10">
-                  <Loader2 className="w-10 h-10 text-primary-500 animate-spin" />
-                </div>
-              )}
-              {activeMessages.map(msg => (
-                <div key={msg.id} className={`flex ${msg.sender === 'advisor' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[70%] rounded-lg p-3 relative ${
-                    msg.sender === 'advisor'
-                      ? 'bg-[#d9fdd3] dark:bg-[#005c4b] text-slate-900 dark:text-slate-100 rounded-tr-none shadow-sm'
-                      : 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-tl-none shadow-sm'
-                  }`}>
-                    <p className="text-sm">{msg.text}</p>
-                    {msg.status === 'failed' && (
-                      <p className="text-[10px] text-red-500 mt-1 flex items-center">
-                        <AlertCircle className="w-3 h-3 mr-1" />
-                        {msg.errorMessage || 'Error de envío'}
-                      </p>
-                    )}
-                    <div className="flex justify-end items-center space-x-1 mt-1">
-                      <span className="text-[10px] text-slate-500">
-                        {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className={`text-sm truncate max-w-[115px] ${
+                      unread
+                        ? 'font-black text-slate-900 dark:text-white'
+                        : 'font-medium text-slate-500 dark:text-slate-400'
+                    }`}>{conv.contactName}</span>
+                    <div className="flex items-center gap-1 shrink-0 ml-1">
+                      {unread && (
+                        <span className="min-w-[18px] h-[18px] px-1 bg-[#1877F2] text-white text-[10px] font-black rounded-full flex items-center justify-center">
+                          {conv.unreadCount > 9 ? '9+' : conv.unreadCount}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-slate-400">
+                        {conv.lastMessageDate ? new Date(conv.lastMessageDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                       </span>
-                      {msg.sender === 'advisor' && (
-                        <span className="text-slate-400">
-                          {msg.status === 'sent' && <CheckCheck className="w-3 h-3 text-primary-500" />}
-                          {(msg.status === 'pending' || !msg.status) && <Clock className="w-3 h-3" />}
-                          {msg.status === 'failed' && <AlertCircle className="w-3 h-3 text-red-500" />}
+                    </div>
+                  </div>
+                  <p className={`text-xs truncate leading-relaxed ${
+                    unread ? 'text-slate-700 dark:text-slate-200 font-semibold' : 'text-slate-400'
+                  }`}>{conv.lastMessage || 'Nuevo chat'}</p>
+                  <div className="flex items-center justify-between mt-1.5">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <WhatsappWindowBadge lastInboundDate={conv.lastInboundDate || (conv.lastMessageSender === 'lead' ? conv.lastMessageDate : null)} />
+                      {isSeguimiento && (
+                        <span className="text-[8px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">
+                          Seguimiento
+                        </span>
+                      )}
+                      {isAgendado && (
+                        <span className="text-[8px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
+                          Agendado
                         </span>
                       )}
                     </div>
+                    {conv.advisorId && (
+                      <span className="text-[9px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full shrink-0">
+                        {team.find(m => m.userId === conv.advisorId)?.name?.split(' ')[0] || 'Agente'}
+                      </span>
+                    )}
                   </div>
+                </div>
+              </div>
+            </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Chat area ── */}
+      <div className={`${!activeChat ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#f0f2f5] dark:bg-[#0b141a] w-full md:w-auto overflow-hidden`}>
+        {activeChat ? (
+          <>
+            {/* Chat header */}
+            <div className="bg-white dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 px-5 py-3 shrink-0 shadow-sm">
+              <div className="flex items-center gap-4">
+                <button onClick={() => setActiveConversation('')} className="md:hidden text-slate-400 hover:text-slate-600">
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+
+                {/* Avatar + info */}
+                <div className="relative shrink-0">
+                  <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+                    <UserCircle className="w-7 h-7 text-slate-300" />
+                  </div>
+                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white dark:border-slate-800 rounded-full" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-black text-slate-900 dark:text-white text-sm truncate">{activeChat.contactName}</h2>
+                    {getSourceIcon(activeChat.source)}
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    {activeChat.source === 'whatsapp' ? activeChat.phoneE164 : activeChat.source === 'instagram' ? 'Instagram DM' : 'Messenger'}
+                  </p>
+                </div>
+
+                {/* Assign agent */}
+                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl shrink-0">
+                  <UserPlus className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <select
+                    value={activeChat.advisorId || ''}
+                    onChange={e => assignAgent(activeChat.id, e.target.value)}
+                    className="bg-transparent text-[10px] font-bold text-slate-600 dark:text-slate-400 outline-none cursor-pointer max-w-[90px]"
+                  >
+                    <option value="">Sin asignar</option>
+                    {team.map(m => (
+                      <option key={m.userId} value={m.userId || ''}>{m.name || m.email}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Lead Score */}
+                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-black shrink-0 ${scoreColor(activeChat.aiScore || 0)}`}>
+                  <Zap className="w-3.5 h-3.5 fill-current" />
+                  <span>{activeChat.aiScore || 0}</span>
+                </div>
+
+                {/* Window badge */}
+                <WhatsappWindowBanner windowInfo={windowInfo} />
+
+                {/* Action buttons */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => {
+                      const phone = activeChat.phoneRaw || activeChat.phoneE164;
+                      phone ? window.open(`tel:${phone}`, '_self') : addToast('Sin número válido', 'error');
+                    }}
+                    className="flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl hover:bg-blue-50 text-[#1877F2] transition-colors" title="Llamar">
+                    <Phone className="w-4 h-4" />
+                    <span className="text-[8px] font-black">Llamar</span>
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const on = !(activeChat as any).botEnabled;
+                      await toggleBot(activeChat.id, on);
+                      addToast(on ? '🤖 Bot activado' : '👤 Bot desactivado', 'success');
+                    }}
+                    className={`flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl transition-colors ${
+                      (activeChat as any).botEnabled ? 'bg-emerald-50 text-emerald-600' : 'hover:bg-slate-100 text-slate-400'
+                    }`} title="Bot IA">
+                    <Bot className="w-4 h-4" />
+                    <span className="text-[8px] font-black">{(activeChat as any).botEnabled ? 'Bot ON' : 'Bot OFF'}</span>
+                  </button>
+                  <button
+                    onClick={() => addToast(`${activeChat.contactName} · ${activeChat.phoneE164 || 'Sin número'}`, 'info')}
+                    className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors" title="Opciones">
+                    <MoreVertical className="w-4 h-4" />
+                    <span className="text-[8px] font-black">Más</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3 scrollbar-hide">
+              {activeMessages.map(msg => (
+                <div key={msg.id} className={`flex flex-col ${msg.sender === 'advisor' ? 'items-end' : 'items-start'}`}>
+                  <div className={`max-w-[72%] rounded-2xl px-4 py-3 shadow-sm ${
+                    msg.sender === 'advisor'
+                      ? 'bg-[#d9fdd3] dark:bg-[#005c4b] text-slate-900 dark:text-white rounded-tr-none'
+                      : 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-tl-none'
+                  }`}>
+                    {msg.type === 'audio' ? (
+                      msg.mediaUrl ? (
+                        <div className="mb-1 min-w-[230px]">
+                          {/* Reproductor nativo con múltiples formatos */}
+                          <audio controls preload="metadata" className="w-full rounded-xl" style={{ height: '42px', minWidth: '230px' }}>
+                            <source src={msg.mediaUrl} type="audio/ogg; codecs=opus" />
+                            <source src={msg.mediaUrl} type="audio/mp4" />
+                            <source src={msg.mediaUrl} type="audio/mpeg" />
+                            <source src={msg.mediaUrl} />
+                          </audio>
+                          <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 mt-1 text-[10px] text-slate-400 hover:text-[#1877F2] transition-colors">
+                            <Download className="w-3 h-3" /> Descargar audio
+                          </a>
+                        </div>
+                      ) : (
+                        <div className="mb-1 flex items-center gap-2 bg-slate-100 dark:bg-slate-700 rounded-xl px-3 py-2 min-w-[160px]">
+                          <div className="w-7 h-7 rounded-full bg-slate-300 dark:bg-slate-600 flex items-center justify-center shrink-0">
+                            <Mic className="w-3.5 h-3.5 text-slate-500" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Mensaje de voz</p>
+                            <p className="text-[10px] text-slate-400">procesando...</p>
+                          </div>
+                        </div>
+                      )
+                    ) : msg.mediaUrl && (msg.type === 'image' || msg.text?.includes('[Imagen Enviada]')) ? (
+                      <div className="mb-2 rounded-xl overflow-hidden max-h-56 border border-black/5">
+                        <img src={msg.mediaUrl} alt="adjunto" className="w-full h-full object-cover cursor-pointer"
+                          onClick={() => window.open(msg.mediaUrl, '_blank')} />
+                      </div>
+                    ) : msg.mediaUrl ? (
+                      <div className="mb-2 flex items-center gap-2 p-2.5 bg-black/5 dark:bg-white/5 rounded-xl">
+                        <FileText className="w-4 h-4 text-red-500 shrink-0" />
+                        <p className="text-xs font-bold flex-1 truncate">Documento adjunto</p>
+                        <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer"
+                          className="p-1.5 bg-white dark:bg-slate-700 rounded-lg shadow-sm">
+                          <Download className="w-3.5 h-3.5 text-slate-500" />
+                        </a>
+                      </div>
+                    ) : null}
+                    {(msg.type !== 'audio' || !msg.mediaUrl) && (
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                        {msg.text?.replace(/^\[Imagen Enviada\]\n/, '').replace(/^\[Documento Enviado:.*?\]\n/, '').replace(/^\[Error al enviar.*?\]\n/, '')}
+                      </p>
+                    )}
+                    <div className="flex justify-end items-center gap-1 mt-1.5 opacity-40">
+                      <span className="text-[10px]">
+                        {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+                      </span>
+                      {msg.sender === 'advisor' && <CheckCheck className="w-3.5 h-3.5 text-[#1877F2]" />}
+                    </div>
+                  </div>
+                  {msg.aiCoachingTip && (
+                    <div className="mt-1 flex items-center gap-1.5 px-3 py-1 bg-amber-50 dark:bg-amber-900/20 border border-amber-100 rounded-full">
+                      <Sparkles className="w-3 h-3 text-amber-500" />
+                      <span className="text-[9px] font-bold text-amber-700 dark:text-amber-400">{msg.aiCoachingTip}</span>
+                    </div>
+                  )}
                 </div>
               ))}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input / Área de envío */}
-            <div className="bg-white dark:bg-slate-800 p-4 shrink-0 border-t border-slate-200 dark:border-slate-700">
+            {/* AI suggested reply */}
+            {activeChat.aiSuggestedReply && !isWindowExpired && (
+              <div className="px-5 py-3 bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700 flex items-center gap-3">
+                <div className="p-2 bg-[#1877F2]/10 rounded-xl shrink-0">
+                  <Sparkles className="w-4 h-4 text-[#1877F2]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-black text-[#1877F2] uppercase tracking-widest mb-0.5">Sugerencia IA</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 italic truncate">"{activeChat.aiSuggestedReply}"</p>
+                </div>
+                <button onClick={() => setInputText(activeChat.aiSuggestedReply || '')}
+                  className="px-3 py-1.5 bg-[#1877F2] text-white text-[10px] font-black rounded-xl hover:bg-blue-600 transition-colors shrink-0">
+                  Usar
+                </button>
+              </div>
+            )}
 
-              {/* Hint de ventana activa */}
-              {!isLoadingMessages && (
+            {/* Input area */}
+            <div className="bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700 shrink-0">
+              {isWindowExpired && <WhatsappUsageStats quota={activeQuota} onUpgrade={() => setShowCreditsModal(true)} />}
+              <div className="px-4 py-3">
                 <WhatsappWindowHint status={windowInfo.status} />
-              )}
 
-              {/* Error de envío */}
-              {sendError && (
-                <div className="mb-2 p-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-xs rounded border border-red-100 dark:border-red-800 flex items-center">
-                  <AlertCircle className="w-4 h-4 mr-2 min-w-4" />
-                  <span className="truncate">{sendError}</span>
-                </div>
-              )}
-
-              {/* Adjunto PDF */}
-              {mediaUrl && (
-                <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex items-center justify-between">
-                  <div className="flex items-center text-blue-700 dark:text-blue-300">
-                    <FileText className="w-5 h-5 mr-3" />
-                    <div>
-                      <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">{mediaFilename || 'Documento adjunto'}</p>
-                      <p className="text-xs">PDF listo para enviar</p>
+                {/* Action shortcuts */}
+                {!isWindowExpired && (
+                  <div className="flex items-center gap-2 mb-2.5 flex-wrap">
+                    {/* Quick templates dropdown */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowQuickTemplates(v => !v)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1877F2]/10 hover:bg-[#1877F2]/20 rounded-xl text-xs font-bold text-[#1877F2] transition-colors"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" /> Plantillas
+                      </button>
+                      {showQuickTemplates && (
+                        <div className="absolute bottom-full left-0 mb-2 w-72 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden">
+                          <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-700">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Plantillas rápidas</p>
+                            <p className="text-[9px] text-slate-400 mt-0.5">Se rellenan con el nombre del cliente automáticamente</p>
+                          </div>
+                          {[
+                            { label: 'Bienvenida', text: quickTemplates.welcomeMessage },
+                            { label: 'Envío de Cotización', text: quickTemplates.quoteMessage },
+                            { label: 'Recordatorio de Reunión', text: quickTemplates.meetingReminder },
+                            { label: 'Seguimiento', text: quickTemplates.followUpMessage },
+                          ].map(({ label, text }) => {
+                            const filled = text
+                              .replace(/\{\{leadName\}\}/g, activeChat?.contactName?.split(' ')[0] || 'Cliente')
+                              .replace(/\{\{companyName\}\}/g, company?.tradeName || company?.legalName || 'nuestra empresa')
+                              .replace(/\{\{quoteNumber\}\}/g, '—')
+                              .replace(/\{\{savings\}\}/g, '—');
+                            return (
+                              <button
+                                key={label}
+                                onClick={() => { setInputText(filled); setShowQuickTemplates(false); }}
+                                className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/60 transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0 group"
+                              >
+                                <p className="text-[11px] font-bold text-slate-700 dark:text-white group-hover:text-[#1877F2] transition-colors">{label}</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-2 leading-relaxed">{filled}</p>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
+                    <button onClick={() => setShowCatalogDrawer(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 rounded-xl text-xs font-bold text-slate-500 transition-colors">
+                      <Package className="w-3.5 h-3.5 text-slate-400" /> Catálogo
+                    </button>
+                    <button onClick={() => navigate('/cotizaciones')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 rounded-xl text-xs font-bold text-slate-500 transition-colors">
+                      <FileText className="w-3.5 h-3.5 text-slate-400" /> Cotizar
+                    </button>
+                    <button onClick={() => setShowPaymentModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-900/10 hover:bg-emerald-100 rounded-xl text-xs font-bold text-emerald-600 transition-colors">
+                      <CreditCard className="w-3.5 h-3.5" /> Link de Pago
+                    </button>
                   </div>
-                  <button
-                    onClick={() => { setMediaUrl(null); setMediaFilename(null); }}
-                    className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-full transition-colors text-blue-500"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
+                )}
 
-              {isWindowExpired ? (
-                /* ─── Ventana vencida: mostrar advertencia + botón plantilla ── */
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800/40 rounded-xl">
-                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                    <p className="text-xs text-red-700 dark:text-red-400">
-                      La ventana de 24h ha vencido. No puedes enviar mensajes libres hasta que el cliente escriba primero.
-                    </p>
+                {isWindowExpired ? (
+                  <div className="flex flex-col md:flex-row gap-2.5">
+                    <div className="flex-1 flex items-center gap-3 px-4 py-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800/40 rounded-2xl text-red-600">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <div>
+                        <p className="text-xs font-bold">Ventana libre vencida</p>
+                        <p className="text-[10px] opacity-70">Reactivá con una plantilla aprobada.</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setShowTemplateSelector(true)}
+                      className="px-6 py-3 bg-[#10B981] hover:bg-emerald-600 text-white font-black text-xs rounded-2xl flex items-center gap-2 transition-colors">
+                      <LayoutTemplate className="w-4 h-4" /> Reactivar chat
+                    </button>
                   </div>
-                  <button
-                    onClick={() => setShowTemplateSelector(true)}
-                    className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 rounded-xl transition-colors shadow-sm"
-                  >
-                    <LayoutTemplate className="w-4 h-4" />
-                    Usar plantilla aprobada
-                  </button>
-                </div>
-              ) : (
-                /* ─── Ventana activa: input normal ──────────────────────────── */
-                <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
-                  <textarea
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage(e);
-                      }
-                    }}
-                    disabled={isSending}
-                    placeholder={isSending ? 'Enviando...' : 'Escribe un mensaje...'}
-                    className="flex-1 bg-slate-100 dark:bg-slate-900 border-none rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/50 disabled:opacity-50 resize-none"
-                    rows={inputText.split('\n').length > 1 ? Math.min(inputText.split('\n').length, 5) : 1}
-                  />
-                  <button
-                    type="submit"
-                    disabled={(!inputText.trim() && !mediaUrl) || isSending}
-                    className="bg-primary-600 hover:bg-primary-700 disabled:bg-slate-300 text-white p-3 rounded-lg transition-colors flex items-center justify-center min-w-[3rem]"
-                  >
-                    {isSending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-                  </button>
-                </form>
-              )}
+                ) : (
+                  <form onSubmit={handleSendMessage}>
+                    {mediaUrl && (
+                      <div className="flex items-center gap-2.5 p-2.5 bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 rounded-xl mb-2 relative max-w-sm">
+                        {/\.(jpg|jpeg|png|webp|gif)($|\?)/i.test(mediaUrl) ? (
+                          <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0"><img src={mediaUrl} alt="" className="w-full h-full object-cover" /></div>
+                        ) : /\.(ogg|mp3|m4a|aac|wav|opus|audio)($|\?)/i.test(mediaUrl) || (mediaFilename && /\.(ogg|mp3|m4a|aac|wav|opus)$/i.test(mediaFilename)) ? (
+                          <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0"><Mic className="w-5 h-5 text-emerald-600" /></div>
+                        ) : (
+                          <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center shrink-0"><FileText className="w-5 h-5 text-red-500" /></div>
+                        )}
+                        <p className="text-xs font-bold text-slate-700 flex-1 truncate">{mediaFilename || 'Archivo adjunto'}</p>
+                        <button type="button" onClick={() => { setMediaUrl(null); setMediaFilename(null); }}
+                          className="p-1 text-slate-400 hover:text-red-500 rounded-lg transition-colors">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*,.pdf,.doc,.docx"
+                        className="hidden"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
+                      />
+                      <input
+                        ref={audioFileInputRef}
+                        type="file"
+                        accept="audio/*,.ogg,.mp3,.m4a,.aac,.wav,.opus"
+                        className="hidden"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
+                      />
+                      <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}
+                        title="Adjuntar imagen o documento"
+                        className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40">
+                        {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+                      </button>
+                      <button type="button" onClick={() => audioFileInputRef.current?.click()} disabled={isUploading}
+                        title="Enviar audio"
+                        className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/20 text-slate-500 hover:text-emerald-600 rounded-xl transition-colors shrink-0 disabled:opacity-40">
+                        <Mic className="w-4 h-4" />
+                      </button>
+                      <textarea
+                        value={inputText}
+                        onChange={e => setInputText(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(e); } }}
+                        placeholder="Escribí un mensaje..."
+                        rows={1}
+                        className="flex-1 bg-slate-50 dark:bg-slate-900 rounded-2xl px-4 py-3 text-sm outline-none resize-none border-2 border-transparent focus:border-[#1877F2]/20 transition-colors"
+                      />
+                      <button type="submit" disabled={(!inputText.trim() && !mediaUrl) || isSending}
+                        className="w-11 h-11 flex items-center justify-center bg-[#1877F2] text-white rounded-2xl shadow-lg shadow-[#1877F2]/20 hover:bg-blue-600 disabled:opacity-40 transition-all shrink-0">
+                        {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center flex-col text-slate-500 text-center p-6">
-            {leadNotFoundWarning ? (
-              <>
-                <AlertCircle className="h-16 w-16 mb-4 text-orange-400" />
-                <p className="font-semibold text-lg text-slate-800 dark:text-slate-200">Este lead aún no tiene conversación de WhatsApp asociada.</p>
-                <p className="text-sm mt-2 max-w-sm">No se pudieron precargar los mensajes. El cliente debe enviar un mensaje a la plataforma o necesitamos iniciar la sesión para este LeadId.</p>
-              </>
-            ) : (
-              <>
-                <MessageSquareText className="h-16 w-16 mb-4 opacity-50" />
-                <p>Selecciona una conversación para comenzar</p>
-              </>
-            )}
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-12 bg-[#f0f2f5] dark:bg-[#0b141a]">
+            <div className="w-20 h-20 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center mb-6 shadow-sm">
+              <MessageSquareText className="w-10 h-10 text-slate-200 dark:text-slate-600" />
+            </div>
+            <h3 className="text-base font-black text-slate-600 dark:text-slate-400 mb-1">Bandeja de entrada</h3>
+            <p className="text-sm text-slate-400">Seleccioná una conversación para comenzar</p>
           </div>
         )}
       </div>
 
-      {/* ─── Template Selector Modal ──────────────────────────────────────────── */}
+      {/* Modals */}
       {showTemplateSelector && activeChat && (
-        <TemplateSelector
-          templates={whatsappTemplates}
-          contactName={activeChat.contactName}
-          onSend={handleSendTemplate}
-          onClose={() => setShowTemplateSelector(false)}
+        <TemplateSelector templates={whatsappTemplates} contactName={activeChat.contactName}
+          onSend={handleSendTemplate} onClose={() => setShowTemplateSelector(false)} />
+      )}
+      {showCreditsModal && <TemplateCreditsModal onClose={() => setShowCreditsModal(false)} />}
+      {showPaymentModal && activeChat && (
+        <CreatePaymentLinkModal
+          initialCustomerName={activeChat.contactName} conversationId={activeChat.id}
+          onClose={() => { setShowPaymentModal(false); setSelectedCatalogItemForPayment(null); }}
+          initialConcept={selectedCatalogItemForPayment?.name || ''}
+          initialAmount={selectedCatalogItemForPayment?.rate || ''}
+          initialCurrency={selectedCatalogItemForPayment?.currency}
         />
+      )}
+      {showConnectionModal && <WhatsappConnectionModal onClose={() => setShowConnectionModal(false)} />}
+
+      {/* Catalog Drawer */}
+      {showCatalogDrawer && (
+        <div className="fixed inset-y-0 right-0 z-50 w-full max-w-sm bg-white dark:bg-slate-800 shadow-2xl border-l border-slate-200 dark:border-slate-700 flex flex-col">
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-[#1877F2]/10 rounded-xl">
+                <Package className="w-4 h-4 text-[#1877F2]" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-slate-900 dark:text-white">Catálogo</h3>
+                <p className="text-[10px] text-slate-400">Insertá productos en el chat</p>
+              </div>
+            </div>
+            <button onClick={() => setShowCatalogDrawer(false)}
+              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-slate-400 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-300" />
+              <input type="text" placeholder="Buscar producto..." value={catalogSearch}
+                onChange={e => setCatalogSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-[#1877F2]/50 transition-colors" />
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-hide">
+            {catalogItems
+              .filter(i => i.name.toLowerCase().includes(catalogSearch.toLowerCase()) || i.description?.toLowerCase().includes(catalogSearch.toLowerCase()))
+              .map(item => {
+                const img = item.imageUrl || (item.images?.[0] || null);
+                return (
+                  <div key={item.id} className="p-3 bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700 rounded-2xl flex gap-3 hover:border-[#1877F2]/30 transition-all">
+                    {img ? (
+                      <img src={img} alt={item.name} className="w-14 h-14 rounded-xl object-cover shrink-0 border border-black/5" />
+                    ) : (
+                      <div className="w-14 h-14 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0">
+                        <Package className="w-5 h-5 text-slate-300" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1 mb-0.5">
+                        <h4 className="text-xs font-black text-slate-900 dark:text-white truncate">{item.name}</h4>
+                        <span className="text-xs font-black text-[#1877F2] shrink-0">
+                          {item.currency === 'CRC' ? '₡' : '$'}{item.rate.toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 line-clamp-2">{item.description || 'Sin descripción'}</p>
+                      <div className="flex gap-2 mt-2">
+                        <button onClick={() => {
+                          setInputText(`🛍️ *${item.name}*\n\n${item.description || ''}\n\n💵 *Precio:* ${item.currency || 'USD'} ${item.rate.toLocaleString()}`);
+                          if (img) { setMediaUrl(img); setMediaFilename(`${item.name}.png`); }
+                          setShowCatalogDrawer(false);
+                          addToast('Producto listo en el editor', 'success');
+                        }} className="flex-1 py-1.5 bg-[#1877F2] hover:bg-blue-600 text-white rounded-lg text-[9px] font-black uppercase transition-colors">
+                          Insertar
+                        </button>
+                        <button onClick={() => { setSelectedCatalogItemForPayment(item); setShowPaymentModal(true); }}
+                          className="px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors flex items-center">
+                          <CreditCard className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            {catalogItems.length === 0 && (
+              <div className="text-center py-10">
+                <Package className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                <p className="text-xs text-slate-400 mb-2">Catálogo vacío</p>
+                <button onClick={() => { setShowCatalogDrawer(false); navigate('/catalogo'); }}
+                  className="text-xs font-bold text-[#1877F2] hover:underline">
+                  Agregar productos
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

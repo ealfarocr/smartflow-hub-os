@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlogHub | SmartFlow Suite OS - Automatización e Inteligencia Artificial</title>
+  
+  <meta name="description" content="Aprende a escalar tu negocio local con las últimas estrategias en automatización, Inteligencia Artificial, CRM de WhatsApp y cobros express.">
+  <meta name="author" content="SmartFlow Hub OS">
+  <link rel="icon" type="image/png" href="https://smartflow-hub-landing.web.app/favicon.png">
+
+  <!-- Google Fonts Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <!-- Font styling & core variables -->
+  <style>
+    :root {
+      --primary: #1877F2;
+      --primary-hover: #1565C0;
+      --primary-rgb: 24, 119, 242;
+      --secondary: #10B981;
+      --bg-dark: #0A1628;
+      --text-main: #0A1628;
+      --text-muted: #475569;
+      --border: #E2E8F0;
+      --card-bg: #FFFFFF;
+      --font-family: 'Outfit', sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-family);
+      background-color: #F8FAFC;
+      color: var(--text-main);
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    a {
+      text-decoration: none;
+      color: inherit;
+    }
+
+    /* Header styling */
+    header {
+      background: rgba(255, 255, 255, 0.8);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      transition: all 0.3s ease;
+    }
+
+    .header-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-img {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+    }
+
+    .logo-text {
+      font-size: 20px;
+      font-weight: 900;
+      color: var(--bg-dark);
+      letter-spacing: -0.5px;
+    }
+
+    .logo-text span {
+      background: linear-gradient(135deg, var(--primary) 0%, #10B981 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-weight: 800;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .nav-item {
+      font-size: 14.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      transition: color 0.2s;
+    }
+
+    .nav-item:hover {
+      color: var(--primary);
+    }
+
+    .btn-hub {
+      background: var(--bg-dark);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 12px;
+      font-size: 13.5px;
+      font-weight: 800;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 4px 12px rgba(10, 22, 40, 0.15);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .btn-hub:hover {
+      background: var(--primary);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(24, 119, 242, 0.3);
+    }
+
+    /* Hero Section */
+    .hero {
+      padding: 80px 24px 60px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+      background: radial-gradient(circle at top right, rgba(24,119,242,0.04) 0%, transparent 50%),
+                  radial-gradient(circle at bottom left, rgba(16,185,129,0.03) 0%, transparent 50%);
+    }
+
+    .hero-inner {
+      max-width: 800px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 1;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 14px;
+      background: rgba(24, 119, 242, 0.08);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 800;
+      border-radius: 100px;
+      margin-bottom: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .hero h1 {
+      font-size: clamp(32px, 5vw, 48px);
+      font-weight: 950;
+      color: var(--bg-dark);
+      line-height: 1.15;
+      margin-bottom: 18px;
+      letter-spacing: -1px;
+    }
+
+    .grad-text {
+      background: linear-gradient(135deg, var(--primary) 0%, #10B981 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero p {
+      font-size: 18px;
+      color: var(--text-muted);
+      font-weight: 600;
+      line-height: 1.6;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    /* Category Filter */
+    .filters {
+      max-width: 1200px;
+      margin: 0 auto 40px;
+      padding: 0 24px;
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .filter-btn {
+      background: white;
+      border: 1.5px solid var(--border);
+      padding: 10px 20px;
+      border-radius: 14px;
+      font-family: var(--font-family);
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .filter-btn:hover {
+      border-color: rgba(24, 119, 242, 0.4);
+      color: var(--bg-dark);
+    }
+
+    .filter-btn.active {
+      background: var(--bg-dark);
+      border-color: var(--bg-dark);
+      color: white;
+      box-shadow: 0 4px 15px rgba(10, 22, 40, 0.15);
+    }
+
+    /* Blog Grid */
+    .blog-section {
+      max-width: 1200px;
+      margin: 0 auto 100px;
+      padding: 0 24px;
+    }
+
+    .blog-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 30px;
+    }
+
+    @media (max-width: 768px) {
+      .blog-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .blog-card {
+      background: var(--card-bg);
+      border-radius: 24px;
+      border: 1.5px solid var(--border);
+      overflow: hidden;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.01);
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .blog-card:hover {
+      transform: translateY(-8px);
+      box-shadow: 0 20px 40px rgba(10, 22, 40, 0.08);
+      border-color: rgba(24, 119, 242, 0.25);
+    }
+
+    .blog-card-image-wrap {
+      position: relative;
+      height: 200px;
+      width: 100%;
+      background: #0A1628;
+      overflow: hidden;
+    }
+
+    .blog-card-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .blog-card:hover .blog-card-img {
+      transform: scale(1.05);
+    }
+
+    .blog-card-content {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      flex-grow: 1;
+      justify-content: space-between;
+    }
+
+    .blog-tag {
+      display: inline-block;
+      padding: 4px 12px;
+      background: #EFF6FF;
+      color: #1877F2;
+      font-size: 10px;
+      font-weight: 800;
+      border-radius: 100px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+      width: fit-content;
+    }
+
+    .blog-date {
+      font-size: 11.5px;
+      color: #64748B;
+      font-weight: 700;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .blog-card-title {
+      font-size: 18px;
+      font-weight: 900;
+      color: #0A1628;
+      line-height: 1.4;
+      margin-bottom: 12px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .blog-card-intro {
+      font-size: 14px;
+      color: #475569;
+      line-height: 1.65;
+      font-weight: 600;
+      margin-bottom: 24px;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .blog-card-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 800;
+      color: #1877F2;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      transition: gap 0.2s;
+      margin-top: auto;
+      text-align: left;
+    }
+
+    .blog-card:hover .blog-card-btn {
+      gap: 10px;
+    }
+
+    /* Modal Styling */
+    .blog-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 22, 40, 0.6);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index: 10000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      animation: fadeIn 0.3s ease forwards;
+    }
+
+    .blog-modal-content {
+      background: white;
+      width: 100%;
+      max-width: 800px;
+      max-height: 90vh;
+      border-radius: 32px;
+      overflow-y: auto;
+      border: 1px solid #E2E8F0;
+      box-shadow: 0 30px 60px rgba(10, 22, 40, 0.25);
+      position: relative;
+      animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    .blog-modal-close {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: white;
+      border: 1px solid #E2E8F0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: bold;
+      color: #64748B;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+      transition: all 0.2s;
+      z-index: 10;
+    }
+
+    .blog-modal-close:hover {
+      background: #F1F5F9;
+      color: #0A1628;
+      transform: rotate(90deg);
+    }
+
+    .blog-modal-hero {
+      position: relative;
+      height: 300px;
+      background: #0A1628;
+      background-size: cover;
+      background-position: center;
+    }
+
+    .blog-modal-body {
+      padding: 40px;
+    }
+
+    @media (max-width: 768px) {
+      .blog-modal-body {
+        padding: 24px;
+      }
+      .blog-modal-hero {
+        height: 200px;
+      }
+    }
+
+    /* Footer styling */
+    footer {
+      background: var(--bg-dark);
+      color: white;
+      padding: 80px 24px 40px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .footer-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .footer-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 40px;
+      margin-bottom: 60px;
+      flex-wrap: wrap;
+    }
+
+    .footer-brand {
+      flex: 1;
+      min-width: 280px;
+    }
+
+    .footer-logo {
+      font-size: 24px;
+      font-weight: 900;
+      margin-bottom: 15px;
+    }
+
+    .footer-logo span {
+      background: linear-gradient(135deg, var(--primary) 0%, #10B981 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .footer-tagline {
+      font-size: 14.5px;
+      color: #94A3B8;
+      font-weight: 500;
+      line-height: 1.6;
+      max-width: 320px;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 60px;
+      flex-wrap: wrap;
+    }
+
+    .footer-col {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .footer-col h4 {
+      font-size: 14px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: white;
+      margin-bottom: 8px;
+    }
+
+    .footer-col a {
+      font-size: 14px;
+      color: #94A3B8;
+      font-weight: 600;
+      transition: color 0.2s;
+    }
+
+    .footer-col a:hover {
+      color: white;
+    }
+
+    .footer-bottom {
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding-top: 30px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+      font-size: 13.5px;
+      color: #64748B;
+      font-weight: 600;
+    }
+
+    .footer-legal {
+      display: flex;
+      gap: 20px;
+    }
+
+    .footer-legal a:hover {
+      color: white;
+    }
+
+    /* Animations */
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(30px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    @keyframes pulse {
+      0%, 100% { background-color: #E2E8F0; }
+      50% { background-color: #F1F5F9; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Premium Header -->
+  <header>
+    <div class="header-inner">
+      <a href="/" class="brand">
+        <div class="logo-text">SmartFlow <span>BlogHub</span></div>
+      </a>
+      <div class="nav-links">
+        <a href="https://smartflow-hub-landing.web.app" class="nav-item">Página Principal</a>
+        <a href="https://hub.smartflow-suite.com" class="btn-hub">Acceder al Hub OS</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Header -->
+  <section class="hero">
+    <div class="hero-inner">
+      <div class="chip">Marketing AI & Ventas</div>
+      <h1>Blog de <span class="grad-text">Automatización de Negocios</span></h1>
+      <p>Aprende a duplicar tu facturación, configurar agentes inteligentes y dominar tu CRM con guías tácticas en tiempo real.</p>
+    </div>
+  </section>
+
+  <!-- Categories Filter -->
+  <div class="filters">
+    <button class="filter-btn active" onclick="filterPosts('all', this)">Todo</button>
+    <button class="filter-btn" onclick="filterPosts('Agente IA 24/7', this)">Agentes IA</button>
+    <button class="filter-btn" onclick="filterPosts('CRM Multiagente', this)">CRM WhatsApp</button>
+    <button class="filter-btn" onclick="filterPosts('Links de Pago', this)">Links de Pago</button>
+  </div>
+
+  <!-- Cards Grid Area -->
+  <section class="blog-section">
+    <div id="blogGrid" class="blog-grid">
+      <!-- Loaded dynamically via Firestore or preset fallbacks -->
+    </div>
+  </section>
+
+  <!-- Premium Footer -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <div class="footer-logo">SmartFlow <span>Hub OS</span></div>
+          <div class="footer-tagline">La plataforma que crece con tu negocio. Para cualquier nicho, en cualquier etapa.</div>
+        </div>
+        <div class="footer-links">
+          <div class="footer-col">
+            <h4>Plataforma</h4>
+            <a href="https://smartflow-hub-landing.web.app/#como">Cómo funciona</a>
+            <a href="https://smartflow-hub-landing.web.app/#herramientas">Herramientas</a>
+            <a href="https://smartflow-hub-landing.web.app/#negocios">Para tu negocio</a>
+            <a href="https://hub.smartflow-suite.com">Acceder al Hub</a>
+          </div>
+          <div class="footer-col">
+            <h4>Legal</h4>
+            <a href="https://smartflow-hub-landing.web.app/privacidad.html">Privacidad</a>
+            <a href="https://smartflow-hub-landing.web.app/terminos.html">Términos</a>
+            <a href="https://smartflow-hub-landing.web.app/cookies.html">Cookies</a>
+          </div>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <div>© 2026 SmartFlow Hub OS. Todos los derechos reservados.</div>
+        <div class="footer-legal">
+          <strong>Eduardo Alfaro Rodriguez</strong> | San José, Costa Rica
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Blog Article Reader Modal -->
+  <div id="blogModalBackdrop" class="blog-modal-backdrop" onclick="if(event.target === this) closeBlogModal()">
+    <div class="blog-modal-content">
+      <button class="blog-modal-close" onclick="closeBlogModal()">✕</button>
+      <div id="modalHero" class="blog-modal-hero"></div>
+      <div class="blog-modal-body">
+        <h2 id="modalTitle" style="font-size: clamp(24px, 4vw, 32px); font-weight: 950; color: #0A1628; line-height: 1.25; margin-bottom: 24px;">Título del Artículo</h2>
+        <div id="modalBodyContent">
+          <!-- Loaded dynamically -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase Compat Library SDK Loading -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+  <!-- Blog Engine Logic -->
+  <script>
+    // Initialize Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyAFAclEs9Jc6fJxAWTI7eXJiZCoOlZPYGg",
+      authDomain: "paneles-solares-bcs-mx.firebaseapp.com",
+      projectId: "paneles-solares-bcs-mx",
+      storageBucket: "paneles-solares-bcs-mx.firebasestorage.app",
+      messagingSenderId: "652296458641",
+      appId: "1:652296458641:web:59bfb7ce64c79e22f8ca30"
+    };
+
+    if (!window.firebaseInitialized) {
+      firebase.initializeApp(firebaseConfig);
+      window.firebaseInitialized = true;
+    }
+    const db = firebase.firestore();
+
+    let allPostsCache = [];
+    let activeFilterTopic = 'all';
+
+    // Premium fallback articles when Firestore is completely empty
+    const presetPosts = [
+      {
+        id: "preset-1",
+        title: "Cómo duplicar tus ventas usando Inteligencia Artificial en WhatsApp",
+        introduction: "Descubre cómo las marcas líderes automatizan el 85% de sus chats y disparan su conversión comercial con un Agente IA activo 24/7 sin perder el toque humano.",
+        topic: "Agente IA 24/7",
+        createdAt: new Date().toISOString(),
+        imageUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop",
+        subheadings: [
+          { title: "El nuevo estándar de respuestas inmediatas", content: "El 80% de los clientes prefieren comprar en empresas que responden al instante. Un Agente IA puede responder miles de chats simultáneamente." },
+          { title: "Calificación y automatización de embudos", content: "El Agente recopila datos clave, valida el interés del lead, y le agenda una cita directamente en el calendario de tus asesores." }
+        ],
+        conclusion: "La IA no sustituye a tu equipo, le da superpoderes para que se enfoquen en cerrar contratos, no en responder dudas repetitivas.",
+        cta: "¡Prueba nuestro Agente IA de forma gratuita en la Suite!"
+      },
+      {
+        id: "preset-2",
+        title: "El fin de las respuestas tardías: CRM Multiagente en 2026",
+        introduction: "Olvídate de perder prospectos por demoras o vendedores desorganizados. Te enseñamos a unificar a todo tu equipo en una sola línea de WhatsApp con SmartFlow Hub OS.",
+        topic: "CRM Multiagente",
+        createdAt: new Date(Date.now() - 86400000).toISOString(),
+        imageUrl: "https://images.unsplash.com/photo-1460925895917-afdab827c52f?q=80&w=1200&auto=format&fit=crop",
+        subheadings: [
+          { title: "Un solo número corporativo para todos", content: "Tus asesores comerciales pueden iniciar sesión, responder chats y transferir leads entre departamentos con total visibilidad." },
+          { title: "Métricas de rendimiento en tiempo real", content: "Supervisa tiempos de respuesta promedio, volumen de chats, y embudos de conversión para premiar a tus mejores vendedores." }
+        ],
+        conclusion: "Un CRM no es un lujo, es el cerebro operativo que tu negocio local necesita para seguir creciendo.",
+        cta: "Crea tu CRM Base gratis en 90 segundos hoy."
+      },
+      {
+        id: "preset-3",
+        title: "Estrategias de Cobro en WhatsApp: PayPal y Enlaces Rápidos",
+        introduction: "Cómo acortar el ciclo de venta de 2 días a 2 minutos cobrando mediante tarjetas de crédito y monederos digitales directamente en el chat del cliente.",
+        topic: "Links de Pago",
+        createdAt: new Date(Date.now() - 172800000).toISOString(),
+        imageUrl: "https://images.unsplash.com/photo-1559526324-4b87b5e36e44?q=80&w=1200&auto=format&fit=crop",
+        subheadings: [
+          { title: "El botón de compra donde está la atención", content: "No envíes a tus prospectos a una tienda online externa donde el 70% abandona el carrito. Envíales un enlace de pago de PayPal seguro dentro del mismo chat." },
+          { title: "Facturación y confirmaciones automatizadas", content: "Cuando el pago se procesa con éxito, el sistema envía un email de bienvenida y su factura de forma automática al cliente." }
+        ],
+        conclusion: "Facilitar el pago es el hack más simple y efectivo para incrementar tu ticket promedio de forma inmediata.",
+        cta: "Genera tus primeros enlaces de cobros en tu cuenta de SmartFlow."
+      }
+    ];
+
+    // Function to render matching cards
+    function renderGrid(posts) {
+      const grid = document.getElementById('blogGrid');
+      if (!grid) return;
+      grid.innerHTML = '';
+
+      const filtered = activeFilterTopic === 'all' 
+        ? posts 
+        : posts.filter(p => p.topic && p.topic.toLowerCase().trim() === activeFilterTopic.toLowerCase().trim());
+
+      if (filtered.length === 0) {
+        grid.innerHTML = `
+          <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; background: white; border-radius: 24px; border: 1.5px solid var(--border);">
+            <div style="font-size: 40px; margin-bottom: 15px;">🔍</div>
+            <h4 style="font-size: 18px; font-weight:800; color:#0A1628; margin-bottom: 8px;">No se encontraron artículos</h4>
+            <p style="font-size: 14.5px; color:#64748B; font-weight: 600;">Pronto publicaremos nuevo contenido de esta categoría. ¡Mantente atento!</p>
+          </div>
+        `;
+        return;
+      }
+
+      filtered.forEach(post => {
+        const card = document.createElement('div');
+        card.className = 'blog-card';
+        card.onclick = () => openBlogModal(post);
+
+        const dateStr = new Date(post.createdAt).toLocaleDateString('es-MX', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric'
+        });
+
+        card.innerHTML = `
+          <div class="blog-card-image-wrap">
+            <img src="${post.imageUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop'}" alt="${post.title}" class="blog-card-img" loading="lazy" />
+          </div>
+          <div class="blog-card-content">
+            <div>
+              <span class="blog-tag">${post.topic || 'General'}</span>
+              <div class="blog-date">
+                <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                <span>${dateStr}</span>
+              </div>
+              <h3 class="blog-card-title">${post.title}</h3>
+              <p class="blog-card-intro">${post.introduction || post.intro || ''}</p>
+            </div>
+            <button class="blog-card-btn">
+              <span>Leer Artículo Completo</span>
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            </button>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    // Filter Trigger
+    function filterPosts(topic, buttonEl) {
+      activeFilterTopic = topic;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      buttonEl.classList.add('active');
+      renderGrid(allPostsCache);
+    }
+
+    // Modal Details Parser
+    function openBlogModal(post) {
+      const backdrop = document.getElementById('blogModalBackdrop');
+      const title = document.getElementById('modalTitle');
+      const hero = document.getElementById('modalHero');
+      const content = document.getElementById('modalBodyContent');
+      if (!backdrop || !title || !hero || !content) return;
+
+      const dateStr = new Date(post.createdAt).toLocaleDateString('es-MX', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      });
+
+      title.innerText = post.title;
+      hero.style.backgroundImage = `url('${post.imageUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop'}')`;
+
+      let bodyHTML = `
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom: 24px; flex-wrap:wrap;">
+          <span class="blog-tag" style="margin-bottom:0;">${post.topic || 'General'}</span>
+          <span style="font-size:12.5px; font-weight:700; color:#64748B;">📅 Publicado el ${dateStr}</span>
+        </div>
+        
+        <p style="font-size:16.5px; line-height:1.8; color:#1E293B; font-weight:600; margin-bottom:30px; border-left:4px solid var(--primary); padding-left:20px;">
+          ${post.introduction || post.intro || ''}
+        </p>
+      `;
+
+      if (post.subheadings && Array.isArray(post.subheadings)) {
+        post.subheadings.forEach(sub => {
+          bodyHTML += `
+            <h3 style="font-size:20px; font-weight:850; color:#0A1628; margin-top:36px; margin-bottom:12px; line-height:1.35;">
+              ${sub.title}
+            </h3>
+            <p style="font-size:15.5px; line-height:1.75; color:#334155; margin-bottom:24px; font-weight:500;">
+              ${sub.content}
+            </p>
+          `;
+        });
+      }
+
+      if (post.conclusion) {
+        bodyHTML += `
+          <h3 style="font-size:20px; font-weight:850; color:#0A1628; margin-top:40px; margin-bottom:12px;">
+            Conclusión y Próximos Pasos
+          </h3>
+          <p style="font-size:15.5px; line-height:1.75; color:#334155; margin-bottom:24px; font-weight:500;">
+            ${post.conclusion}
+          </p>
+        `;
+      }
+
+      if (post.cta) {
+        bodyHTML += `
+          <div style="margin-top:40px; padding:24px; border-radius:20px; background: linear-gradient(135deg, rgba(24,119,242,0.06) 0%, rgba(16,185,129,0.04) 100%); border:1.5px solid rgba(24,119,242,0.15); text-align:center;">
+            <h4 style="font-size:16px; font-weight:800; color:#0A1628; margin-bottom:10px;">¿Listo para implementar estas estrategias?</h4>
+            <p style="font-size:14px; line-height:1.5; color:#475569; margin-bottom:18px; font-weight:600;">
+              ${post.cta}
+            </p>
+            <a href="https://hub.smartflow-suite.com" class="btn-hub" style="display:inline-block; font-size:13px; text-transform:none;">
+              Comenzar mi prueba gratuita
+            </a>
+          </div>
+        `;
+      }
+
+      content.innerHTML = bodyHTML;
+      backdrop.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeBlogModal() {
+      const backdrop = document.getElementById('blogModalBackdrop');
+      if (backdrop) backdrop.style.display = 'none';
+      document.body.style.overflow = '';
+    }
+
+    // Skeleton loaders
+    function showSkeletons() {
+      const grid = document.getElementById('blogGrid');
+      if (!grid) return;
+      grid.innerHTML = Array(3).fill(0).map(() => `
+        <div class="blog-card" style="pointer-events: none; opacity: 0.65;">
+          <div class="blog-card-image-wrap" style="background: #E2E8F0; animation: pulse 1.5s infinite;"></div>
+          <div class="blog-card-content" style="gap:12px; display:flex; flex-direction:column; justify-content:space-between; flex-grow:1;">
+            <div>
+              <div style="height:18px; width:80px; background:#E2E8F0; border-radius:10px; animation:pulse 1.5s infinite; margin-bottom:8px;"></div>
+              <div style="height:14px; width:120px; background:#E2E8F0; border-radius:10px; animation:pulse 1.5s infinite; margin-bottom:8px;"></div>
+              <div style="height:24px; width:90%; background:#E2E8F0; border-radius:10px; animation:pulse 1.5s infinite; margin-top:10px; margin-bottom:8px;"></div>
+              <div style="height:60px; width:100%; background:#E2E8F0; border-radius:10px; animation:pulse 1.5s infinite;"></div>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Main real-time Firestore database listener
+    showSkeletons();
+    db.collection("landing_blog_posts")
+      .orderBy("createdAt", "desc")
+      .onSnapshot((querySnapshot) => {
+        if (querySnapshot && !querySnapshot.empty) {
+          allPostsCache = [];
+          querySnapshot.forEach((doc) => {
+            allPostsCache.push({ id: doc.id, ...doc.data() });
+          });
+          renderGrid(allPostsCache);
+        } else {
+          allPostsCache = presetPosts;
+          renderGrid(presetPosts);
+        }
+      }, (error) => {
+        console.warn("Firestore collection listener blocked or failed. Loading premium fallbacks:", error);
+        allPostsCache = presetPosts;
+        renderGrid(presetPosts);
+      });
+  </script>
+</body>
+</html>

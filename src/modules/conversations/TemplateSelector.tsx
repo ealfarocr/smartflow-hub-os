@@ -97,8 +97,8 @@ export const TemplateSelector = ({ templates, contactName, onSend, onClose }: Te
               <MessageSquareText className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-900 dark:text-white text-base">Plantilla aprobada por Meta</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">La ventana de 24h ha vencido · selecciona una plantilla</p>
+              <h3 className="font-bold text-slate-900 dark:text-white text-base">Reactivar Conversación</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Ventana libre vencida · Reactiva el chat usando una plantilla aprobada</p>
             </div>
           </div>
           <button
@@ -134,7 +134,7 @@ export const TemplateSelector = ({ templates, contactName, onSend, onClose }: Te
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${categoryColor[tpl.category]}`}>
                         {categoryLabel[tpl.category]}
                       </span>
-                      <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-primary-500 shrink-0" />
+                      <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#1877F2] shrink-0" />
                     </div>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
@@ -149,7 +149,7 @@ export const TemplateSelector = ({ templates, contactName, onSend, onClose }: Te
             <div className="p-5 space-y-5">
               <button
                 onClick={() => setSelectedTemplate(null)}
-                className="flex items-center gap-1 text-xs text-slate-500 hover:text-primary-600 transition-colors"
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-[#1877F2] transition-colors"
               >
                 ← Volver a plantillas
               </button>
@@ -226,8 +226,8 @@ export const TemplateSelector = ({ templates, contactName, onSend, onClose }: Te
               className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 dark:disabled:bg-slate-600 text-white font-semibold py-3 rounded-xl transition-colors"
             >
               {isSending
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando plantilla...</>
-                : <><Send className="w-4 h-4" /> Enviar Plantilla</>
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando reactivación...</>
+                : <><Send className="w-4 h-4" /> Enviar Reactivación</>
               }
             </button>
           </div>

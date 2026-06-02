@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Lead, Quote, AgendaItem, Conversation } from '@/types';
+import { Lead, Quote, AgendaItem, Conversation, TenantFeatures } from '@/types';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 // ── Types ──────────────────────────────────────────────
@@ -14,6 +14,15 @@ export interface DashboardActivity {
   icon: string; // emoji
   color: string;
   link?: string;
+}
+
+export interface UncapturedValue {
+  key: string;
+  label: string;
+  value: number;
+  description: string;
+  solutionRoute: string;
+  active: boolean;
 }
 
 export interface DashboardMetrics {
@@ -34,6 +43,7 @@ export interface DashboardMetrics {
   quotesByStatus: Array<{ status: string; count: number; color: string }>;
   activityByDay: Array<{ date: string; label: string; leads: number; quotes: number }>;
   recentActivity: DashboardActivity[];
+  uncapturedValues: UncapturedValue[];
 }
 
 // ── Helpers ────────────────────────────────────────────
@@ -109,7 +119,6 @@ function formatCompact(n: number): string {
   return `$${n.toLocaleString('es-MX')}`;
 }
 
-// Stage colors — match CRM pipeline defaults
 const STAGE_COLORS: Record<string, string> = {
   'Nuevo': '#3b82f6',
   'Seguimiento': '#f59e0b',
@@ -141,7 +150,9 @@ export function useDashboardMetrics(
   quotes: Quote[],
   agendaItems: AgendaItem[],
   conversations: Conversation[],
-   period: PeriodKey
+  period: PeriodKey,
+  features: Partial<TenantFeatures> = {},
+  memberCount: number = 1
 ): DashboardMetrics {
   const { commercial } = useSettingsStore();
   const currency = commercial?.currency || 'MX';
@@ -155,20 +166,21 @@ export function useDashboardMetrics(
     const leadsInPrev = leads.filter(l => inRange(l.createdAt, prev.from, prev.to));
     const closedStages = ['Venta Realizada'];
     const lostStages = ['Perdido'];
-    const closedLeads = leads.filter(l => closedStages.includes(l.stage) && inRange(l.createdAt, from, to));
-    const closedLeadsPrev = leads.filter(l => closedStages.includes(l.stage) && inRange(l.createdAt, prev.from, prev.to));
+    // Usar lastActivity (fecha del último cambio de etapa) en lugar de createdAt
+    const closedLeads = leads.filter(l => closedStages.includes(l.stage) && inRange(l.lastActivity || l.createdAt, from, to));
+    const closedLeadsPrev = leads.filter(l => closedStages.includes(l.stage) && inRange(l.lastActivity || l.createdAt, prev.from, prev.to));
 
     // ── Quotes ──
     const quotesInPeriod = quotes.filter(q => inRange(q.date || (q as any).createdAt, from, to));
     const quotesInPrev = quotes.filter(q => inRange(q.date || (q as any).createdAt, prev.from, prev.to));
     const sentStatuses = ['enviada', 'aprobada'];
-    const quotesSent = quotesInPeriod.filter(q => sentStatuses.includes(q.status)).length || quotesInPeriod.length;
-    const quotesSentPrev = quotesInPrev.filter(q => sentStatuses.includes(q.status)).length || quotesInPrev.length;
+    const quotesSent = quotesInPeriod.filter(q => sentStatuses.includes(q.status)).length;
+    const quotesSentPrev = quotesInPrev.filter(q => sentStatuses.includes(q.status)).length;
 
-    // Potential amount — open quotes (not rejected)
-    const openQuotes = quotes.filter(q => !['rechazada', 'vencida'].includes(q.status));
+    // Potential amount (Only Pending/Sent, not draft or closed)
+    const openQuotes = quotes.filter(q => ['enviada', 'vencida'].includes(q.status)); // Vencida counted as potential to reactivate
     const potentialAmount = openQuotes.reduce((sum, q) => sum + (q.total || 0), 0);
-    const prevOpenQuotes = quotes.filter(q => !['rechazada', 'vencida'].includes(q.status) && inRange(q.date || (q as any).createdAt, prev.from, prev.to));
+    const prevOpenQuotes = quotes.filter(q => ['enviada', 'vencida'].includes(q.status) && inRange(q.date || (q as any).createdAt, prev.from, prev.to));
     const potentialAmountPrev = prevOpenQuotes.reduce((sum, q) => sum + (q.total || 0), 0);
 
     // Closed amount
@@ -219,115 +231,106 @@ export function useDashboardMetrics(
       });
     }
 
-    // ── Recent activity (combined feed) ──
     const recentActivity: DashboardActivity[] = [];
+    leads.filter(l => l.createdAt).sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0)).slice(0, 8).forEach(l => {
+      const d = toDate(l.createdAt); if (!d) return;
+      if (closedStages.includes(l.stage)) {
+        recentActivity.push({ id: `lead-closed-${l.id}`, type: 'deal_closed', title: `Venta realizada: ${l.name}`, subtitle: l.city, date: d, icon: '🎉', color: '#10b981', link: '/crm' });
+      } else if (lostStages.includes(l.stage)) {
+        recentActivity.push({ id: `lead-lost-${l.id}`, type: 'deal_lost', title: `Lead perdido: ${l.name}`, subtitle: l.city, date: d, icon: '❌', color: '#ef4444', link: '/crm' });
+      } else {
+        recentActivity.push({ id: `lead-${l.id}`, type: 'lead_new', title: `Nuevo lead: ${l.name}`, subtitle: `${l.source} · ${l.city}`, date: d, icon: '👤', color: '#3b82f6', link: '/crm' });
+      }
+    });
 
-    // From leads
-    leads
-      .filter(l => l.createdAt)
-      .sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0))
-      .slice(0, 8)
-      .forEach(l => {
-        const d = toDate(l.createdAt);
-        if (!d) return;
+    quotes.slice(0, 6).forEach(q => {
+      const d = toDate(q.date || (q as any).createdAt); if (!d) return;
+      const isSent = q.status === 'enviada' || q.status === 'aprobada';
+      recentActivity.push({ id: `quote-${q.id}`, type: isSent ? 'quote_sent' : 'quote_created', title: `Cotización ${q.quoteNumber} ${isSent ? 'enviada' : 'creada'}`, subtitle: `$${q.total?.toLocaleString('es-MX') || '0'} ${currency}`, date: d, icon: isSent ? '📩' : '📄', color: isSent ? '#2563eb' : '#94a3b8', link: '/cotizaciones' });
+    });
 
-        if (closedStages.includes(l.stage)) {
-          recentActivity.push({
-            id: `lead-closed-${l.id}`,
-            type: 'deal_closed',
-            title: `Venta realizada: ${l.name}`,
-            subtitle: l.city,
-            date: d,
-            icon: '🎉',
-            color: '#10b981',
-            link: '/crm',
-          });
-        } else if (lostStages.includes(l.stage)) {
-          recentActivity.push({
-            id: `lead-lost-${l.id}`,
-            type: 'deal_lost',
-            title: `Lead perdido: ${l.name}`,
-            subtitle: l.city,
-            date: d,
-            icon: '❌',
-            color: '#ef4444',
-            link: '/crm',
-          });
-        } else {
-          recentActivity.push({
-            id: `lead-${l.id}`,
-            type: 'lead_new',
-            title: `Nuevo lead: ${l.name}`,
-            subtitle: `${l.source} · ${l.city}`,
-            date: d,
-            icon: '👤',
-            color: '#3b82f6',
-            link: '/crm',
-          });
-        }
-      });
+    conversations.filter(c => c.lastMessageSender === 'lead' && c.lastMessageDate).sort((a, b) => (toDate(b.lastMessageDate)?.getTime() || 0) - (toDate(a.lastMessageDate)?.getTime() || 0)).slice(0, 5).forEach(c => {
+      const d = toDate(c.lastMessageDate); if (!d) return;
+      recentActivity.push({ id: `conv-${c.id}`, type: 'message_received', title: `Mensaje de ${c.contactName}`, subtitle: c.lastMessage?.slice(0, 60) || 'Nuevo mensaje', date: d, icon: '💬', color: '#10b981', link: '/conversaciones' });
+    });
 
-    // From quotes
-    quotes
-      .slice(0, 6)
-      .forEach(q => {
-        const d = toDate(q.date || (q as any).createdAt);
-        if (!d) return;
-        const isSent = q.status === 'enviada' || q.status === 'aprobada';
-        recentActivity.push({
-          id: `quote-${q.id}`,
-          type: isSent ? 'quote_sent' : 'quote_created',
-          title: `Cotización ${q.quoteNumber} ${isSent ? 'enviada' : 'creada'}`,
-          subtitle: `$${q.total?.toLocaleString('es-MX') || '0'} ${currency}`,
-          date: d,
-          icon: isSent ? '📩' : '📄',
-          color: isSent ? '#2563eb' : '#94a3b8',
-          link: '/cotizaciones',
-        });
-      });
+    agendaItems.filter(a => a.type === 'visita técnica' && !a.isCompleted).slice(0, 4).forEach(a => {
+      const d = toDate(a.date); if (!d) return;
+      recentActivity.push({ id: `agenda-${a.id}`, type: 'visit_scheduled', title: `Visita técnica: ${a.title}`, subtitle: d.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' }), date: d, icon: '🏠', color: '#8b5cf6', link: '/agenda' });
+    });
 
-    // From conversations (last messages)
-    conversations
-      .filter(c => c.lastMessageSender === 'lead' && c.lastMessageDate)
-      .sort((a, b) => (toDate(b.lastMessageDate)?.getTime() || 0) - (toDate(a.lastMessageDate)?.getTime() || 0))
-      .slice(0, 5)
-      .forEach(c => {
-        const d = toDate(c.lastMessageDate);
-        if (!d) return;
-        recentActivity.push({
-          id: `conv-${c.id}`,
-          type: 'message_received',
-          title: `Mensaje de ${c.contactName}`,
-          subtitle: c.lastMessage?.slice(0, 60) || 'Nuevo mensaje',
-          date: d,
-          icon: '💬',
-          color: '#10b981',
-          link: '/conversaciones',
-        });
-      });
-
-    // From agenda
-    agendaItems
-      .filter(a => a.type === 'visita técnica' && !a.isCompleted)
-      .slice(0, 4)
-      .forEach(a => {
-        const d = toDate(a.date);
-        if (!d) return;
-        recentActivity.push({
-          id: `agenda-${a.id}`,
-          type: 'visit_scheduled',
-          title: `Visita técnica: ${a.title}`,
-          subtitle: d.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' }),
-          date: d,
-          icon: '🏠',
-          color: '#8b5cf6',
-          link: '/agenda',
-        });
-      });
-
-    // Sort by date desc, limit to 15
     recentActivity.sort((a, b) => b.date.getTime() - a.date.getTime());
     recentActivity.splice(15);
+
+    // ── Uncaptured Values ──
+    const uncapturedValues: UncapturedValue[] = [];
+
+    const manualLeads = leads.filter(l => l.source !== 'WhatsApp').length;
+    if (!features.hasIntegrations && manualLeads > 0) {
+      uncapturedValues.push({
+        key: 'wa_missed',
+        label: 'Leads sin bandeja conectada',
+        value: manualLeads,
+        description: 'Leads capturados manualmente que podrían entrar automáticamente vía WhatsApp.',
+        solutionRoute: '/configuracion/canales',
+        active: !!features.hasIntegrations
+      });
+    }
+
+    const unansweredCount = conversations.filter(c => {
+      if (c.lastMessageSender !== 'lead' || !c.lastMessageDate) return false;
+      const lastDate = toDate(c.lastMessageDate);
+      return lastDate && (now.getTime() - lastDate.getTime()) > 2 * 60 * 60 * 1000;
+    }).length;
+    if (!features.hasAiAgent && unansweredCount > 0) {
+      uncapturedValues.push({
+        key: 'ai_missed',
+        label: 'Mensajes sin respuesta (+2h)',
+        value: unansweredCount,
+        description: 'Conversaciones que llevan más de 2 horas esperando respuesta humana.',
+        solutionRoute: '/tienda',
+        active: !!features.hasAiAgent
+      });
+    }
+
+    const advancedLeadsNoQuote = leads.filter(l => 
+      (l.stage === 'Seguimiento' || l.stage === 'Visita Técnica') && 
+      !quotes.some(q => q.leadId === l.id)
+    ).length;
+    if (!features.hasQuotes && advancedLeadsNoQuote > 0) {
+      uncapturedValues.push({
+        key: 'quotes_missed',
+        label: 'Leads avanzados sin cotización',
+        value: advancedLeadsNoQuote,
+        description: 'Leads en etapa de negociación que aún no han recibido una propuesta formal.',
+        solutionRoute: '/tienda',
+        active: !!features.hasQuotes
+      });
+    }
+
+    const wonLeadsNoPayment = leads.filter(l => l.stage === 'Venta Realizada').length;
+    if (!features.hasPaymentLinks && wonLeadsNoPayment > 0) {
+      uncapturedValues.push({
+        key: 'payments_missed',
+        label: 'Ventas cerradas sin cobro',
+        value: wonLeadsNoPayment,
+        description: 'Ventas ganadas que no registran un link de pago enviado al cliente.',
+        solutionRoute: '/tienda',
+        active: !!features.hasPaymentLinks
+      });
+    }
+
+    const totalActivityThisWeek = activityByDay.reduce((acc, curr) => acc + curr.leads + curr.quotes, 0);
+    if (!features.hasQualityAuditor && memberCount >= 2 && totalActivityThisWeek > 5) {
+      uncapturedValues.push({
+        key: 'auditor_missed',
+        label: 'Actividad de equipo sin auditar',
+        value: totalActivityThisWeek,
+        description: 'Tu equipo tuvo mucha actividad esta semana. El Auditor IA puede decirte cómo resultaron.',
+        solutionRoute: '/tienda',
+        active: !!features.hasQualityAuditor
+      });
+    }
 
     return {
       newLeads: leadsInPeriod.length,
@@ -347,8 +350,9 @@ export function useDashboardMetrics(
       quotesByStatus,
       activityByDay,
       recentActivity,
+      uncapturedValues,
     };
-  }, [leads, quotes, agendaItems, conversations, period]);
+  }, [leads, quotes, agendaItems, conversations, period, features, memberCount, currency]);
 }
 
 export { formatCompact, pctChange };

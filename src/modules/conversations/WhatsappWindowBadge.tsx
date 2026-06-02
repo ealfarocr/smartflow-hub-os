@@ -1,4 +1,5 @@
 import { useWindowStatusFromDate } from '@/hooks/useWhatsappWindow';
+import { MessageSquare, AlertTriangle, XCircle } from 'lucide-react';
 
 interface WhatsappWindowBadgeProps {
   lastInboundDate?: string | null;
@@ -30,15 +31,15 @@ export const WhatsappWindowBadge = ({ lastInboundDate, compact = false }: Whatsa
   return (
     <span
       className={`
-        inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full
+        inline-flex items-center text-[10px] font-black px-2 py-1 rounded-lg
         ${badgeColor}
         ${isExpiring ? 'animate-pulse' : ''}
-        whitespace-nowrap
+        whitespace-nowrap uppercase tracking-tighter transition-all duration-300
       `}
     >
-      {status === 'active'   && <span className="mr-1">●</span>}
-      {status === 'expiring' && <span className="mr-1">⚠</span>}
-      {status === 'expired'  && <span className="mr-1">✕</span>}
+      {status === 'active'   && <MessageSquare className="w-3 h-3 mr-1.5 fill-current" />}
+      {status === 'expiring' && <AlertTriangle className="w-3 h-3 mr-1.5 fill-current" />}
+      {status === 'expired'  && <XCircle className="w-3 h-3 mr-1.5 fill-current" />}
       {statusLabel}
     </span>
   );

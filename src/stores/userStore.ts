@@ -21,8 +21,9 @@ interface UserState {
   isLoading: boolean;
   
   // Actions
+  reset: () => void;
   subscribe: (tenantId: string) => () => void;
-  inviteUser: (tenantId: string, email: string, role: Role, invitedBy: string) => Promise<void>;
+  inviteUser: (tenantId: string, email: string, name: string, role: Role, invitedBy: string) => Promise<void>;
   updateMemberRole: (membershipId: string, role: Role) => Promise<void>;
   updateMemberStatus: (membershipId: string, isActive: boolean) => Promise<void>;
 }
@@ -31,6 +32,8 @@ export const useUserStore = create<UserState>((set) => ({
   teamMembers: [],
   presenceMap: {},
   isLoading: true,
+
+  reset: () => set({ teamMembers: [], presenceMap: {}, isLoading: false }),
 
   subscribe: (tenantId) => {
     set({ isLoading: true });
@@ -45,7 +48,7 @@ export const useUserStore = create<UserState>((set) => ({
           tenantId: m.tenantId,
           role: m.role,
           status: m.status, // active, pending, suspended
-          name: profile?.name || 'Pendiente de acceso',
+          name: profile?.name || m.name || 'Pendiente de acceso',
           email: profile?.email || m.email,
           isActive: m.status !== 'suspended'
         } as TeamMember;
@@ -70,8 +73,8 @@ export const useUserStore = create<UserState>((set) => ({
     };
   },
 
-  inviteUser: async (tenantId, email, role, invitedBy) => {
-    await UserService.inviteUser(tenantId, email, role, invitedBy);
+  inviteUser: async (tenantId, email, name, role, invitedBy) => {
+    await UserService.inviteUser(tenantId, email, name, role, invitedBy);
   },
 
   updateMemberRole: async (membershipId, role) => {

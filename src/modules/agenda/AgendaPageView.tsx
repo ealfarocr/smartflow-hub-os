@@ -4,12 +4,12 @@ import { useLeadStore } from '@/stores/leadStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { AgendaItem } from '@/types';
-import { Plus, Calendar as CalendarIcon, List, CheckCircle2, Circle, Clock, MapPin, User as UserIcon, CalendarX2, Loader2, AlertCircle, Pencil } from 'lucide-react';
+import { Plus, Calendar as CalendarIcon, List, CheckCircle2, Circle, Clock, MapPin, User as UserIcon, CalendarX2, Loader2, AlertCircle, Pencil, Trash2 } from 'lucide-react';
 import { format, isSameDay, addDays } from 'date-fns';
 import { AgendaModal } from './components/AgendaModal';
 
 export const AgendaPageView = () => {
-  const { items, updateItem, subscribe, isLoading, error } = useAgendaStore();
+  const { items, updateItem, deleteItem, subscribe, isLoading, error } = useAgendaStore();
   const { leads } = useLeadStore();
   const { activeMembership } = useAuthStore();
   const { addToast } = useUIStore();
@@ -60,6 +60,16 @@ export const AgendaPageView = () => {
     }
   };
 
+  const handleDelete = async (id: string, title: string) => {
+    if (!window.confirm(`¿Eliminar "${title}"?`)) return;
+    try {
+      await deleteItem(id);
+      addToast('Actividad eliminada', 'success');
+    } catch (error) {
+      addToast('Error al eliminar', 'error');
+    }
+  };
+
   // Mock Calendar setup
   const today = new Date();
   const calendarDays = Array.from({ length: 7 }).map((_, i) => addDays(today, i - 1));
@@ -68,6 +78,7 @@ export const AgendaPageView = () => {
     switch(type) {
       case 'llamada': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400';
       case 'visita técnica': return 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400';
+      case 'visita': return 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400';
       case 'instalación': return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400';
       default: return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400';
     }
@@ -81,22 +92,22 @@ export const AgendaPageView = () => {
           <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
             <button
               onClick={() => setViewMode('list')}
-              className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-primary-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+              className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-sm text-[#1877F2] dark:text-primary-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
             >
               <List className="w-5 h-5" />
             </button>
             <button
               onClick={() => setViewMode('calendar')}
-              className={`p-1.5 rounded-md transition-colors ${viewMode === 'calendar' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-primary-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+              className={`p-1.5 rounded-md transition-colors ${viewMode === 'calendar' ? 'bg-white dark:bg-slate-700 shadow-sm text-[#1877F2] dark:text-primary-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
             >
               <CalendarIcon className="w-5 h-5" />
             </button>
           </div>
           <button
             onClick={handleCreateNew}
-            className="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center"
+            className="bg-[#1877F2] hover:bg-[#166fe5] text-white px-5 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest transition-all shadow-lg shadow-[#1877F2]/20 flex items-center"
           >
-            <Plus className="h-4 w-4 mr-2" />
+            <Plus className="h-4.5 w-4.5 mr-2" />
             Nueva Actividad
           </button>
         </div>
@@ -106,7 +117,7 @@ export const AgendaPageView = () => {
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm relative min-h-[400px]">
            {isLoading && (
              <div className="absolute inset-0 bg-white/50 dark:bg-slate-900/50 backdrop-blur-[1px] z-20 flex flex-col items-center justify-center">
-                <Loader2 className="w-12 h-12 text-primary-500 animate-spin mb-4" />
+                <Loader2 className="w-12 h-12 text-[#1877F2] animate-spin mb-4" />
                 <p className="text-slate-500 font-medium animate-pulse text-lg">Sincronizando agenda...</p>
              </div>
            )}
@@ -146,7 +157,7 @@ export const AgendaPageView = () => {
                   <li key={item.id} className={`group p-4 sm:p-6 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${item.isCompleted ? 'opacity-60' : ''}`}>
                     <div className="flex items-start justify-between">
                       <div className="flex items-start space-x-4">
-                        <button onClick={() => toggleStatus(item.id, item.isCompleted)} className="mt-1 flex-shrink-0 text-slate-400 hover:text-primary-600 dark:hover:text-primary-400">
+                        <button onClick={() => toggleStatus(item.id, item.isCompleted)} className="mt-1 flex-shrink-0 text-slate-400 hover:text-[#1877F2] dark:hover:text-primary-400">
                           {item.isCompleted ? <CheckCircle2 className="w-6 h-6 text-emerald-500" /> : <Circle className="w-6 h-6" />}
                         </button>
                         <div>
@@ -166,15 +177,23 @@ export const AgendaPageView = () => {
                       </div>
                       <div className="text-right flex flex-col items-end gap-2">
                         <div className="flex items-center justify-end text-slate-600 dark:text-slate-300 font-medium bg-slate-100 dark:bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
-                          <Clock className="w-4 h-4 mr-2 text-primary-500" />
+                          <Clock className="w-4 h-4 mr-2 text-[#1877F2]" />
                           {format(new Date(item.date), 'dd/MM/yyyy HH:mm')}
                         </div>
-                        <button 
-                          onClick={() => handleEditItem(item)}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center text-xs font-medium text-slate-500 hover:text-primary-600 dark:hover:text-primary-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 rounded-md"
-                        >
-                          <Pencil className="w-3.5 h-3.5 mr-1.5" /> Editar
-                        </button>
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2">
+                          <button
+                            onClick={() => handleEditItem(item)}
+                            className="flex items-center text-xs font-medium text-slate-500 hover:text-[#1877F2] dark:hover:text-primary-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 rounded-md"
+                          >
+                            <Pencil className="w-3.5 h-3.5 mr-1.5" /> Editar
+                          </button>
+                          <button
+                            onClick={() => handleDelete(item.id, item.title)}
+                            className="flex items-center text-xs font-medium text-red-400 hover:text-red-600 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 rounded-md"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Eliminar
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </li>
@@ -191,7 +210,7 @@ export const AgendaPageView = () => {
                const isToday = isSameDay(date, today);
                return (
                  <div key={i} className={`min-h-[150px] border border-slate-200 dark:border-slate-700 rounded-lg p-2 ${isToday ? 'bg-primary-50 dark:bg-primary-900/10 border-primary-300 dark:border-primary-800' : 'bg-slate-50 dark:bg-slate-900/50'}`}>
-                   <p className={`text-xs font-bold mb-2 ${isToday ? 'text-primary-600 dark:text-primary-400' : 'text-slate-500'}`}>
+                   <p className={`text-xs font-bold mb-2 ${isToday ? 'text-[#1877F2] dark:text-primary-400' : 'text-slate-500'}`}>
                      {format(date, 'EEEE dd')}
                    </p>
                    <div className="space-y-2">

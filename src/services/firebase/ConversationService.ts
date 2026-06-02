@@ -25,7 +25,7 @@ export class ConversationService {
     const q = query(
       collection(db, this.collectionName),
       where('tenantId', '==', tenantId),
-      where('status', '==', 'active'),
+      where('status', 'in', ['active', 'bot_handling']),
       orderBy('lastMessageDate', 'desc')
     );
 
@@ -35,7 +35,10 @@ export class ConversationService {
         id: doc.id,
         lastMessageDate: doc.data().lastMessageDate instanceof Timestamp 
           ? doc.data().lastMessageDate.toDate().toISOString() 
-          : doc.data().lastMessageDate
+          : doc.data().lastMessageDate,
+        lastInboundDate: doc.data().lastInboundDate instanceof Timestamp 
+          ? doc.data().lastInboundDate.toDate().toISOString() 
+          : doc.data().lastInboundDate
       })) as Conversation[];
       callback(conversations);
     }, (error) => {
@@ -75,10 +78,10 @@ export class ConversationService {
     mediaFilename?: string | null,
     templateName?: string,
     languageCode?: string,
-    components?: any[]
+    components?: any[],
+    source: string = 'whatsapp'
   ) {
     if (sender === 'lead') {
-      // Logic for lead sending messages (inbound) - usually from webhook, but for dev/mock:
       const batch = writeBatch(db);
       const msgRef = doc(collection(db, this.collectionName, conversationId, 'messages'));
       batch.set(msgRef, {
@@ -92,6 +95,7 @@ export class ConversationService {
       batch.update(convRef, {
         lastMessage: text,
         lastMessageDate: serverTimestamp(),
+        lastInboundDate: serverTimestamp(),
         lastMessageSender: sender,
         unreadCount: increment(1),
         updatedAt: serverTimestamp()
@@ -100,14 +104,18 @@ export class ConversationService {
       return;
     }
 
-    // ADVISOR OUTBOUND - Always via Callable
+    // ADVISOR OUTBOUND
     if (!tenantId) throw new Error('TenantId is required for advisor outbound');
     
-    const sendFn = httpsCallable(this.functions, 'sendWhatsappMessage');
+    // Choose function based on source
+    const functionName = source === 'whatsapp' ? 'sendWhatsappMessage' : 'sendMetaMessage';
+    const sendFn = httpsCallable(this.functions, functionName);
+    
     const result = await sendFn({
       conversationId,
       text,
       tenantId,
+      source,
       ...(mediaUrl && { mediaUrl }),
       ...(mediaFilename && { mediaFilename }),
       ...(templateName && { templateName }),
@@ -122,6 +130,22 @@ export class ConversationService {
     const convRef = doc(db, this.collectionName, conversationId);
     await updateDoc(convRef, {
       unreadCount: 0,
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  static async assignAgent(conversationId: string, advisorId: string) {
+    const convRef = doc(db, this.collectionName, conversationId);
+    await updateDoc(convRef, {
+      advisorId,
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  static async toggleBot(conversationId: string, enabled: boolean) {
+    const convRef = doc(db, this.collectionName, conversationId);
+    await updateDoc(convRef, {
+      botEnabled: enabled,
       updatedAt: serverTimestamp()
     });
   }
@@ -149,6 +173,8 @@ export class ConversationService {
         lastMessage: 'Hola, me interesa cotizar para mi casa',
         lastMessageSender: 'lead' as const,
         unreadCount: 1,
+        aiSentiment: 'positive' as const,
+        aiSuggestedReply: '¡Hola Carlos! Claro que sí, ¿te gustaría que agendemos una visita técnica para dimensionar tu sistema?'
       },
       {
         contactName: 'Empresa Alpha',
@@ -158,6 +184,7 @@ export class ConversationService {
         lastMessage: 'Gracias por la información',
         lastMessageSender: 'advisor' as const,
         unreadCount: 0,
+        aiSentiment: 'neutral' as const
       }
     ];
 

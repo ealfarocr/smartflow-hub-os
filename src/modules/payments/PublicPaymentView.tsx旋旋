@@ -1,0 +1,139 @@
+import { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { PaymentService, PaymentRequest } from '@/services/firebase/PaymentService';
+import { Loader2, CheckCircle2, AlertCircle, Lock } from 'lucide-react';
+import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
+
+export const PublicPaymentView = () => {
+  const { id } = useParams<{ id: string }>();
+  const [request, setRequest] = useState<PaymentRequest | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadRequest = async () => {
+      if (!id) return;
+      try {
+        const data = await PaymentService.getRequest(id);
+        if (data) {
+          setRequest(data);
+        } else {
+          setError('El enlace de pago no existe o ha expirado.');
+        }
+      } catch (e) {
+        console.error(e);
+        setError('Error al cargar la información de pago.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadRequest();
+  }, [id]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+        <Loader2 className="w-12 h-12 text-[#1877F2] animate-spin mb-4" />
+        <p className="text-slate-500 font-bold animate-pulse">Cargando información de pago...</p>
+      </div>
+    );
+  }
+
+  if (error || !request) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 text-center">
+        <div className="w-20 h-20 bg-red-50 text-red-500 rounded-[2rem] flex items-center justify-center mb-6">
+          <AlertCircle className="w-10 h-10" />
+        </div>
+        <h1 className="text-2xl font-black text-slate-900 mb-2">Enlace no válido</h1>
+        <p className="text-slate-500 max-w-md">{error}</p>
+      </div>
+    );
+  }
+
+  const currencySymbol = request.currency === 'CRC' ? '₡' : '$';
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+      {/* Branding Header */}
+      <div className="w-full max-w-lg mb-8 text-center">
+        <h2 className="text-3xl font-black text-[#1877F2] tracking-tighter italic">SMARTFLOW<span className="text-slate-900 not-italic">HUB</span></h2>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1">Plataforma de Pagos Seguros</p>
+      </div>
+
+      <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl shadow-[#1877F2]/5 border border-slate-100 overflow-hidden">
+        {/* Concept Section */}
+        <div className="bg-[#1877F2] p-10 text-white text-center relative overflow-hidden">
+           <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.2),transparent)] opacity-50" />
+           <p className="text-white/70 text-[10px] font-black uppercase tracking-[0.2em] mb-2 relative z-10">Concepto de Pago</p>
+           <h3 className="text-2xl font-black tracking-tight leading-tight relative z-10">{request.concept}</h3>
+           <div className="mt-8 relative z-10 inline-flex flex-col items-center">
+             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/50 mb-1">Total a Pagar</span>
+             <div className="flex items-start">
+               <span className="text-2xl font-black mt-2 mr-1 opacity-70">{currencySymbol}</span>
+               <span className="text-6xl font-black tracking-tighter">{request.amount.toLocaleString()}</span>
+               <span className="text-xl font-black ml-1 opacity-50">{request.currency}</span>
+             </div>
+           </div>
+        </div>
+
+        <div className="p-10 space-y-8">
+          {/* Customer Info */}
+          <div className="flex items-center justify-between p-6 bg-slate-50 rounded-3xl border border-slate-100">
+             <div>
+               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Cliente</p>
+               <p className="text-lg font-black text-slate-900">{request.customer}</p>
+             </div>
+             <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-[#1877F2] shadow-sm">
+               <CheckCircle2 className="w-6 h-6" />
+             </div>
+          </div>
+
+          {/* Payment Button */}
+          <div className="space-y-4">
+            <PayPalScriptProvider options={{ 
+              clientId: request.paypalClientId || "test", 
+              currency: request.currency === 'MX' ? 'MXN' : request.currency,
+              components: "buttons",
+              enableFunding: "card"
+            }}>
+              <PayPalButtons
+                createOrder={(_, actions) => {
+                  return actions.order.create({
+                    purchase_units: [{
+                      amount: {
+                        value: request.amount.toString(),
+                        currency_code: request.currency === 'MX' ? 'MXN' : request.currency
+                      }
+                    }]
+                  });
+                }}
+                onApprove={async (_, actions) => {
+                  if (actions.order) {
+                    await actions.order.capture();
+                  }
+                }}
+              />
+            </PayPalScriptProvider>
+            
+            <div className="flex items-center justify-center gap-2 text-slate-400">
+              <ShieldCheck className="w-4 h-4" />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Pago Encriptado y Seguro</span>
+            </div>
+          </div>
+
+          {/* Footer Info */}
+          <div className="pt-8 border-t border-slate-50 flex items-center justify-between">
+            <div>
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">ID de Transacción</p>
+              <p className="text-[10px] font-mono text-slate-400">{request.id}</p>
+            </div>
+            <img src="https://www.paypalobjects.com/webstatic/mktg/logo/AM_mc_vs_dc_ae.jpg" alt="Pagos" className="h-6 grayscale opacity-50" />
+          </div>
+        </div>
+      </div>
+
+      <p className="mt-8 text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Powered by SmartFlow Hub OS</p>
+    </div>
+  );
+};

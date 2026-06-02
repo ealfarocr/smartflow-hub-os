@@ -1,5 +1,21 @@
 {
   "projects": {
     "default": "paneles-solares-bcs-mx"
-  }
+  },
+  "targets": {
+    "paneles-solares-bcs-mx": {
+      "hosting": {
+        "app": [
+          "paneles-solares-bcs-mx"
+        ],
+        "landing": [
+          "smartflow-hub-landing"
+        ],
+        "blog": [
+          "smartflow-hub-blog"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

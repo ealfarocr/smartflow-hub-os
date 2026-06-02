@@ -1,5 +1,5 @@
 {
-  "name": "paneles-solares-mx",
+  "name": "smartflow-hub-os",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
+    "@paypal/react-paypal-js": "^9.2.0",
     "@tailwindcss/vite": "^4.2.2",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",

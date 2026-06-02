@@ -6,7 +6,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '@/lib/firebase';
-import { WhatsappTemplate } from '@/types';
+import { WhatsappTemplate, TenantFeatures, AIAgentConfig, MultiAgentConfig, MediaLibraryItem } from '@/types';
 
 // ─── Pipeline Stage ───────────────────────────────────────
 export interface PipelineStage {
@@ -18,9 +18,20 @@ export interface PipelineStage {
   isClosed: boolean;
 }
 
+export interface OnboardingState {
+  registeredAt?: any;
+  dismissedNotificationIds: string[];
+  lastNotificationDate?: any;
+}
+
 // ─── Tenant Settings ──────────────────────────────────────
 export interface TenantSettings {
   tenantId?: string;
+  paypalEmail?: string; // Movido a la raíz para facilitar guardado directo
+  sinpePhone?: string;
+  sinpeOwner?: string;
+  sinpeId?: string;
+  bankAccounts?: string;
   company: {
     legalName: string;
     tradeName: string;
@@ -54,12 +65,26 @@ export interface TenantSettings {
     stages: PipelineStage[];
   };
   whatsappTemplates: WhatsappTemplate[];
+  features?: Partial<TenantFeatures>;
+  aiAgentConfig?: AIAgentConfig;
+  multiAgentConfig?: MultiAgentConfig;
+  onboarding?: OnboardingState;
+  tasks?: {
+    sections: string[];
+  };
   updatedAt?: any;
   updatedBy?: string;
 }
 
 // ─── Migración: mapea campos antiguos → nuevos ───────────
 function migrateSettings(raw: Record<string, any>): TenantSettings {
+  // Root fields
+  const paypalEmail = raw.paypalEmail || raw.company?.paypalEmail || '';
+  const sinpePhone = raw.sinpePhone || '';
+  const sinpeOwner = raw.sinpeOwner || '';
+  const sinpeId = raw.sinpeId || '';
+  const bankAccounts = raw.bankAccounts || '';
+
   // company
   const oldCompany = raw.company || {};
   const company = {
@@ -95,7 +120,7 @@ function migrateSettings(raw: Record<string, any>): TenantSettings {
   // templates (antes "messages")
   const oldTemplates = raw.templates || raw.messages || {};
   const templates = {
-    welcomeMessage: oldTemplates.welcomeMessage || 'Hola {{leadName}}, gracias por contactar a {{companyName}}. Con gusto podemos ayudarte a evaluar una solución de paneles solares para tu consumo. ¿Tienes a mano tu recibo eléctrico reciente?',
+    welcomeMessage: oldTemplates.welcomeMessage || 'Hola {{leadName}}, gracias por contactar a {{companyName}}. Con gusto podemos brindarte información sobre nuestros servicios. ¿Cómo podemos ayudarte hoy?',
     quoteMessage: oldTemplates.quoteMessage || 'Hola {{leadName}}, te compartimos tu cotización {{quoteNumber}}. El ahorro estimado es de {{savings}} MXN. Puedes revisar la propuesta y decirnos si deseas agendar una visita técnica.',
     meetingReminder: oldTemplates.meetingReminder || 'Hola {{leadName}}, te recordamos nuestra reunión o visita técnica programada. Si necesitas ajustar el horario, puedes responder este mensaje.',
     followUpMessage: oldTemplates.followUpMessage || 'Hola {{leadName}}, ¿pudiste revisar la propuesta que te enviamos? Quedo al pendiente para resolver tus dudas o ayudarte con el siguiente paso.',
@@ -121,7 +146,7 @@ function migrateSettings(raw: Record<string, any>): TenantSettings {
       metaTemplateName: 'seguimiento_cotizacion_solar',
       category: 'UTILITY',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, te contactamos de {{2}} para dar seguimiento a tu cotización de paneles solares {{3}}. ¿Tienes alguna duda sobre la propuesta o te gustaría que revisemos juntos el siguiente paso?',
+      bodyPreview: 'Hola {{1}}, te contactamos de {{2}} para dar seguimiento a tu solicitud {{3}}. ¿Tienes alguna duda sobre la propuesta o te gustaría que revisemos juntos el siguiente paso?',
       variables: ['Nombre del cliente', 'Empresa', 'Número de cotización'],
       isActive: true,
     },
@@ -131,7 +156,7 @@ function migrateSettings(raw: Record<string, any>): TenantSettings {
       metaTemplateName: 'reactivacion_conversacion_solar',
       category: 'UTILITY',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, anteriormente nos contactaste en {{2}} para recibir información sobre paneles solares. Si aún deseas continuar, podemos ayudarte a retomar tu solicitud.',
+      bodyPreview: 'Hola {{1}}, anteriormente nos contactaste en {{2}} para recibir información. Si aún deseas continuar, podemos ayudarte a retomar tu solicitud.',
       variables: ['Nombre del cliente', 'Empresa'],
       isActive: true,
     },
@@ -171,7 +196,7 @@ function migrateSettings(raw: Record<string, any>): TenantSettings {
       metaTemplateName: 'solicitud_recibo_electrico',
       category: 'UTILITY',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, para preparar una propuesta más precisa de paneles solares con {{2}}, necesitamos revisar tu recibo eléctrico reciente. Puedes responder este mensaje adjuntando una imagen o PDF.',
+      bodyPreview: 'Hola {{1}}, para preparar una propuesta más precisa con {{2}}, necesitamos que nos compartas más información. Puedes responder este mensaje adjuntando una imagen o PDF.',
       variables: ['Nombre del cliente', 'Empresa'],
       isActive: true,
     },
@@ -191,7 +216,7 @@ function migrateSettings(raw: Record<string, any>): TenantSettings {
       metaTemplateName: 'propuesta_pendiente_revision_solar',
       category: 'UTILITY',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, te escribimos de {{2}} para confirmar si pudiste revisar la propuesta de paneles solares {{3}}. Si tienes dudas, podemos ayudarte a revisarla.',
+      bodyPreview: 'Hola {{1}}, te escribimos de {{2}} para confirmar si pudiste revisar nuestra propuesta {{3}}. Si tienes dudas, podemos ayudarte a revisarla.',
       variables: ['Nombre del cliente', 'Empresa', 'Número de cotización'],
       isActive: true,
     },
@@ -201,7 +226,7 @@ function migrateSettings(raw: Record<string, any>): TenantSettings {
       metaTemplateName: 'agendar_llamada_seguimiento_solar',
       category: 'UTILITY',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, podemos agendar una llamada breve con {{2}} para revisar tu cotización de paneles solares y resolver tus dudas. Indícanos qué horario te funciona mejor.',
+      bodyPreview: 'Hola {{1}}, podemos agendar una llamada breve con {{2}} para revisar tu propuesta y resolver tus dudas. Indícanos qué horario te funciona mejor.',
       variables: ['Nombre del cliente', 'Empresa'],
       isActive: true,
     },
@@ -221,7 +246,7 @@ function migrateSettings(raw: Record<string, any>): TenantSettings {
       metaTemplateName: 'beneficios_energia_solar',
       category: 'MARKETING',
       languageCode: 'es_MX',
-      bodyPreview: 'Hola {{1}}, en {{2}} podemos ayudarte a evaluar si un sistema de paneles solares se adapta a tu consumo eléctrico. Si te interesa, podemos revisar tu caso y orientarte con una propuesta.',
+      bodyPreview: 'Hola {{1}}, en {{2}} podemos ayudarte con nuestros servicios. Si te interesa, podemos revisar tu caso y orientarte con una propuesta.',
       variables: ['Nombre del cliente', 'Empresa'],
       isActive: true,
     },
@@ -242,13 +267,38 @@ function migrateSettings(raw: Record<string, any>): TenantSettings {
       ? raw.whatsappTemplates
       : defaultWaTemplates;
 
+  const features: Partial<TenantFeatures> = raw.features || {};
+
+  const aiAgentConfig: AIAgentConfig = raw.aiAgentConfig || {
+    apiKey: '',
+    knowledgeFiles: [],
+    productFiles: [],
+    mediaLibrary: [],
+  };
+  if (!aiAgentConfig.mediaLibrary) aiAgentConfig.mediaLibrary = [];
+
+  const multiAgentConfig: MultiAgentConfig = raw.multiAgentConfig || {
+    isAutoDistributionEnabled: false,
+    includedUserIds: [],
+  };
+
   return {
+    paypalEmail,
+    sinpePhone,
+    sinpeOwner,
+    sinpeId,
+    bankAccounts,
     company,
     branding,
     commercial,
     templates,
     pipeline: { stages },
     whatsappTemplates,
+    features,
+    aiAgentConfig,
+    multiAgentConfig,
+    onboarding: raw.onboarding || { dismissedNotificationIds: [] },
+    tasks: raw.tasks || { sections: [] },
   };
 }
 
@@ -273,7 +323,7 @@ export const SettingsService = {
   /**
    * Guarda o actualiza la configuración completa.
    */
-  saveSettings: async (tenantId: string, settings: TenantSettings, userId?: string) => {
+  saveSettings: async (tenantId: string, settings: Partial<TenantSettings>, userId?: string) => {
     const docRef = doc(db, 'settings', tenantId);
     await setDoc(docRef, {
       ...settings,
@@ -289,6 +339,26 @@ export const SettingsService = {
   uploadLogo: async (tenantId: string, file: File): Promise<string> => {
     const ext = file.name.split('.').pop() || 'png';
     const storageRef = ref(storage, `logos/${tenantId}/logo.${ext}`);
+    await uploadBytes(storageRef, file, { contentType: file.type });
+    return getDownloadURL(storageRef);
+  },
+
+  /**
+   * Sube un archivo a la biblioteca de medios del agente IA.
+   */
+  uploadMedia: async (tenantId: string, file: File): Promise<string> => {
+    const ext = file.name.split('.').pop() || 'bin';
+    const storageRef = ref(storage, `media-library/${tenantId}/${Date.now()}.${ext}`);
+    await uploadBytes(storageRef, file, { contentType: file.type });
+    return getDownloadURL(storageRef);
+  },
+
+  /**
+   * Sube un documento de entrenamiento (PDF/TXT) al storage del agente IA.
+   */
+  uploadKnowledgeFile: async (tenantId: string, file: File): Promise<string> => {
+    const safeName = `${Date.now()}-${file.name.replace(/\s+/g, '_')}`;
+    const storageRef = ref(storage, `tenants/${tenantId}/ai-agent/knowledge/${safeName}`);
     await uploadBytes(storageRef, file, { contentType: file.type });
     return getDownloadURL(storageRef);
   },

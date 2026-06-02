@@ -75,7 +75,16 @@ export const AuthService = {
 
   async getUserProfile(uid: string): Promise<User | null> {
     const snap = await getDoc(doc(db, 'users', uid));
-    return snap.exists() ? (snap.data() as User) : null;
+    if (!snap.exists()) return null;
+    
+    const data = snap.data() as User;
+    
+    // Forzar Super Admin para el correo maestro (Admin Master)
+    if (data.email === 'publicidadynegociosenlinea@gmail.com') {
+      return { ...data, isSuperAdmin: true };
+    }
+    
+    return data;
   },
   
   async getMembership(uid: string, tenantId: string): Promise<Membership | null> {
@@ -117,6 +126,28 @@ export const AuthService = {
     const q = query(collection(db, 'memberships'), where('userId', '==', uid));
     const querySnapshot = await getDocs(q);
     
-    return querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }) as Membership);
+    const memberships = querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }) as Membership);
+
+    // Enriquecer con nombres de empresas para evitar IDs crudos en la UI
+    const enriched = await Promise.all(memberships.map(async (m) => {
+      try {
+        const tDoc = await getDoc(doc(db, 'tenants', m.tenantId));
+        if (tDoc.exists()) {
+          const tData = tDoc.data();
+          return { ...m, tenantName: tData.name || tData.n || tData.tradeName || 'Negocio' };
+        }
+      } catch (e) {
+        console.warn(`No se pudo obtener el nombre para el tenant ${m.tenantId}`, e);
+      }
+      return m;
+    }));
+
+    return enriched;
+  },
+
+  async getTenantMemberships(tenantId: string): Promise<Membership[]> {
+    const q = query(collection(db, 'memberships'), where('tenantId', '==', tenantId), where('status', '==', 'active'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }) as Membership);
   }
 };

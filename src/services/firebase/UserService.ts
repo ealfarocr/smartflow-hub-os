@@ -44,7 +44,7 @@ export const UserService = {
   /**
    * Invita a un nuevo usuario al tenant.
    */
-  inviteUser: async (tenantId: string, email: string, role: string, invitedBy: string) => {
+  inviteUser: async (tenantId: string, email: string, name: string, role: string, invitedBy: string) => {
     // Verificar si ya está invitado
     const q = query(
       collection(db, 'memberships'),
@@ -59,6 +59,7 @@ export const UserService = {
     await addDoc(collection(db, 'memberships'), {
       tenantId,
       email,
+      name,
       role,
       status: 'pending',
       userId: null,

@@ -58,6 +58,9 @@ export function getWindowStatusFromDate(lastInboundDate?: string | null): Whatsa
   }
 
   const lastInboundAt = new Date(lastInboundDate);
+  if (isNaN(lastInboundAt.getTime())) {
+    return { status: 'expired', expiresAt: null, timeRemaining: null, lastInboundAt: null };
+  }
   const expiresAt = new Date(lastInboundAt.getTime() + WINDOW_MS);
   const timeRemaining = expiresAt.getTime() - Date.now();
 

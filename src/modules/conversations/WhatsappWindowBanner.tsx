@@ -1,4 +1,4 @@
-import { Clock, AlertTriangle, XCircle, Info } from 'lucide-react';
+import { AlertTriangle, XCircle, Info, MessageSquare } from 'lucide-react';
 import { UseWhatsappWindowResult } from '@/hooks/useWhatsappWindow';
 
 interface WhatsappWindowBannerProps {
@@ -14,10 +14,10 @@ export const WhatsappWindowBanner = ({ windowInfo }: WhatsappWindowBannerProps) 
 
   if (status === 'active') {
     return (
-      <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/40">
-        <Clock className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
-        <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
-          Ventana WhatsApp activa · quedan <strong>{countdown}</strong>
+      <div className="flex items-center gap-2 px-4 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-500/20 shadow-sm animate-in fade-in duration-500">
+        <MessageSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 fill-current" />
+        <span className="text-[11px] font-black text-emerald-700 dark:text-emerald-400 whitespace-nowrap uppercase tracking-wider">
+          Chat Libre · <span className="font-bold">{countdown}</span>
         </span>
       </div>
     );
@@ -25,10 +25,10 @@ export const WhatsappWindowBanner = ({ windowInfo }: WhatsappWindowBannerProps) 
 
   if (status === 'expiring') {
     return (
-      <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700/40 animate-pulse">
-        <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
-        <span className="text-[11px] font-medium text-amber-700 dark:text-amber-400 whitespace-nowrap">
-          Atención: quedan <strong>{countdown}</strong>
+      <div className="flex items-center gap-2 px-4 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-400/20 animate-pulse shadow-sm">
+        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 fill-current" />
+        <span className="text-[11px] font-black text-amber-700 dark:text-amber-400 whitespace-nowrap uppercase tracking-wider">
+          Cierra en: <span className="font-bold">{countdown}</span>
         </span>
       </div>
     );
@@ -36,10 +36,10 @@ export const WhatsappWindowBanner = ({ windowInfo }: WhatsappWindowBannerProps) 
 
   // expired
   return (
-    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40">
-      <XCircle className="w-3 h-3 text-red-600 dark:text-red-400 shrink-0" />
-      <span className="text-[11px] font-medium text-red-700 dark:text-red-400 whitespace-nowrap">
-        Ventana vencida · usar plantilla aprobada
+    <div className="flex items-center gap-2 px-4 py-1.5 rounded-xl bg-red-50 dark:bg-red-900/20 border-2 border-red-500/20 shadow-sm">
+      <XCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 fill-current" />
+      <span className="text-[11px] font-black text-red-700 dark:text-red-400 whitespace-nowrap uppercase tracking-wider">
+        Ventana Vencida · Reactivar Chat
       </span>
     </div>
   );
@@ -52,12 +52,12 @@ export const WhatsappWindowHint = ({ status }: { status: 'active' | 'expiring' |
   if (status === 'expired') return null;
 
   return (
-    <div className="flex items-center gap-1.5 mb-2">
-      <Info className="w-3 h-3 text-slate-400 shrink-0" />
-      <p className="text-[11px] text-slate-400">
+    <div className="flex items-center gap-1.5 mb-2 px-2">
+      <Info className="w-3.5 h-3.5 text-[#1877F2] shrink-0" />
+      <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
         {status === 'active'
-          ? 'Puedes responder con mensaje libre dentro de la ventana de 24 horas.'
-          : 'La ventana vence pronto. Responde ahora o prepara una plantilla.'}
+          ? 'La ventana está abierta. Puedes enviar mensajes, imágenes y archivos sin restricciones.'
+          : '¡Atención! La ventana de conversación vence pronto. Responde ahora para mantener el chat activo.'}
       </p>
     </div>
   );
