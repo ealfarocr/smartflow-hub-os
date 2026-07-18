@@ -87,10 +87,14 @@ export function launchWhatsappEmbeddedSignup(
       if (!isValidFacebookOrigin(event.origin)) return;
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'WA_EMBEDDED_SIGNUP' && data.event === 'FINISH') {
+        if (
+          data.type === 'WA_EMBEDDED_SIGNUP' &&
+          data.data?.waba_id &&
+          data.data?.phone_number_id
+        ) {
           sessionData = {
-            wabaId: data.data?.waba_id,
-            phoneNumberId: data.data?.phone_number_id,
+            wabaId: data.data.waba_id,
+            phoneNumberId: data.data.phone_number_id,
           };
         }
       } catch {
