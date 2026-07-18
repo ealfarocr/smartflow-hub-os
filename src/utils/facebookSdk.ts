@@ -8,6 +8,19 @@ declare global {
 let sdkPromise: Promise<void> | null = null;
 
 /**
+ * Valida que el origen del postMessage sea realmente de Facebook.
+ * Previene ataques por dominios que terminen con 'facebook.com'.
+ */
+const isValidFacebookOrigin = (origin: string): boolean => {
+  try {
+    const hostname = new URL(origin).hostname;
+    return hostname === 'facebook.com' || hostname.endsWith('.facebook.com');
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Carga el SDK de JavaScript de Facebook una sola vez y lo inicializa con el
  * App ID de SmartFlow Hub Connect. Llamadas repetidas devuelven la misma promesa.
  */
@@ -16,6 +29,7 @@ export function loadFacebookSdk(): Promise<void> {
 
   sdkPromise = new Promise((resolve, reject) => {
     if (typeof window === 'undefined') {
+      sdkPromise = null;
       reject(new Error('loadFacebookSdk solo puede ejecutarse en el navegador'));
       return;
     }
@@ -41,7 +55,10 @@ export function loadFacebookSdk(): Promise<void> {
     script.src = 'https://connect.facebook.net/es_LA/sdk.js';
     script.async = true;
     script.defer = true;
-    script.onerror = () => reject(new Error('No se pudo cargar el SDK de Facebook'));
+    script.onerror = () => {
+      sdkPromise = null;
+      reject(new Error('No se pudo cargar el SDK de Facebook'));
+    };
     document.body.appendChild(script);
   });
 
@@ -66,7 +83,7 @@ export function launchWhatsappEmbeddedSignup(
     let sessionData: { wabaId: string; phoneNumberId: string } | null = null;
 
     const handleMessage = (event: MessageEvent) => {
-      if (!event.origin.endsWith('facebook.com')) return;
+      if (!isValidFacebookOrigin(event.origin)) return;
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'WA_EMBEDDED_SIGNUP' && data.event === 'FINISH') {
