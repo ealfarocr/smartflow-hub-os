@@ -16,6 +16,7 @@ import { MultiAgentView } from '@/modules/multi-agent/MultiAgentView'
 import { QualityAuditorView } from '@/modules/auditor/QualityAuditorView'
 import { PaymentsView } from '@/modules/payments/PaymentsView'
 import { MarketplaceView } from '@/modules/marketplace/MarketplaceView'
+import { SubscriptionView } from '@/modules/subscription/SubscriptionView'
 import { TasksView } from '@/modules/tasks/TasksView'
 import { PublicPaymentView } from '@/modules/payments/PublicPaymentView'
 import { AdminMailView } from '@/modules/admin-mail/AdminMailView'
@@ -39,6 +40,7 @@ import { SuperAdminGuard } from '@/components/guards/SuperAdminGuard'
 import { TenantsListView } from '@/modules/superadmin/TenantsListView'
 import { ToolsHubView } from '@/modules/superadmin/ToolsHubView'
 import { MarketingView } from '@/modules/superadmin/MarketingView'
+import { GlobalAgentView } from '@/modules/superadmin/GlobalAgentView'
 import { TenantEntryView } from '@/modules/superadmin/TenantEntryView'
 
 export const AppRouter = () => {
@@ -80,6 +82,7 @@ export const AppRouter = () => {
             <Route element={<SuperAdminGuard children={<Outlet />} />}>
               <Route path="super-admin" element={<TenantsListView />} />
               <Route path="super-admin/tools" element={<ToolsHubView />} />
+              <Route path="super-admin/agente-global" element={<GlobalAgentView />} />
               <Route path="super-admin/marketing" element={<MarketingView />} />
             </Route>
 
@@ -111,6 +114,7 @@ export const AppRouter = () => {
             </Route>
             <Route path="tareas" element={<TasksView />} />
             <Route path="tienda" element={<MarketplaceView />} />
+            <Route path="suscripcion" element={<SubscriptionView />} />
             <Route path="academia" element={<AcademiaView />} />
             <Route path="partners" element={<PartnersView />} />
             

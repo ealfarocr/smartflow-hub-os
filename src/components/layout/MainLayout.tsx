@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { RouteErrorBoundary } from './RouteErrorBoundary'
-import { LayoutDashboard, MessageSquareText, Users, Calendar, Settings, Package, FileText, Menu, X, LogOut, LayoutGrid, Plus, Zap, Sun, Moon, Bot, ShieldCheck, CreditCard, ShoppingBag, LayoutList, Mail, GraduationCap, Handshake, FolderOpen, Sparkles, ChevronDown, ChevronRight, Headset, Blocks } from 'lucide-react'
+import { LayoutDashboard, MessageSquareText, Users, Calendar, Settings, Package, FileText, Menu, X, LogOut, LayoutGrid, Plus, Zap, Sun, Moon, Bot, ShieldCheck, CreditCard, ShoppingBag, LayoutList, Mail, GraduationCap, Handshake, FolderOpen, Sparkles, ChevronDown, ChevronRight, Headset, Blocks, BadgeCheck } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useUIStore } from '@/stores/uiStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -13,6 +13,7 @@ import { TenantFeatures } from '@/types'
 import { CreateTenantModal } from '@/modules/superadmin/CreateTenantModal'
 import SupportAgent from '../support/SupportAgent'
 import { OnboardingBanner } from '../onboarding/OnboardingBanner'
+import { NotificationBell } from './NotificationBell'
 
 const allNavItems = [
   // --- CORE SECTION ---
@@ -22,6 +23,7 @@ const allNavItems = [
   { name: 'CRM',             href: '/crm',             icon: Users,              feature: null },
   { name: 'Paquetes',        href: '/paquetes',        icon: FolderOpen,         feature: null },
   { name: 'Tienda Hub',      href: '/tienda',          icon: ShoppingBag,        feature: null },
+  { name: 'Mi Suscripción', href: '/suscripcion',     icon: BadgeCheck,         feature: null },
   { name: 'Usuarios',        href: '/usuarios',        icon: Users,              feature: null },
   { name: 'Configuración',   href: '/configuracion',   icon: Settings,           feature: null },
   { name: 'Academia',        href: '/academia',        icon: GraduationCap,      feature: null, superAdminOnly: true },
@@ -29,7 +31,7 @@ const allNavItems = [
 
   // --- TOOLS SECTION ---
   { name: 'WhatsApp',        href: '/conversaciones',  icon: MessageSquareText,  feature: 'hasMultiAgent' as keyof TenantFeatures },
-  { name: 'Multi-Agente',    href: '/multi-agent',     icon: Headset,            feature: 'hasMultiAgent' as keyof TenantFeatures },
+  { name: 'Multi-Agente',    href: '/multi-agent',     icon: Headset,            feature: 'hasMultiAgentPanel' as keyof TenantFeatures },
   { name: 'Agente IA',       href: '/ai-agent',        icon: Bot,                feature: 'hasAiAgent' as keyof TenantFeatures },
   { name: 'Auditor IA',      href: '/auditoria',       icon: ShieldCheck,        feature: 'hasQualityAuditor' as keyof TenantFeatures },
   { name: 'Links de Pago',   href: '/pagos',           icon: CreditCard,         feature: 'hasPaymentLinks' as keyof TenantFeatures },
@@ -105,6 +107,7 @@ export const MainLayout = () => {
     configItems.push({ name: 'Academia', href: '/academia', icon: GraduationCap });
     configItems.push({ name: 'Partners', href: '/partners', icon: Handshake });
     configItems.push({ name: 'Gestión de Negocios', href: '/super-admin', icon: LayoutGrid });
+    configItems.push({ name: 'Agente IA Global', href: '/super-admin/agente-global', icon: Bot });
     configItems.push({ name: 'Librería Hub', href: '/super-admin/tools', icon: Zap });
   }
 
@@ -117,12 +120,10 @@ export const MainLayout = () => {
 
   // Inyectar branding dinámico
   useEffect(() => {
-    if (branding?.primaryColor) {
-      document.documentElement.style.setProperty('--primary', branding.primaryColor);
-    } else {
-      document.documentElement.style.setProperty('--primary', '#2563eb');
-    }
-  }, [branding?.primaryColor]);
+    document.documentElement.style.setProperty('--primary', branding?.primaryColor || '#1877F2');
+    if (branding?.secondaryColor) document.documentElement.style.setProperty('--secondary', branding.secondaryColor);
+    if (branding?.accentColor) document.documentElement.style.setProperty('--accent', branding.accentColor);
+  }, [branding?.primaryColor, branding?.secondaryColor, branding?.accentColor]);
 
   const handleLogout = () => {
     if (window.confirm('¿Cerrar sesión?')) {
@@ -151,7 +152,7 @@ export const MainLayout = () => {
             ) : branding?.logoUrl ? (
               <img src={branding.logoUrl} alt="Logo" className="h-10 w-auto max-w-[170px] object-contain object-left flex-shrink-0" />
             ) : (
-              <div className="w-9 h-9 rounded-lg bg-primary-600 flex items-center justify-center text-white font-bold flex-shrink-0 shadow-lg shadow-primary-500/20">
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-bold flex-shrink-0 shadow-lg" style={{ backgroundColor: 'var(--primary)' }}>
                 {impersonatedName?.charAt(0).toUpperCase() || activeMembership?.tenantName?.charAt(0) || company?.tradeName?.charAt(0) || 'S'}
               </div>
             )}
@@ -197,10 +198,11 @@ export const MainLayout = () => {
                       className={({ isActive }) =>
                         `flex items-center px-4 py-2.5 text-xs font-bold rounded-xl transition-all duration-200 group ${
                           isActive
-                            ? 'bg-[#1877F2] text-white shadow-lg shadow-[#1877F2]/30'
+                            ? 'text-white shadow-lg'
                             : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700/50'
                         }`
                       }
+                      style={({ isActive }: { isActive: boolean }) => isActive ? { backgroundColor: 'var(--primary)' } : {}}
                     >
                       {({ isActive }) => (
                         <>
@@ -246,10 +248,11 @@ export const MainLayout = () => {
                         className={({ isActive }) =>
                           `flex items-center px-4 py-2.5 text-xs font-bold rounded-xl transition-all duration-200 group ${
                             isActive
-                              ? 'bg-[#1877F2] text-white shadow-lg shadow-[#1877F2]/30'
+                              ? 'text-white shadow-lg'
                               : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700/50'
                           }`
                         }
+                        style={({ isActive }: { isActive: boolean }) => isActive ? { backgroundColor: 'var(--primary)' } : {}}
                       >
                         {({ isActive }) => (
                           <>
@@ -296,10 +299,11 @@ export const MainLayout = () => {
                         className={({ isActive }) =>
                           `flex items-center px-4 py-2.5 text-xs font-bold rounded-xl transition-all duration-200 group ${
                             isActive
-                              ? 'bg-[#1877F2] text-white shadow-lg shadow-[#1877F2]/30'
+                              ? 'text-white shadow-lg'
                               : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700/50'
                           }`
                         }
+                        style={({ isActive }: { isActive: boolean }) => isActive ? { backgroundColor: 'var(--primary)' } : {}}
                       >
                         {({ isActive }) => (
                           <>
@@ -346,10 +350,11 @@ export const MainLayout = () => {
                         className={({ isActive }) =>
                           `flex items-center px-4 py-2.5 text-xs font-bold rounded-xl transition-all duration-200 group ${
                             isActive
-                              ? 'bg-[#1877F2] text-white shadow-lg shadow-[#1877F2]/30'
+                              ? 'text-white shadow-lg'
                               : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700/50'
                           }`
                         }
+                        style={({ isActive }: { isActive: boolean }) => isActive ? { backgroundColor: 'var(--primary)' } : {}}
                       >
                         {({ isActive }) => (
                           <>
@@ -403,14 +408,15 @@ export const MainLayout = () => {
             <div className="hidden sm:flex items-center text-sm font-medium text-slate-600 dark:text-slate-400 mr-2">
                {user?.name || 'Cargando...'}
             </div>
-            <div className="h-8 w-8 rounded-full bg-primary-100 dark:bg-primary-900/50 flex items-center justify-center border border-primary-200 dark:border-primary-800 cursor-pointer">
-              <span className="text-sm font-medium text-primary-700 dark:text-primary-400">
+            <div className="h-8 w-8 rounded-full flex items-center justify-center border cursor-pointer" style={{ backgroundColor: 'color-mix(in srgb, var(--primary) 15%, transparent)', borderColor: 'color-mix(in srgb, var(--primary) 30%, transparent)', color: 'var(--primary)' }}>
+              <span className="text-sm font-medium">
                 {userInitials}
               </span>
             </div>
+            <NotificationBell />
             <button
               onClick={toggleTheme}
-              className="p-2 text-slate-400 hover:text-primary-500 dark:hover:text-primary-400 transition-colors"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
               title={theme === 'dark' ? 'Modo Claro' : 'Modo Oscuro'}
             >
               {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}

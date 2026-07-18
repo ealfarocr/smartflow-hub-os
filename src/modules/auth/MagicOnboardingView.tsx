@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { OnboardingService } from '@/services/OnboardingService';
+import { slugifyTenantId } from '@/utils/slug';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 
@@ -20,7 +21,7 @@ const INDUSTRIES = [
 ];
 
 export const MagicOnboardingView = () => {
-  const { user, memberships, refreshAuth } = useAuthStore();
+  const { user, memberships } = useAuthStore();
   const { addToast } = useUIStore();
   const navigate = useNavigate();
   
@@ -75,14 +76,12 @@ export const MagicOnboardingView = () => {
       // Registro real en backend
       await OnboardingService.registerNewBusiness({
         businessName,
-        tradeName: businessName.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, ''),
+        tradeName: slugifyTenantId(businessName),
         email: user?.email || '',
         phone: '',
         industry: resolvedIndustry,
         selectedFeatures: ['hasCrm', 'hasTasks', 'hasPackages'] // Defaults free
       });
-      
-      await refreshAuth(); // Recargar membresías
       setStep(4);
     } catch (error) {
       console.error(error);
@@ -281,7 +280,7 @@ export const MagicOnboardingView = () => {
               </div>
 
               <button
-                onClick={() => navigate('/dashboard')}
+                onClick={() => { window.location.href = '/dashboard'; }}
                 className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-6 rounded-[2rem] font-black text-lg uppercase tracking-widest shadow-2xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3"
               >
                 ENTRAR A MI HUB <ArrowRight className="w-6 h-6" />

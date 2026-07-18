@@ -4,10 +4,10 @@ import {
   Plus, Users, FileText, Package, Calendar, Blocks,
   CheckCircle2, AlertCircle, Clock, MoreVertical, Building2, Loader2,
   Activity, Zap, Bot, Headset, ShieldCheck, CreditCard, LayoutList,
-  Search, Filter, Trash2
+  Search, Filter, Trash2, Phone, RefreshCw
 } from 'lucide-react';
 import { TenantRecord, TenantFeatures } from '@/types';
-import { SuperAdminService } from '@/services/firebase/SuperAdminService';
+import { SuperAdminService, WhatsappNumberInfo } from '@/services/firebase/SuperAdminService';
 import { useAuthStore } from '@/stores/authStore';
 import { CreateTenantModal } from './CreateTenantModal';
 import { EditTenantModal } from './EditTenantModal';
@@ -22,6 +22,7 @@ const FEATURE_ICONS: Record<keyof TenantFeatures, { icon: React.ElementType; lab
   hasIntegrations: { icon: Blocks,   label: 'Integraciones', color: '#6366F1' },
   hasAiAgent:      { icon: Bot,      label: 'Agente IA',     color: '#8B5CF6' },
   hasMultiAgent:   { icon: Headset,  label: 'WhatsApp API',  color: '#25D366' },
+  hasMultiAgentPanel: { icon: Headset, label: 'Multi-Agente', color: '#25D366' },
   hasQualityAuditor: { icon: ShieldCheck, label: 'Auditor IA', color: '#F59E0B' },
   hasPaymentLinks:   { icon: CreditCard, label: 'Pagos',      color: '#1877F2' },
   hasTasks:          { icon: LayoutList, label: 'Tareas',     color: '#1877F2' },
@@ -42,6 +43,8 @@ const PLAN_COLOR: Record<string, string> = {
 export const TenantsListView = () => {
   const { setActiveTenant } = useAuthStore();
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
+  const [waNumbers, setWaNumbers] = useState<Record<string, WhatsappNumberInfo>>({});
+  const [isLoadingNumbers, setIsLoadingNumbers] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
@@ -66,7 +69,22 @@ export const TenantsListView = () => {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  const loadWhatsAppNumbers = async () => {
+    setIsLoadingNumbers(true);
+    try {
+      const numbers = await SuperAdminService.getWhatsAppNumbers();
+      setWaNumbers(numbers);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingNumbers(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    loadWhatsAppNumbers();
+  }, []);
 
   const handleToggleStatus = async (tenantId: string, current: string) => {
     try {
@@ -227,6 +245,17 @@ export const TenantsListView = () => {
             {/* Table Header - Mas compacto y extendido */}
             <div className="flex items-center gap-6 px-6 py-2 bg-slate-50 dark:bg-slate-900/80 rounded-xl text-[9px] font-black text-slate-400 uppercase tracking-widest border border-slate-100 dark:border-slate-800">
               <span className="flex-1">Negocio / Industria</span>
+              <span className="w-44 flex items-center gap-1.5">
+                Número API
+                <button
+                  onClick={loadWhatsAppNumbers}
+                  disabled={isLoadingNumbers}
+                  title="Actualizar números desde Meta"
+                  className="text-slate-400 hover:text-[#25D366] transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-2.5 h-2.5 ${isLoadingNumbers ? 'animate-spin' : ''}`} />
+                </button>
+              </span>
               <span className="w-24">Plan</span>
               <span className="w-48 text-center">Herramientas</span>
               <span className="w-28 text-center">Estatus</span>
@@ -253,6 +282,36 @@ export const TenantsListView = () => {
                       <p className="text-sm font-black text-slate-900 dark:text-white truncate">{tenant.name}</p>
                       <p className="text-[10px] font-bold text-slate-400 truncate uppercase tracking-tighter">{tenant.industry} · {tenant.ownerEmail}</p>
                     </div>
+                  </div>
+
+                  {/* Número API (WhatsApp) */}
+                  <div className="w-44 min-w-0">
+                    {(() => {
+                      const wa = waNumbers[tenant.id];
+                      const number = wa?.displayPhoneNumber;
+                      if (isLoadingNumbers && !wa) {
+                        return <span className="text-[10px] font-bold text-slate-300 dark:text-slate-600">Cargando…</span>;
+                      }
+                      if (number) {
+                        return (
+                          <div className="flex items-center gap-1.5 min-w-0" title={wa?.verifiedName || undefined}>
+                            <Phone className="w-3 h-3 text-[#25D366] flex-shrink-0" />
+                            <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200 truncate">{number}</span>
+                            {!wa?.isActive && (
+                              <span className="text-[7px] font-black text-amber-500 uppercase">inactivo</span>
+                            )}
+                          </div>
+                        );
+                      }
+                      if (wa?.phoneNumberId) {
+                        return (
+                          <span className="text-[9px] font-bold text-slate-400 truncate" title={wa.error || 'ID interno de Meta — número no disponible'}>
+                            ID: {wa.phoneNumberId}
+                          </span>
+                        );
+                      }
+                      return <span className="text-[10px] font-bold text-slate-300 dark:text-slate-600">—</span>;
+                    })()}
                   </div>
 
                   {/* Plan */}

@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tenantId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "leads",
       "queryScope": "COLLECTION",
       "fields": [
@@ -64,6 +72,22 @@
       "fields": [
         { "fieldPath": "tenantId", "order": "ASCENDING" },
         { "fieldPath": "provider", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tenant_onboarding_states",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "followup3dSent", "order": "ASCENDING" },
+        { "fieldPath": "followup3dScheduledFor", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tenant_onboarding_states",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "followup7dSent", "order": "ASCENDING" },
+        { "fieldPath": "followup7dScheduledFor", "order": "ASCENDING" }
       ]
     }
   ],

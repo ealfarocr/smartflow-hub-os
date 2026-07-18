@@ -7,6 +7,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { SuperAdminService } from '../../services/firebase/SuperAdminService';
 import { OnboardingService } from '../../services/OnboardingService';
+import { slugifyTenantId } from '@/utils/slug';
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 
 const TOOLS = [
@@ -30,7 +31,8 @@ export const CheckoutView = () => {
   const [searchParams] = useSearchParams();
   const packParam = searchParams.get('pack') ?? '';
   const packConfig = PACK_CONFIG[packParam] ?? null;
-  const isPackMode = !!packConfig;
+  const [ignorePackMode, setIgnorePackMode] = useState(false);
+  const isPackMode = !!packConfig && !ignorePackMode;
 
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedTools, setSelectedTools] = useState<string[]>([]);
@@ -67,11 +69,7 @@ export const CheckoutView = () => {
   const isCapped = totalRaw > 197;
   const effectiveTotal = packConfig ? packConfig.price : total;
 
-  const slugify = (name: string) =>
-    name.toLowerCase()
-      .normalize('NFD').replace(/[̀-ͯ]/g, '')
-      .replace(/\s+/g, '').replace(/[^a-z0-9]/g, '')
-      .substring(0, 20);
+  const slugify = slugifyTenantId;
 
   const handleBusinessNameChange = (value: string) => {
     const auto = slugify(value);
@@ -107,6 +105,8 @@ export const CheckoutView = () => {
     }
     if (currentStep < steps.length - 1) {
       const nextStep = (currentStep === 0 && isPackMode) ? 2 : currentStep + 1;
+      // Lead: usuario completó sus datos y avanza al paso de herramientas/pago
+      if (currentStep === 0) (window as any).fbq?.('track', 'Lead');
       setCurrentStep(nextStep);
       window.scrollTo(0, 0);
     } else if (effectiveTotal === 0 || paymentSuccess) {
@@ -125,11 +125,12 @@ export const CheckoutView = () => {
         password: formData.password,
         phone: formData.whatsapp,
         industry: formData.industry,
+        currency: formData.currency,
         selectedFeatures: selectedTools
       });
-      setTimeout(() => navigate('/login', {
-        state: { message: '¡Tu Hub ha sido creado! Ya puedes iniciar sesión.' }
-      }), 2000);
+      (window as any).fbq?.('track', 'CompleteRegistration');
+      // Recarga completa para que onAuthStateChanged lea la membresía ya creada
+      setTimeout(() => { window.location.href = '/dashboard'; }, 1500);
     } catch (err: any) {
       setError(err.message || 'Hubo un error al crear tu cuenta.');
     } finally {
@@ -521,7 +522,7 @@ export const CheckoutView = () => {
                             </div>
                           )}
                           <button
-                            onClick={() => setSelectedTools([])}
+                            onClick={() => { setSelectedTools([]); setIgnorePackMode(true); }}
                             className="text-xs text-slate-400 hover:text-[#1877F2] transition-colors font-semibold"
                           >
                             → Prefiero solo el CRM Gratis (sin herramientas)
@@ -573,6 +574,7 @@ export const CheckoutView = () => {
                                         const verify = httpsCallable(fns, 'verifyPaypalOrder');
                                         const result = await verify({ orderId: data.orderID });
                                         if ((result.data as any).success) {
+                                          (window as any).fbq?.('track', 'Purchase', { value: effectiveTotal, currency: 'USD' });
                                           setPaymentSuccess(true);
                                           setTimeout(() => handleFinalize(), 1500);
                                         } else {
@@ -600,7 +602,12 @@ export const CheckoutView = () => {
               {/* Footer */}
               <div className="px-8 md:px-12 py-5 bg-white border-t border-blue-50 flex items-center justify-between flex-shrink-0">
                 <button
-                  onClick={() => currentStep > 0 && setCurrentStep(prev => prev - 1)}
+                  onClick={() => {
+                    if (currentStep === 0 || isSubmitting) return;
+                    // En pack mode, desde step 2 volver a step 0 (el 1 fue saltado)
+                    const prevStep = (isPackMode && currentStep === 2) ? 0 : currentStep - 1;
+                    setCurrentStep(prevStep);
+                  }}
                   disabled={currentStep === 0 || isSubmitting}
                   className={`flex items-center gap-2 text-xs font-black uppercase tracking-widest transition-colors ${
                     currentStep === 0 || isSubmitting ? 'opacity-0 pointer-events-none' : 'text-slate-400 hover:text-slate-700'

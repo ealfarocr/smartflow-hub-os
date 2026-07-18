@@ -12,8 +12,17 @@ import {
   limit,
   deleteDoc,
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '@/lib/firebase';
 import { TenantRecord, TenantFeatures, TenantPlan, ToolLibraryRecord } from '@/types';
+
+export interface WhatsappNumberInfo {
+  displayPhoneNumber: string | null;
+  phoneNumberId: string | null;
+  isActive: boolean;
+  verifiedName: string | null;
+  error?: string;
+}
 
 export interface CreateTenantInput {
   name: string;
@@ -100,22 +109,47 @@ export const SuperAdminService = {
   },
 
   /**
+   * Devuelve el número de WhatsApp activo en la API por cada negocio.
+   * Consulta a Meta vía Cloud Function (el token nunca llega al cliente) y
+   * cachea el número legible en la integración.
+   * Mapa: tenantId → WhatsappNumberInfo
+   */
+  getWhatsAppNumbers: async (): Promise<Record<string, WhatsappNumberInfo>> => {
+    try {
+      const fn = httpsCallable<unknown, { numbers: Record<string, WhatsappNumberInfo> }>(
+        functions,
+        'getWhatsappNumbers'
+      );
+      const res = await fn({});
+      return res.data?.numbers || {};
+    } catch (error) {
+      console.error("Error en SuperAdminService.getWhatsAppNumbers:", error);
+      return {};
+    }
+  },
+
+  /**
    * Verifica si un nombre de negocio ya está registrado
    */
   isTenantNameAvailable: async (name: string): Promise<boolean> => {
     try {
+      // Verificar por tradeName (que se usa como tenantId) — no por name (display)
       const q = query(
-        collection(db, 'tenants'), 
-        where('name', '==', name.trim()),
+        collection(db, 'tenants'),
+        where('tradeName', '==', name.trim()),
         limit(1)
       );
       const snap = await getDocs(q);
       return snap.empty;
-    } catch (error) {
-      console.error("Error al verificar disponibilidad de nombre:", error);
-      // Si falla por permisos, devolvemos true para que al menos intente crear la cuenta
-      // y la validación final se haga en el servidor/transacción.
-      return true; 
+    } catch {
+      // Sin auth en checkout las reglas bloquean la query de colección —
+      // intentar lectura directa por ID (el tenantId ES el tradeName slugificado)
+      try {
+        const snap = await getDoc(doc(db, 'tenants', name.trim()));
+        return !snap.exists();
+      } catch {
+        return true;
+      }
     }
   },
 

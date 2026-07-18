@@ -7,6 +7,7 @@ import { AgendaItem } from '@/types';
 import { Plus, Calendar as CalendarIcon, List, CheckCircle2, Circle, Clock, MapPin, User as UserIcon, CalendarX2, Loader2, AlertCircle, Pencil, Trash2 } from 'lucide-react';
 import { format, isSameDay, addDays } from 'date-fns';
 import { AgendaModal } from './components/AgendaModal';
+import { toDateSafe, formatDateSafe } from '@/utils/dateUtils';
 
 export const AgendaPageView = () => {
   const { items, updateItem, deleteItem, subscribe, isLoading, error } = useAgendaStore();
@@ -31,11 +32,12 @@ export const AgendaPageView = () => {
     isCompleted: false,
   });
   const handleEditItem = (item: AgendaItem) => {
+    const safeDate = toDateSafe(item.date) ?? new Date();
     setFormData({
       id: item.id,
       title: item.title,
       type: item.type,
-      date: new Date(item.date).toISOString().slice(0, 16),
+      date: safeDate.toISOString().slice(0, 16),
       leadId: item.leadId || '',
       isCompleted: item.isCompleted,
     });
@@ -151,7 +153,7 @@ export const AgendaPageView = () => {
              </div>
            ) : (
            <ul className="divide-y divide-slate-200 dark:divide-slate-700">
-              {items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map(item => {
+              {[...items].sort((a, b) => (toDateSafe(a.date)?.getTime() ?? 0) - (toDateSafe(b.date)?.getTime() ?? 0)).map(item => {
                 const lead = leads.find(l => l.id === item.leadId);
                 return (
                   <li key={item.id} className={`group p-4 sm:p-6 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${item.isCompleted ? 'opacity-60' : ''}`}>
@@ -178,7 +180,7 @@ export const AgendaPageView = () => {
                       <div className="text-right flex flex-col items-end gap-2">
                         <div className="flex items-center justify-end text-slate-600 dark:text-slate-300 font-medium bg-slate-100 dark:bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
                           <Clock className="w-4 h-4 mr-2 text-[#1877F2]" />
-                          {format(new Date(item.date), 'dd/MM/yyyy HH:mm')}
+                          {formatDateSafe(item.date, 'dd/MM/yyyy HH:mm')}
                         </div>
                         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2">
                           <button
@@ -206,7 +208,10 @@ export const AgendaPageView = () => {
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm p-4">
           <div className="grid grid-cols-7 gap-4">
              {calendarDays.map((date, i) => {
-               const dayItems = items.filter(item => isSameDay(new Date(item.date), date));
+               const dayItems = items.filter(item => {
+                 const d = toDateSafe(item.date);
+                 return d ? isSameDay(d, date) : false;
+               });
                const isToday = isSameDay(date, today);
                return (
                  <div key={i} className={`min-h-[150px] border border-slate-200 dark:border-slate-700 rounded-lg p-2 ${isToday ? 'bg-primary-50 dark:bg-primary-900/10 border-primary-300 dark:border-primary-800' : 'bg-slate-50 dark:bg-slate-900/50'}`}>
@@ -216,7 +221,7 @@ export const AgendaPageView = () => {
                    <div className="space-y-2">
                       {dayItems.map(item => (
                         <div key={item.id} className={`group relative p-1.5 rounded text-xs truncate cursor-pointer ${getTypeColor(item.type)} border border-black/5 dark:border-white/5 transition-colors hover:ring-1 hover:ring-primary-500/50`} onClick={() => handleEditItem(item)}>
-                          <span className={item.isCompleted ? 'line-through opacity-70' : ''}>{format(new Date(item.date), 'HH:mm')} {item.title}</span>
+                          <span className={item.isCompleted ? 'line-through opacity-70' : ''}>{formatDateSafe(item.date, 'HH:mm', '--:--')} {item.title}</span>
                           <button 
                             onClick={(e) => { e.stopPropagation(); toggleStatus(item.id, item.isCompleted); }}
                             className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 hover:scale-110 transition-all p-0.5"

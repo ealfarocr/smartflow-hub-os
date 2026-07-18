@@ -8,6 +8,7 @@ export interface TenantFeatures {
   hasIntegrations: boolean;
   hasAiAgent?: boolean;
   hasMultiAgent?: boolean;
+  hasMultiAgentPanel?: boolean;
   hasQualityAuditor?: boolean;
   hasPaymentLinks?: boolean;
   hasCatalog?: boolean;

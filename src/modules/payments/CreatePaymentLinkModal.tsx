@@ -71,9 +71,10 @@ export const CreatePaymentLinkModal = ({
 
       setGeneratedLink(`https://hub.smartflow-suite.com/pay/${randomId}`);
       addToast('Link de pago generado con éxito', 'success');
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating payment link", error);
-      addToast('Error al generar el link de pago', 'error');
+      const msg = error?.code || error?.message || 'Error desconocido';
+      addToast(`Error al generar link: ${msg}`, 'error');
     }
   };
 

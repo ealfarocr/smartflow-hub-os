@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AgendaItem } from '@/types';
+import { toDateSafe } from '@/utils/dateUtils';
 
 export class AgendaService {
   private static collectionName = 'agenda_items';
@@ -25,14 +26,17 @@ export class AgendaService {
     );
 
     return onSnapshot(q, (snapshot) => {
-      const items = snapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id,
-        // Convert Firestore Timestamps to ISO strings for the store if needed
-        date: doc.data().date instanceof Timestamp 
-          ? doc.data().date.toDate().toISOString() 
-          : doc.data().date
-      })) as AgendaItem[];
+      const items = snapshot.docs.map(doc => {
+        // Normaliza la fecha a ISO string válido sin importar el formato origen
+        // (Timestamp, string, número o serverTimestamp pendiente). Si no parsea,
+        // queda null para que el render no lance "Invalid time value".
+        const safeDate = toDateSafe(doc.data().date);
+        return {
+          ...doc.data(),
+          id: doc.id,
+          date: safeDate ? safeDate.toISOString() : null,
+        };
+      }) as AgendaItem[];
       callback(items);
     }, (error) => {
       console.error("Error subscribing to agenda:", error);

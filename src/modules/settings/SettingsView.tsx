@@ -533,6 +533,7 @@ export const SettingsView = () => {
                   { key: 'hasCrm' as keyof TenantFeatures, label: 'CRM & Ventas', desc: 'Gestión de leads y pipeline kanban.' },
                   { key: 'hasTasks' as keyof TenantFeatures, label: 'Mis Tareas', desc: 'Gestor de listas y tareas del negocio.' },
                   { key: 'hasMultiAgent' as keyof TenantFeatures, label: 'WhatsApp Coexistente', desc: 'CRM multi-agente con WhatsApp API oficial.' },
+                  { key: 'hasMultiAgentPanel' as keyof TenantFeatures, label: 'Multi-Agente', desc: 'Panel de distribución de conversaciones entre agentes.' },
                   { key: 'hasAiAgent' as keyof TenantFeatures, label: 'Agente IA', desc: 'IA que responde, califica y agenda automáticamente.' },
                   { key: 'hasQualityAuditor' as keyof TenantFeatures, label: 'Auditor IA', desc: 'Audita chats y evalúa el desempeño de asesores.' },
                   { key: 'hasPaymentLinks' as keyof TenantFeatures, label: 'Links de Pago', desc: 'Genera cobros por WhatsApp con tarjeta o PayPal.' },

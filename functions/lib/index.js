@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.checkWindowExpiry = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.sendMetaMessage = exports.acceptTenantInvite = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
+exports.repairOrphanLeads = exports.checkWindowExpiry = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.acceptTenantInvite = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const crypto = __importStar(require("crypto"));
@@ -129,24 +129,57 @@ async function triggerAiAutopilot(tenantId, conversationId, incomingText, source
             console.log('[AI Autopilot] Conversación archivada. Omitiendo.');
             return;
         }
-        if (convData?.botEnabled === false) {
-            console.log('[AI Autopilot] Bot desactivado por asesor.');
+        // Opt-in: el bot SOLO responde si fue activado manualmente (botEnabled === true).
+        // Por defecto (undefined o false) permanece desactivado.
+        if (convData?.botEnabled !== true) {
+            console.log('[AI Autopilot] Bot desactivado (responde solo si se activa manualmente).');
             return;
         }
         // Construir contexto desde documentos de entrenamiento (truncado a 6000 chars)
         const settingsData = settingsDoc.data() || {};
         const agentConfig = settingsData.aiAgentConfig || { knowledgeFiles: [], productFiles: [] };
         const businessName = settingsData.tradeName || settingsData.companyName || 'el negocio';
+        // BASE GLOBAL DEL AGENTE — aplica a TODOS los negocios (actuales y futuros).
+        // Se COMBINA con la info privada del negocio, pero jamás mezcla datos entre negocios.
+        let globalConfig = {};
+        try {
+            const gSnap = await db.collection('config').doc('agent_global').get();
+            globalConfig = gSnap.data() || {};
+        }
+        catch { /* sin base global: se usa solo lo privado */ }
+        const globalInstructions = (globalConfig.generalInstructions || '').trim();
+        const globalFiles = globalConfig.knowledgeFiles || [];
+        const globalMedia = globalConfig.mediaLibrary || [];
         const allFiles = [...(agentConfig.knowledgeFiles || []), ...(agentConfig.productFiles || [])];
-        const mediaLibrary = agentConfig.mediaLibrary || [];
+        // Los archivos subidos al Agente IA con URL pueden ENVIARSE al cliente, EXCEPTO los
+        // documentos internos/de entrenamiento (confidenciales). Se combinan con la biblioteca
+        // explícita de medios (mediaLibrary) y con los medios globales, evitando duplicados.
+        const INTERNAL_DOC_RX = /entrenamiento|training|interno|confidencial|instrucci[oó]n|system\s*prompt|prompt\s*del|configuraci[oó]n\s*del\s*agente/i;
+        const explicitMedia = agentConfig.mediaLibrary || [];
+        const sendableFiles = allFiles.filter((f) => f?.url && !INTERNAL_DOC_RX.test(f.name || ''));
+        const globalSendable = globalMedia.filter((f) => f?.url && !INTERNAL_DOC_RX.test(f.name || ''));
+        const seenMediaUrls = new Set();
+        const mediaLibrary = [...explicitMedia, ...sendableFiles, ...globalSendable].filter((m) => {
+            if (!m?.url || seenMediaUrls.has(m.url))
+                return false;
+            seenMediaUrls.add(m.url);
+            return true;
+        });
         const mediaContext = mediaLibrary.length > 0
             ? `\nARCHIVOS DISPONIBLES PARA ENVIAR AL CLIENTE:\n${mediaLibrary.map((m) => `- "${m.name}"${m.description ? ` (${m.description})` : ''}: ${m.url}`).join('\n')}\n`
             : '';
-        const rawContext = allFiles
+        // Conocimiento = BASE GLOBAL (instrucciones + docs globales) + INFO PRIVADA del negocio.
+        const globalKnowledge = [
+            globalInstructions ? `INSTRUCCIONES GENERALES DE VENTAS (aplican a todos los negocios):\n${globalInstructions}` : '',
+            globalFiles.filter((f) => f.content).map((f) => `=== [GLOBAL] ${f.name} ===\n${f.content}`).join('\n\n'),
+        ].filter(Boolean).join('\n\n');
+        const tenantRaw = allFiles
             .filter((f) => f.content)
             .map((f) => `=== ${f.name} ===\n${f.content}`)
             .join('\n\n');
-        const knowledgeContext = rawContext.length > 10000 ? rawContext.slice(0, 10000) + '\n[...]' : rawContext;
+        const globalCapped = globalKnowledge.length > 6000 ? globalKnowledge.slice(0, 6000) + '\n[...]' : globalKnowledge;
+        const tenantCapped = tenantRaw.length > 10000 ? tenantRaw.slice(0, 10000) + '\n[...]' : tenantRaw;
+        const knowledgeContext = [globalCapped, tenantCapped].filter(Boolean).join('\n\n');
         const history = recentMsgsSnap.docs
             .reverse()
             .map((d) => {
@@ -160,15 +193,26 @@ async function triggerAiAutopilot(tenantId, conversationId, incomingText, source
             ? `Nombre del contacto: DESCONOCIDO — debes pedirlo antes de agendar.`
             : `Nombre del contacto: ${contactName}`;
         const systemPrompt = knowledgeContext
-            ? `Eres el asistente virtual oficial de ${businessName}.
-IDENTIDAD: Los documentos de entrenamiento definen quién eres, cómo te llamas y qué vendes. Síguelos al pie de la letra.
+            ? `Eres un ASESOR EXPERTO EN CIERRE DE VENTAS de ${businessName} — de élite, no un bot de soporte. Tu misión es CONVERTIR cada conversación en una venta o una visita agendada.
+IDENTIDAD: Los documentos de entrenamiento definen quién eres, cómo te llamas, qué vendes y los precios. Síguelos al pie de la letra y habla del producto con seguridad total.
 NUNCA menciones SmartFlow Hub OS ni ninguna otra plataforma. Solo representas a ${businessName}.
+
+MENTALIDAD DE CIERRE (tu ADN — lo más importante):
+- Cada mensaje debe ACERCAR al cliente a comprar o agendar. Nada de relleno.
+- RESPONDE SIEMPRE lo que te preguntan, con datos concretos de tus documentos. NUNCA evadas con "eso lo ve el equipo" si la información está en tus documentos.
+- Construye valor: conecta cada dato con un beneficio real ("lotes de 1.000 m², espacio de sobra para tu casa de recreo").
+- Crea urgencia SOLO si es verdad según los documentos (preventa, disponibilidad limitada, precio de lanzamiento). Jamás inventes escasez.
+- Califica sin interrogar: mientras avanzas, capta qué busca, para cuándo y su presupuesto.
+- Maneja objeciones con seguridad y reencuadre al valor, nunca con evasivas.
+- CIERRE VARIADO: alterna el siguiente paso — a veces envías el documento, a veces das el precio y preguntas cuál le interesa, a veces propones la visita. NUNCA termines todos los mensajes con la misma frase "¿te gustaría agendar una cita?": eso te delata como robot y se ve poco profesional.
 
 REGLAS ESTRICTAS:
 - Los precios en los documentos son los precios FINALES de contado en preventa. No existe ningún descuento adicional por pagar de contado — ese ya es el precio más bajo disponible.
 - Nunca inventes precios, descuentos o condiciones que no estén explícitamente en los documentos.
-- Si el cliente pregunta por financiamiento o cuotas: indica que hay asesoría de crédito sin costo, pero que los términos exactos se coordinan con el equipo de ventas.
+- ⛔ PRESUPUESTO MENOR AL PRECIO (crítico): si el cliente dice tener un monto MENOR al precio mínimo (ej: "tengo 7 millones" y el lote inicia en su precio mínimo), JAMÁS le digas que con ese monto puede comprar, ni le ofrezcas el producto a ese precio, ni insinúes que "alcanza". Sé honesto y firme con el precio real de los documentos (ej: "Los lotes inician en [precio mínimo real] en preventa"). Luego pivota al valor: asesoría de crédito SIN COSTO, convenio CCSS y opciones de financiamiento para cubrir la diferencia. NUNCA bajes el precio, NUNCA negocies, NUNCA regales. El precio mínimo es intocable.
+- FORMAS DE PAGO / FINANCIAMIENTO: responde con lo que digan los documentos (contado, opciones de pago, asesoría de crédito) y usa el momento para AVANZAR la venta. Ej: "Manejamos contado en preventa al mejor precio, y te conectamos asesoría de crédito sin costo. ¿Cuál lote te está gustando?" Solo menciona que "el equipo coordina los términos exactos" DESPUÉS de dar la info general — nunca como respuesta evasiva de entrada.
 - ARCHIVOS — ENVÍO PROACTIVO: Cuando el cliente pide fotos, catálogo, información, precios o documentos: busca en ARCHIVOS DISPONIBLES y envía el más relevante poniendo su URL exacta en media_url y "image" o "document" en media_type. Si solo hay PDF → envíalo con reply "Aquí te comparto la información completa del proyecto." Si no hay ningún archivo disponible → di que un asesor coordinará el envío. NUNCA prometas enviar un archivo que no esté en ARCHIVOS DISPONIBLES.
+- Si el cliente pide un documento específico por su nombre (ej: "master plan", "planos", "brochure", "catálogo", "lista de precios"): busca en ARCHIVOS DISPONIBLES SOLO un archivo cuyo NOMBRE corresponda claramente a lo pedido y ENVÍALO. Si NINGÚN archivo coincide con lo que pidió → NO envíes ningún otro documento en su lugar; responde "Le pido eso al equipo y se lo comparto enseguida, ¿me confirma su nombre?" y usa crm_action "seguimiento". JAMÁS envíes un documento que no sea el que pidió.
 
 TONO Y ESTILO (lo más importante):
 Escribe como un asesor real de WhatsApp: directo, cálido, sin florituras. Máximo 2-3 líneas por mensaje.
@@ -191,9 +235,9 @@ RECONOCER PETICIÓN DE ASESOR HUMANO:
 - Responde algo como: "Claro, le aviso a [nombre] que quieres hablar con él. ¿Me confirmas tu nombre completo?"
 - Si dice "quiero hablar con alguien", "me comunican con un asesor", "hay alguien disponible" → misma respuesta: conecta con asesor, pide su nombre.
 
-⛔ REGLA CRÍTICA — PORCENTAJES PROHIBIDOS EN PRESENTACIÓN INICIAL:
-NUNCA incluyas porcentajes de construcción (25%, 35%, etc.) en las primeras 2 respuestas ni cuando el cliente pide información general ("más información", "qué tienen", "cuánto cuesta").
-Solo menciona porcentajes si el cliente pregunta DIRECTAMENTE "¿cuánto puedo construir?", "¿límite de construcción?" o similar.
+⛔ REGLA CRÍTICA — PORCENTAJES DE CONSTRUCCIÓN:
+NUNCA menciones porcentajes de construcción (25%, 35%, etc.) al presentar precios, medidas o info general.
+SOLO los mencionas si el cliente pregunta EXPLÍCITAMENTE por la construcción ("¿cuánto puedo construir?", "¿límite de construcción?", "¿cobertura?"). En cualquier otro caso, describe el lote/quinta SIN el porcentaje.
 Incumplir esta regla es un error grave.
 
 AUDIO ENTRANTE (cuando el cliente envía 🎵 Audio):
@@ -201,11 +245,12 @@ AUDIO ENTRANTE (cuando el cliente envía 🎵 Audio):
 - Sin frases adicionales. Sin emojis. Máximo esa línea.
 - Usa crm_action: "seguimiento" si el cliente ya mostró interés previo.
 
-CONFIRMACIONES DEL CLIENTE — ANTI-BUCLE (crítico):
-Si el cliente responde "Si", "Si claro", "Claro", "Ok", "Perfecto", "Sí", "De acuerdo" a algo que ya propusiste:
-- NO repitas la misma pregunta. NUNCA.
+CONFIRMACIONES Y CIERRES DEL CLIENTE — ANTI-BUCLE (crítico):
+Si el cliente responde "Si", "Sí", "Si claro", "Claro", "Ok", "Perfecto", "De acuerdo", "Ah bueno", "Bueno", "Entendido", "Listo", "Quedo atenta", "Quedo atento", "Estoy pendiente", "Gracias", "Hasta luego", "👍" o cualquier mensaje corto de cierre/confirmación:
+- NO hagas ninguna pregunta. NUNCA.
+- NO repitas preguntas que ya están en el historial reciente (si el AGENTE ya preguntó algo en los últimos 2 mensajes → no lo repitas).
+- Si es un cierre → responde en máximo 5 palabras y usa crm_action: "seguimiento". FIN.
 - Si confirmó una fecha de seguimiento → responde SOLO: "Listo, te escribimos el [fecha]." y usa crm_action: "seguimiento". FIN.
-- Si confirmó algo más → acusa en 3 palabras y avanza o despídete.
 
 DETECTAR INTENCIÓN DE VISITA (prioridad alta):
 - Si el cliente menciona un día o fecha para visitar ("el sábado voy", "paso el viernes", "quiero ir esta semana", "voy para allá", "me gustaría visitar", "deseo agendar") → ofrece agendar de inmediato.
@@ -216,10 +261,11 @@ DATOS DEL CONTACTO ACTUAL:
 ${clientNameContext}
 
 PROTOCOLO DE AGENDAMIENTO — SIN EXCEPCIONES:
-Cuando el cliente menciona un día/hora para visitar o dice "deseo agendar":
-- Si el nombre del contacto es DESCONOCIDO → responde ÚNICAMENTE: "¿Me confirmas tu nombre completo para registrar la cita?" Nada más.
-- Si ya tienes el nombre real del contacto → confirma: "Listo [Nombre], quedas agendado/a el [día] a las [hora]." y usa crm_action: "visita".
-- NUNCA confirmes la cita sin nombre completo real. NUNCA uses "Te esperaré en el proyecto", "Nos vemos el [día]", "Si necesitas algo más".
+Para agendar una visita necesitas DOS cosas del cliente: (1) su NOMBRE completo real y (2) un DÍA específico que ÉL mismo mencione ("el sábado", "el domingo 18", "mañana").
+- Si el cliente quiere agendar pero NO dio un día concreto → pregunta "¿Qué día le queda bien para la visita?". NO agendes, NO inventes fecha, NO uses "hoy". Usa crm_action: "seguimiento".
+- Si ya dio el día pero el nombre es DESCONOCIDO → responde ÚNICAMENTE: "¿Me confirmas tu nombre completo para registrar la cita?" Nada más.
+- Si ya tienes NOMBRE real + DÍA específico → confirma: "Listo [Nombre], quedas agendado/a el [día] a las [hora]." usa crm_action: "visita" y pon en visit_date EXACTAMENTE el día que el cliente mencionó.
+- JAMÁS confirmes una cita sin nombre real. JAMÁS pongas visit_date con la fecha de HOY ni una fecha inventada — solo el día que el cliente dijo. NUNCA uses "Te esperaré en el proyecto" ni "Nos vemos el [día]".
 
 CUANDO EL ASESOR HUMANO INTERVINO (mensajes "AGENTE" en el historial):
 - Lee lo que dijo el AGENTE y continúa en esa misma dirección — eres el mismo asesor retomando.
@@ -234,7 +280,7 @@ ${history}
 
 SALIDA JSON OBLIGATORIA — responde ÚNICAMENTE con este objeto JSON (sin texto extra):
 {"reply":"tu respuesta al cliente aquí","crm_action":null,"visit_date":null,"visit_time":null,"media_url":null,"media_type":null}
-Reglas para crm_action: null=conversación general | "seguimiento"=cliente muestra interés serio O está ausente pero volverá | "visita"=tienes nombre+día+hora confirmados | "venta"=cliente confirma compra/pago | "perdido"=cliente rechaza claramente.
+Reglas para crm_action: null=conversación general | "seguimiento"=interés serio, ausente que volverá, O quiere agendar pero AÚN NO dio un día concreto | "visita"=SOLO si tienes nombre real Y un día específico que el CLIENTE mencionó (visit_date = ese día exacto, NUNCA hoy ni inventado) | "venta"=cliente confirma compra/pago | "perdido"=cliente rechaza claramente.
 Si envías un archivo de ARCHIVOS DISPONIBLES: pon su URL exacta en media_url y "image" o "document" en media_type. El reply debe acompañar el envío.
 Hoy es: ${new Date().toLocaleDateString('es-CR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
 Si el cliente menciona un día de visita, calcula la fecha ISO YYYY-MM-DD más cercana en visit_date. Si no confirma hora, usa "10:00" como default en visit_time y pregunta si esa hora le queda bien.`
@@ -263,7 +309,7 @@ ${history}
 
 SALIDA JSON OBLIGATORIA — responde ÚNICAMENTE con este objeto JSON (sin texto extra):
 {"reply":"tu respuesta al cliente aquí","crm_action":null,"visit_date":null,"visit_time":null,"media_url":null,"media_type":null}
-Reglas para crm_action: null=conversación general | "seguimiento"=cliente muestra interés serio O está ausente pero volverá | "visita"=tienes nombre+día+hora confirmados | "venta"=cliente confirma compra/pago | "perdido"=cliente rechaza claramente.`;
+Reglas para crm_action: null=conversación general | "seguimiento"=interés serio, ausente que volverá, O quiere agendar pero AÚN NO dio un día concreto | "visita"=SOLO si tienes nombre real Y un día específico que el CLIENTE mencionó (visit_date = ese día exacto, NUNCA hoy ni inventado) | "venta"=cliente confirma compra/pago | "perdido"=cliente rechaza claramente.`;
         const openaiKey = process.env.OPENAI_API_KEY;
         if (!openaiKey) {
             console.warn('[AI Autopilot] OPENAI_API_KEY no configurada.');
@@ -299,18 +345,36 @@ Reglas para crm_action: null=conversación general | "seguimiento"=cliente muest
         const botMediaUrl = parsed.media_url || null;
         const botMediaType = parsed.media_type || null;
         console.log(`[AI Autopilot] Respuesta raw: "${aiReply}" | crm_action: ${crmAction}`);
-        // POST-PROCESADO: eliminar porcentajes de construcción en conversaciones tempranas
-        // El modelo los incluye desde los documentos de entrenamiento aunque el prompt lo prohíba.
-        const earlyConversation = recentMsgsSnap.docs.length <= 4;
-        if (earlyConversation) {
+        // POST-PROCESADO: detectar cierres del cliente y evitar bucles de preguntas
+        const closurePatterns = /^(si|sí|si claro|claro|ok|okay|perfecto|de acuerdo|ah bueno|bueno|entendido|listo|quedo atenta?|estoy pendiente|gracias|hasta luego|👍|🙏|bien|excelente|genial|ándale|va|dale)[\s!.]*$/i;
+        if (closurePatterns.test(incomingText.trim())) {
+            // Si el cliente mandó un cierre, la respuesta no debe tener preguntas
             aiReply = aiReply
-                .replace(/,?\s*con\s+construcci[oó]n\s+permitida\s+del\s+\d+\s*%/gi, '')
-                .replace(/,?\s*y\s+permiten?\s+una?\s+construcci[oó]n\s+del\s+\d+\s*%/gi, '')
-                .replace(/\(\s*\d+\s*%\s*de\s*construcci[oó]n\s*\)/gi, '')
-                .replace(/\s*—?\s*\d+\s*%\s*de\s*construcci[oó]n/gi, '')
-                .replace(/\s*con\s+\d+\s*%\s*de\s*construcci[oó]n/gi, '')
+                .replace(/[¿?][^.!]*[?]/g, '') // eliminar preguntas completas
+                .replace(/\.\s*¿[^?]*\?/g, '') // eliminar preguntas al final
                 .trim();
-            console.log(`[AI Autopilot] Post-procesado (sin %): "${aiReply}"`);
+            if (!aiReply)
+                aiReply = '¡Perfecto! Quedamos pendientes. 🙌';
+            console.log(`[AI Autopilot] Cierre detectado, respuesta limpia: "${aiReply}"`);
+        }
+        // POST-PROCESADO: quitar el % de construcción SALVO que el cliente lo haya pedido.
+        // Se elimina la FRASE COMPLETA (incluyendo "con un… permitida") y se limpia la
+        // puntuación, para no dejar fragmentos rotos como "con un permitida".
+        const askedAboutConstruction = /construc|construir|edificar|l[ií]mite\s+de\s+construc|cobertura|cu[aá]nto\s+puedo/i.test(incomingText);
+        if (!askedAboutConstruction && /\d+\s*%/.test(aiReply)) {
+            aiReply = aiReply
+                .replace(/,?\s*con\s+(un[ao]?\s+)?\d+\s*%\s*de\s+construcci[oó]n(\s+permitida)?/gi, '')
+                .replace(/,?\s*con\s+(una?\s+)?construcci[oó]n\s+permitida\s+del\s+\d+\s*%/gi, '')
+                .replace(/,?\s*(y\s+)?permiten?\s+una?\s+construcci[oó]n\s+(del|de)\s+\d+\s*%/gi, '')
+                .replace(/,?\s*(cobertura\s+de\s+)?construcci[oó]n\s+(permitida\s+)?(de|del|hasta(\s+el)?)\s+\d+\s*%/gi, '')
+                .replace(/,?\s*hasta\s+(el\s+)?\d+\s*%\s*(de|del)?\s*construcci[oó]n/gi, '')
+                .replace(/\s*\(\s*\d+\s*%\s*(de\s+)?construcci[oó]n\s*\)/gi, '')
+                // limpieza de residuos
+                .replace(/\s{2,}/g, ' ')
+                .replace(/\s+([.,;:])/g, '$1')
+                .replace(/,\s*\./g, '.')
+                .trim();
+            console.log(`[AI Autopilot] % de construcción removido: "${aiReply}"`);
         }
         // Detectar marcador de link de pago [PAGO:concepto:monto:moneda]
         const paymentMarker = aiReply.match(/\[PAGO:([^:]+):([^:]+):([^\]]+)\]/i);
@@ -440,13 +504,30 @@ Reglas para crm_action: null=conversación general | "seguimiento"=cliente muest
         console.log('[AI Autopilot] Guardado con éxito.');
         // CRM + AGENDA AUTOMATION
         if (crmAction && convData?.leadId) {
-            const stageMap = {
-                'seguimiento': 'Seguimiento',
-                'visita': 'Agendado',
-                'venta': 'Venta Realizada',
-                'perdido': 'Perdido',
+            // Resolver la etiqueta REAL de la etapa desde el pipeline del negocio (el tenant
+            // puede haber renombrado las columnas, p.ej. "Agendo" en vez de "Agendado").
+            // Se mapea por ID de etapa (estable); si no, por palabra clave; y por último al default.
+            const pipelineStages = settingsData.pipeline?.stages || [];
+            const idForAction = {
+                seguimiento: 'seguimiento', visita: 'visita-tecnica', venta: 'venta-realizada', perdido: 'perdido',
             };
-            const newStage = stageMap[crmAction];
+            const kwForAction = {
+                seguimiento: /seguim/i, visita: /agend|visita|cita/i, venta: /venta|vendid|cerrad|ganad/i, perdido: /perd/i,
+            };
+            const fallbackLabel = {
+                seguimiento: 'Seguimiento', visita: 'Agendado', venta: 'Venta Realizada', perdido: 'Perdido',
+            };
+            const resolveStageLabel = (action) => {
+                const byId = pipelineStages.find((s) => s.id === idForAction[action]);
+                if (byId?.label)
+                    return byId.label;
+                const kw = kwForAction[action];
+                const byKw = kw ? pipelineStages.find((s) => kw.test(s.label || '')) : undefined;
+                if (byKw?.label)
+                    return byKw.label;
+                return fallbackLabel[action];
+            };
+            const newStage = resolveStageLabel(crmAction);
             if (newStage) {
                 await db.collection('leads').doc(convData.leadId).update({
                     stage: newStage,
@@ -454,9 +535,39 @@ Reglas para crm_action: null=conversación general | "seguimiento"=cliente muest
                 }).catch((e) => console.warn('[AI Autopilot] CRM update error:', e.message));
                 console.log(`[AI Autopilot] CRM: Lead ${convData.leadId} → ${newStage}`);
             }
-            if (crmAction === 'visita') {
-                const dateStr = visitDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+            if (crmAction === 'venta') {
+                await db.collection('notifications').add({
+                    tenantId,
+                    type: 'venta_cerrada',
+                    title: '¡Venta cerrada! 🎉',
+                    body: `${convData.contactName || 'Cliente'} confirmó la compra`,
+                    link: '/crm',
+                    leadId: convData.leadId,
+                    conversationId,
+                    read: false,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                }).catch((e) => console.warn('[AI Autopilot] Notif venta error:', e.message));
+            }
+            // Solo agendar si hay una FECHA real confirmada por el cliente (nunca inventada).
+            if (crmAction === 'visita' && visitDate) {
+                const dateStr = visitDate;
                 const timeStr = visitTime || '10:00';
+                // Evitar CITAS DUPLICADAS: borrar visitas pendientes previas de este mismo lead
+                // (p.ej. si el cliente corrige la fecha, se reemplaza en vez de duplicar).
+                try {
+                    const prev = await db.collection('agenda_items').where('leadId', '==', convData.leadId).get();
+                    const batch = db.batch();
+                    prev.docs.forEach((d) => {
+                        const x = d.data();
+                        if (x.tenantId === tenantId && x.type === 'visita' && !x.isCompleted)
+                            batch.delete(d.ref);
+                    });
+                    if (!prev.empty)
+                        await batch.commit();
+                }
+                catch (e) {
+                    console.warn('[AI Autopilot] Dedup agenda error:', e.message);
+                }
                 await db.collection('agenda_items').add({
                     tenantId,
                     title: `Visita: ${convData.contactName || 'Cliente'}`,
@@ -470,6 +581,18 @@ Reglas para crm_action: null=conversación general | "seguimiento"=cliente muest
                     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                 }).catch((e) => console.warn('[AI Autopilot] Agenda create error:', e.message));
                 console.log(`[AI Autopilot] Agenda: Visita creada ${dateStr} ${timeStr}`);
+                // Notificación in-app (campanita del Hub)
+                await db.collection('notifications').add({
+                    tenantId,
+                    type: 'cita_agendada',
+                    title: 'Nueva cita agendada',
+                    body: `${convData.contactName || 'Cliente'} · ${dateStr} a las ${timeStr}`,
+                    link: '/agenda',
+                    leadId: convData.leadId,
+                    conversationId,
+                    read: false,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                }).catch((e) => console.warn('[AI Autopilot] Notif create error:', e.message));
                 // Email de notificación al equipo
                 const adminEmail = settingsData.email || settingsData.adminEmail || settingsData.contactEmail;
                 const sgKey = process.env.SENDGRID_API_KEY;
@@ -559,6 +682,14 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                 }
                 const integrationData = integrationsSnapshot.docs[0].data();
                 const tenantId = integrationData.tenantId;
+                // Cachear el número legible (display_phone_number) que envía Meta en cada
+                // webhook, para mostrarlo en el panel de SuperAdmin sin llamar a Graph.
+                const incomingDisplayPhone = value?.metadata?.display_phone_number;
+                if (incomingDisplayPhone && incomingDisplayPhone !== integrationData.displayPhoneNumber) {
+                    integrationsSnapshot.docs[0].ref
+                        .update({ displayPhoneNumber: incomingDisplayPhone })
+                        .catch((e) => console.warn('[Webhook WA] No se pudo cachear displayPhoneNumber:', e.message));
+                }
                 // 2.1 Validación de firma HMAC de Meta usando el appSecret del tenant
                 const signature = req.headers['x-hub-signature-256'];
                 const tenantAppSecret = integrationData.appSecret || (process.env.WHATSAPP_APP_SECRET || '').trim();
@@ -668,6 +799,25 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                         utmSource = 'landing_page';
                         sourceLabel = 'Landing Page (botón web)';
                     }
+                    // D.0 RESOLVER ETAPA POR DEFECTO DEL PIPELINE DEL TENANT
+                    // El CRM (Kanban) solo renderiza leads cuya `stage` coincide con una etapa
+                    // configurada en settings/{tenantId}.pipeline.stages. Si hardcodeamos 'Nuevo'
+                    // y el tenant personalizó su pipeline sin esa etiqueta, el lead queda huérfano
+                    // (se crea en Firestore pero no aparece en ninguna columna del CRM).
+                    let defaultStage = 'Nuevo';
+                    try {
+                        const settingsSnap = await db.collection('settings').doc(tenantId).get();
+                        const pipelineStages = settingsSnap.data()?.pipeline?.stages;
+                        if (Array.isArray(pipelineStages) && pipelineStages.length > 0) {
+                            const def = pipelineStages.find((s) => s.isDefault)
+                                || pipelineStages.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0];
+                            if (def?.label)
+                                defaultStage = def.label;
+                        }
+                    }
+                    catch (e) {
+                        console.warn(`[Webhook WA] No se pudo leer el pipeline del tenant ${tenantId}, usando etapa por defecto "Nuevo"`);
+                    }
                     // D. UPSERT LEAD
                     let leadId = '';
                     const leadsSnapshot = await db.collection('leads')
@@ -687,13 +837,23 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                             source: 'WhatsApp',
                             utmSource,
                             productInterest: productInterest || '',
-                            stage: 'Nuevo',
+                            stage: defaultStage,
                             lastActivity: new Date().toISOString(),
                             createdAt: new Date().toISOString(),
                             orderIndex: Date.now(),
                         });
                         leadId = newLeadRef.id;
                         console.log(`[Webhook WA] Nuevo lead creado: ${leadId} | Origen: ${sourceLabel}`);
+                        db.collection('notifications').add({
+                            tenantId,
+                            type: 'nuevo_lead',
+                            title: 'Nuevo lead 🚀',
+                            body: `${contactName || 'Cliente'} escribió por WhatsApp`,
+                            link: '/crm',
+                            leadId,
+                            read: false,
+                            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                        }).catch((e) => console.warn('[Webhook WA] Notif lead error:', e.message));
                     }
                     else {
                         leadId = leadsSnapshot.docs[0].id;
@@ -719,7 +879,9 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                             lastMessageSender: 'lead',
                             unreadCount: 1,
                             status: 'active',
-                            botEnabled: integrationData.isAiAutomated ?? false,
+                            // El bot queda ON por defecto si el tenant tiene el Piloto Automático activado
+                            // (isAiAutomated). El asesor puede apagarlo por chat con el toggle "Bot ON/OFF".
+                            botEnabled: integrationData.isAiAutomated === true,
                             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                             advisorId: 'u-1'
                         });
@@ -924,17 +1086,34 @@ exports.metaWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).https.o
                         .get();
                     if (convSnapshot.empty) {
                         const contactName = `Usuario ${source.charAt(0).toUpperCase() + source.slice(1)}`;
+                        // Resolver la etapa por defecto del pipeline del tenant (evita leads
+                        // huérfanos que no aparecen en el CRM por mismatch de `stage`).
+                        let defaultStageMeta = 'Nuevo';
+                        try {
+                            const settingsSnap = await db.collection('settings').doc(tenantId).get();
+                            const pipelineStages = settingsSnap.data()?.pipeline?.stages;
+                            if (Array.isArray(pipelineStages) && pipelineStages.length > 0) {
+                                const def = pipelineStages.find((s) => s.isDefault)
+                                    || pipelineStages.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0];
+                                if (def?.label)
+                                    defaultStageMeta = def.label;
+                            }
+                        }
+                        catch (e) {
+                            console.warn(`[Webhook Meta] No se pudo leer el pipeline del tenant ${tenantId}, usando etapa por defecto "Nuevo"`);
+                        }
                         // Crear lead automáticamente
                         const newLeadRef = await db.collection('leads').add({
                             tenantId,
                             name: contactName,
-                            stage: 'Nuevo',
+                            stage: defaultStageMeta,
                             source: sourceLabelMeta,
                             utmSource: utmSourceMeta,
                             keyData: `Origen: ${sourceLabelMeta}`,
                             phone: '',
                             email: '',
                             notes: '',
+                            orderIndex: Date.now(),
                             createdAt: new Date().toISOString(),
                             lastActivity: new Date().toISOString()
                         });
@@ -949,6 +1128,8 @@ exports.metaWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).https.o
                             lastMessageSender: 'lead',
                             unreadCount: 1,
                             status: 'active',
+                            // Bot ON por defecto si el tenant tiene el Piloto Automático activado
+                            botEnabled: integrationData.isAiAutomated === true,
                             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                             advisorId: 'u-1',
                             phoneRaw: '',
@@ -956,6 +1137,16 @@ exports.metaWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).https.o
                             phoneSearchKey: ''
                         });
                         conversationId = newConvRef.id;
+                        db.collection('notifications').add({
+                            tenantId,
+                            type: 'nuevo_lead',
+                            title: 'Nuevo lead 🚀',
+                            body: `${contactName || 'Cliente'} escribió por ${sourceLabelMeta}`,
+                            link: '/crm',
+                            leadId: newLeadRef.id,
+                            read: false,
+                            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                        }).catch((e) => console.warn('[Webhook Meta] Notif lead error:', e.message));
                         // Vincular conversación al lead
                         await newLeadRef.update({ conversationId: newConvRef.id });
                     }
@@ -1186,7 +1377,20 @@ Scene: a premium dark desk environment — a sleek laptop and a smartphone side 
     const b64 = response.data?.data?.[0]?.b64_json;
     if (!b64)
         throw new https_1.HttpsError('internal', 'gpt-image-1 no retornó imagen');
-    return { imageUrl: `data:image/png;base64,${b64}` };
+    // Subir a Firebase Storage para obtener URL pública (requerida por Meta API)
+    const uid = request.auth.uid;
+    const filename = `marketing-images/${uid}/${format}-${Date.now()}.png`;
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(filename);
+    await file.save(Buffer.from(b64, 'base64'), {
+        metadata: { contentType: 'image/png' }
+    });
+    await file.makePublic();
+    const storageUrl = `https://storage.googleapis.com/${bucket.name}/${filename}`;
+    return {
+        imageUrl: `data:image/png;base64,${b64}`,
+        storageUrl,
+    };
 });
 /**
  * Función Callable para enviar mensajes de WhatsApp de forma segura
@@ -1291,6 +1495,8 @@ exports.sendWhatsappMessage = (0, https_1.onCall)({
         }
         else if (mediaUrl) {
             const isImage = /\.(jpg|jpeg|png|webp|gif)($|\?)/i.test(mediaUrl) || (mediaFilename && /\.(jpg|jpeg|png|webp|gif)$/i.test(mediaFilename));
+            const isAudio = /\.(ogg|mp3|m4a|aac|wav|opus)($|\?)/i.test(mediaUrl) || (mediaFilename && /\.(ogg|mp3|m4a|aac|wav|opus)$/i.test(mediaFilename));
+            const isVideo = /\.(mp4|mov|3gp|webm)($|\?)/i.test(mediaUrl) || (mediaFilename && /\.(mp4|mov|3gp|webm)$/i.test(mediaFilename));
             if (isImage) {
                 console.log(`[Diagnostic] Adjuntando Imagen. Filename: ${mediaFilename}`);
                 messagePayload.type = 'image';
@@ -1299,8 +1505,22 @@ exports.sendWhatsappMessage = (0, https_1.onCall)({
                     ...(text && { caption: text })
                 };
             }
+            else if (isVideo) {
+                console.log(`[Diagnostic] Adjuntando Video. Filename: ${mediaFilename}`);
+                messagePayload.type = 'video';
+                messagePayload.video = {
+                    link: mediaUrl,
+                    ...(text && { caption: text })
+                };
+            }
+            else if (isAudio) {
+                console.log(`[Diagnostic] Adjuntando Audio. Filename: ${mediaFilename}`);
+                messagePayload.type = 'audio';
+                messagePayload.audio = { link: mediaUrl };
+                // WhatsApp audio no soporta caption — el texto se envía en un mensaje separado si existe
+            }
             else {
-                console.log(`[Diagnostic] Adjuntando Documento PDF. Filename: ${mediaFilename}`);
+                console.log(`[Diagnostic] Adjuntando Documento. Filename: ${mediaFilename}`);
                 messagePayload.type = 'document';
                 messagePayload.document = {
                     link: mediaUrl,
@@ -1336,21 +1556,38 @@ exports.sendWhatsappMessage = (0, https_1.onCall)({
     }
     // 6. PERSISTENCIA EN FIRESTORE (TRANSACCIONAL)
     const isMsgImage = mediaUrl ? (/\.(jpg|jpeg|png|webp|gif)($|\?)/i.test(mediaUrl) || (mediaFilename && /\.(jpg|jpeg|png|webp|gif)$/i.test(mediaFilename))) : false;
+    const isMsgAudio = mediaUrl ? (/\.(ogg|mp3|m4a|aac|wav|opus)($|\?)/i.test(mediaUrl) || (mediaFilename && /\.(ogg|mp3|m4a|aac|wav|opus)$/i.test(mediaFilename))) : false;
+    const isMsgVideo = mediaUrl ? (/\.(mp4|mov|3gp|webm)($|\?)/i.test(mediaUrl) || (mediaFilename && /\.(mp4|mov|3gp|webm)$/i.test(mediaFilename))) : false;
     let finalMessageText = text;
     if (mediaUrl) {
         if (status === 'sent') {
-            finalMessageText = isMsgImage ? `[Imagen Enviada]\n${text}` : `[Documento Enviado: ${mediaFilename || 'PDF'}]\n${text}`;
+            if (isMsgImage)
+                finalMessageText = `[Imagen Enviada]\n${text}`;
+            else if (isMsgVideo)
+                finalMessageText = `[Video Enviado]\n${text}`;
+            else if (isMsgAudio)
+                finalMessageText = `[Audio Enviado]\n${text}`;
+            else
+                finalMessageText = `[Documento Enviado: ${mediaFilename || 'PDF'}]\n${text}`;
         }
         else {
-            finalMessageText = isMsgImage ? `[Error al enviar Imagen]\n${text}` : `[Error al enviar Documento: ${mediaFilename || 'PDF'}]\n${text}`;
+            if (isMsgImage)
+                finalMessageText = `[Error al enviar Imagen]\n${text}`;
+            else if (isMsgVideo)
+                finalMessageText = `[Error al enviar Video]\n${text}`;
+            else if (isMsgAudio)
+                finalMessageText = `[Error al enviar Audio]\n${text}`;
+            else
+                finalMessageText = `[Error al enviar Documento: ${mediaFilename || 'PDF'}]\n${text}`;
         }
     }
+    const msgTypeOut = templateName ? 'template' : (mediaUrl ? (isMsgImage ? 'image' : isMsgVideo ? 'video' : isMsgAudio ? 'audio' : 'document') : 'text');
     const messageData = {
         text: finalMessageText,
         sender: 'advisor',
         direction: 'outbound',
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        type: templateName ? 'template' : (mediaUrl ? (isMsgImage ? 'image' : 'document') : 'text'),
+        type: msgTypeOut,
         status,
         externalId: status === 'sent' ? externalId : null,
         errorMessage: status === 'failed' ? errorMessage : null,
@@ -1520,6 +1757,78 @@ exports.sendMetaMessage = (0, https_1.onCall)({ maxInstances: 10 }, async (reque
         });
     });
     return { success: status === 'sent', messageId: msgRef.id };
+});
+/**
+ * getWhatsappNumbers — Solo SuperAdmin.
+ * Recorre todas las integraciones de WhatsApp, consulta a Meta el número
+ * legible (display_phone_number) usando el phoneNumberId + accessToken de cada
+ * negocio, lo cachea en el documento de la integración y devuelve un mapa
+ * tenantId → { displayPhoneNumber, phoneNumberId, isActive, verifiedName }.
+ * Nunca devuelve tokens al cliente.
+ */
+exports.getWhatsappNumbers = (0, https_1.onCall)({ maxInstances: 10, timeoutSeconds: 120 }, async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    }
+    // Validar SuperAdmin vía /users/{uid}.isSuperAdmin
+    const userSnap = await db.collection('users').doc(request.auth.uid).get();
+    if (!userSnap.exists || userSnap.data()?.isSuperAdmin !== true) {
+        throw new https_1.HttpsError('permission-denied', 'Solo el SuperAdmin puede consultar los números de WhatsApp');
+    }
+    const snap = await db.collection('integrations')
+        .where('provider', '==', 'whatsapp')
+        .get();
+    const numbers = {};
+    await Promise.all(snap.docs.map(async (docSnap) => {
+        const data = docSnap.data();
+        const tenantId = data.tenantId;
+        if (!tenantId)
+            return;
+        const phoneNumberId = data.phoneNumberId || null;
+        const accessToken = data.accessToken || null;
+        let displayPhoneNumber = data.displayPhoneNumber || null;
+        let verifiedName = data.verifiedName || null;
+        let error;
+        if (phoneNumberId && accessToken) {
+            try {
+                const resp = await axios_1.default.get(`https://graph.facebook.com/v17.0/${phoneNumberId}`, { params: { fields: 'display_phone_number,verified_name', access_token: accessToken }, timeout: 10000 });
+                const fresh = resp.data?.display_phone_number || null;
+                const freshName = resp.data?.verified_name || null;
+                if (fresh && (fresh !== data.displayPhoneNumber || freshName !== data.verifiedName)) {
+                    await docSnap.ref.update({
+                        displayPhoneNumber: fresh,
+                        verifiedName: freshName,
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    });
+                }
+                if (fresh)
+                    displayPhoneNumber = fresh;
+                if (freshName)
+                    verifiedName = freshName;
+            }
+            catch (e) {
+                error = e?.response?.data?.error?.message || e?.message || 'Error consultando Meta';
+                console.warn(`[getWhatsappNumbers] ${tenantId}: ${error}`);
+            }
+        }
+        else if (!phoneNumberId) {
+            error = 'Sin phoneNumberId configurado';
+        }
+        else if (!accessToken) {
+            error = 'Sin accessToken configurado';
+        }
+        // Si hay varias integraciones por tenant, priorizar la activa
+        if (!numbers[tenantId] || data.isActive === true) {
+            numbers[tenantId] = {
+                displayPhoneNumber,
+                phoneNumberId,
+                isActive: data.isActive === true,
+                verifiedName,
+                ...(error ? { error } : {}),
+            };
+        }
+    }));
+    return { numbers };
 });
 const https_2 = require("firebase-functions/v2/https");
 /**
@@ -1728,7 +2037,6 @@ exports.onTenantCreatedAutomation = (0, firestore_1.onDocumentCreated)({
     const tenantId = snapshot.id;
     try {
         const companyName = data.name || 'tu negocio';
-        const tradeName = data.tradeName || tenantId;
         const email = data.ownerEmail;
         if (!email) {
             console.log('[Onboarding Automation] No email found for tenant:', tenantId);
@@ -1756,36 +2064,50 @@ exports.onTenantCreatedAutomation = (0, firestore_1.onDocumentCreated)({
         let finalTotal = rawTotal > 197 ? 197 : rawTotal;
         const isFullSuite = rawTotal > 197;
         // --- 2. GENERAR HTML DEL CORREO DE BIENVENIDA ---
+        const firstSteps = [
+            '<strong>Inicia sesión</strong> usando tu correo y contraseña en tu Workspace.'
+        ];
+        if (features.hasMultiAgent) {
+            firstSteps.push('<strong>Conecta tu WhatsApp:</strong> Ve a "Integraciones", escanea el código QR y activa la conexión multiagente.');
+        }
+        if (features.hasAiAgent) {
+            firstSteps.push('<strong>Entrena tu Agente IA:</strong> Sube tus productos o preguntas frecuentes para activar el autopilot de ventas.');
+        }
+        if (!features.hasMultiAgent && !features.hasAiAgent) {
+            firstSteps.push('<strong>Explora tu CRM:</strong> Registra tus primeros prospectos y organiza tu pipeline de ventas.');
+            firstSteps.push('<strong>Agrega herramientas:</strong> Visita la <a href="https://hub.smartflow-suite.com/tienda" style="color:#1877f2;">Tienda</a> para potenciar tu Hub con WhatsApp, Agente IA y más.');
+        }
+        const firstStepsHtml = firstSteps
+            .map(s => `<li style="margin-bottom: 8px;">${s}</li>`)
+            .join('');
         const welcomeHtml = `
       <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eef2f6; border-radius: 20px; background-color: #ffffff; color: #1e293b; box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
         <div style="text-align: center; padding-bottom: 24px; border-bottom: 1px solid #f1f5f9;">
           <h2 style="color: #1877f2; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">SmartFlow <span style="color: #0f172a;">Hub OS</span></h2>
         </div>
-        
+
         <div style="padding: 24px 0;">
           <h1 style="font-size: 22px; font-weight: 800; color: #0f172a; margin-top: 0; line-height: 1.3;">¡Tu espacio de trabajo inteligente está listo, ${companyName}! 🚀</h1>
           <p style="font-size: 15px; line-height: 1.6; color: #475569; margin-bottom: 20px;">
             Te damos una cálida bienvenida a SmartFlow Hub OS. Hemos aprovisionado tu Workspace en la nube para acompañarte en la digitalización y automatización de tus operaciones comerciales.
           </p>
-          
+
           <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; margin: 24px 0;">
             <h3 style="font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #1877f2; margin-top: 0; margin-bottom: 12px;">🔑 Datos de Acceso de tu Workspace</h3>
             <p style="font-size: 14px; margin: 8px 0; color: #334155;">
-              <strong>Workspace URL:</strong> 
-              <a href="https://${tradeName}.smartflow-suite.com" style="color: #1877f2; text-decoration: none; font-weight: bold; border-bottom: 1px dashed #1877f2;">https://${tradeName}.smartflow-suite.com</a>
+              <strong>Workspace URL:</strong>
+              <a href="https://hub.smartflow-suite.com" style="color: #1877f2; text-decoration: none; font-weight: bold; border-bottom: 1px dashed #1877f2;">https://hub.smartflow-suite.com</a>
             </p>
             <p style="font-size: 14px; margin: 8px 0; color: #334155;"><strong>Correo de Administración:</strong> ${email}</p>
           </div>
-          
+
           <h3 style="font-size: 16px; font-weight: 800; color: #0f172a; margin-top: 24px; margin-bottom: 12px;">🎯 Tus primeros pasos para comenzar:</h3>
           <ol style="font-size: 14px; line-height: 1.8; color: #475569; padding-left: 20px; margin-bottom: 24px;">
-            <li style="margin-bottom: 8px;"><strong>Inicia sesión</strong> usando tu correo y contraseña en tu Workspace.</li>
-            <li style="margin-bottom: 8px;"><strong>Conecta tu WhatsApp:</strong> Accede a la sección "WhatsApp", escanea el código QR y activa la conexión multiagente en 10 segundos.</li>
-            <li style="margin-bottom: 8px;"><strong>Carga tu conocimiento:</strong> Entrena a tu Agente IA subiendo tus productos o preguntas frecuentes para activar el autopilot.</li>
+            ${firstStepsHtml}
           </ol>
           
           <div style="text-align: center; margin-top: 32px; margin-bottom: 20px;">
-            <a href="https://smartflow-suite.com/login" style="background-color: #1877f2; color: #ffffff; text-decoration: none; padding: 14px 36px; border-radius: 30px; font-weight: bold; font-size: 14px; display: inline-block; box-shadow: 0 4px 10px rgba(24, 119, 242, 0.25);">ENTRAR A MI DASHBOARD</a>
+            <a href="https://hub.smartflow-suite.com/login" style="background-color: #1877f2; color: #ffffff; text-decoration: none; padding: 14px 36px; border-radius: 30px; font-weight: bold; font-size: 14px; display: inline-block; box-shadow: 0 4px 10px rgba(24, 119, 242, 0.25);">ENTRAR A MI DASHBOARD</a>
           </div>
         </div>
         
@@ -1795,7 +2117,7 @@ exports.onTenantCreatedAutomation = (0, firestore_1.onDocumentCreated)({
         </div>
       </div>
     `;
-        const welcomeText = `¡Bienvenido a SmartFlow Hub OS!\n\nTu espacio de trabajo en la nube ha sido aprovisionado con éxito para ${companyName}.\n\nTu acceso directo: https://${tradeName}.smartflow-suite.com\nEmail de administración: ${email}\n\nInicia sesión y conecta tu WhatsApp desde el menú de la izquierda para comenzar.`;
+        const welcomeText = `¡Bienvenido a SmartFlow Hub OS!\n\nTu espacio de trabajo ha sido aprovisionado para ${companyName}.\n\nAcceso: https://hub.smartflow-suite.com\nEmail: ${email}\n\n${features.hasMultiAgent ? 'Inicia sesión y conecta tu WhatsApp desde Integraciones para comenzar.' : 'Inicia sesión y explora tu CRM. Puedes agregar más herramientas desde la Tienda en cualquier momento.'}`;
         // Guardar correo de bienvenida en cola saliente
         await db.collection('admin_emails').add({
             to: email,
@@ -1906,18 +2228,23 @@ exports.onTenantCreatedAutomation = (0, firestore_1.onDocumentCreated)({
         </div>
       </div>
     `;
-        // Guardar factura en cola saliente
-        await db.collection('admin_emails').add({
-            to: email,
-            subject: `Tu factura de compra ${invoiceNumber} - SmartFlow Hub OS`,
-            text: `Confirmación de cobro aprobado de tu suscripción de SmartFlow Hub OS por $${finalTotal.toFixed(2)} USD.`,
-            html: invoiceHtml,
-            folder: 'sent',
-            processedBySendGrid: false,
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
-        });
+        // Solo enviar factura si hubo un cobro real
+        if (finalTotal > 0) {
+            await db.collection('admin_emails').add({
+                to: email,
+                subject: `Tu factura de compra ${invoiceNumber} - SmartFlow Hub OS`,
+                text: `Confirmación de cobro aprobado de tu suscripción de SmartFlow Hub OS por $${finalTotal.toFixed(2)} USD.`,
+                html: invoiceHtml,
+                folder: 'sent',
+                processedBySendGrid: false,
+                createdAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
         console.log(`[Onboarding Automation] Invoice email created for tenant: ${tenantId}`);
-        // --- 4. PROGRAMAR SEGUIMIENTO DE 3 DÍAS Y 7 DÍAS EN LA BASE DE DATOS ---
+        // --- 4. PROGRAMAR SEGUIMIENTO DE 3/7 DÍAS Y FECHA DE RENOVACIÓN ---
+        const renewalDate = finalTotal > 0
+            ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+            : null; // tenants gratuitos no tienen fecha de renovación
         await db.collection('tenant_onboarding_states').doc(tenantId).set({
             tenantId,
             ownerEmail: email,
@@ -1930,12 +2257,205 @@ exports.onTenantCreatedAutomation = (0, firestore_1.onDocumentCreated)({
             followup3dSent: false,
             followup7dScheduledFor: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
             followup7dSent: false,
+            // Renovación mensual
+            renewalDate,
+            renewalReminderSent: false,
+            suspended: false,
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
+        // Guardar renewalDate también en el tenant doc para consultas rápidas
+        if (renewalDate) {
+            await db.collection('tenants').doc(tenantId).update({ renewalDate, suspended: false });
+        }
         console.log(`[Onboarding Automation] Onboarding tracking initialized for tenant: ${tenantId}`);
     }
     catch (error) {
         console.error('[Onboarding Automation] Error executing trigger:', error);
+    }
+});
+/**
+ * CLOUD FUNCTION: sendOnboardingFollowups
+ * Corre cada 6 horas. Busca tenants cuya fecha de seguimiento ya pasó y aún
+ * no se ha enviado el email. Envía el de 3 días y el de 7 días.
+ */
+exports.sendOnboardingFollowups = (0, scheduler_1.onSchedule)({
+    schedule: 'every 6 hours',
+    timeZone: 'America/Costa_Rica',
+    memory: '256MiB',
+}, async () => {
+    const now = new Date().toISOString();
+    const snap = await db.collection('tenant_onboarding_states')
+        .where('followup3dSent', '==', false)
+        .where('followup3dScheduledFor', '<=', now)
+        .limit(50)
+        .get();
+    for (const docSnap of snap.docs) {
+        const d = docSnap.data();
+        try {
+            const html3d = `
+        <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #eef2f6; border-radius: 20px; background: #fff; color: #1e293b;">
+          <h2 style="color: #1877f2; margin: 0 0 16px 0;">SmartFlow <span style="color: #0f172a;">Hub OS</span></h2>
+          <h1 style="font-size: 20px; font-weight: 800; color: #0f172a; margin-top: 0;">¿Cómo va todo, ${d.companyName}? 🚀</h1>
+          <p style="font-size: 15px; line-height: 1.7; color: #475569;">
+            Han pasado 3 días desde que activaste tu Hub. Queremos asegurarnos de que todo esté andando perfecto.
+          </p>
+          <p style="font-size: 15px; line-height: 1.7; color: #475569;">
+            Si aún no has conectado tu WhatsApp Business o entrenado tu Agente IA, este es el momento ideal.
+            Toma menos de 5 minutos y transforma cómo atiendes a tus clientes.
+          </p>
+          <div style="text-align: center; margin: 28px 0;">
+            <a href="https://hub.smartflow-suite.com" style="background: #1877f2; color: #fff; text-decoration: none; padding: 14px 36px; border-radius: 30px; font-weight: bold; font-size: 14px; display: inline-block;">
+              IR A MI DASHBOARD →
+            </a>
+          </div>
+          <p style="font-size: 13px; color: #94a3b8; text-align: center;">¿Tienes dudas? Escríbenos a <a href="mailto:hola@smartflow-suite.com" style="color: #1877f2;">hola@smartflow-suite.com</a></p>
+        </div>`;
+            await db.collection('admin_emails').add({
+                to: d.ownerEmail,
+                subject: `¿Todo bien con tu Hub, ${d.companyName}? · SmartFlow`,
+                text: `Hola ${d.companyName}, han pasado 3 días desde que activaste tu Hub. ¿Ya conectaste tu WhatsApp? Entra en https://hub.smartflow-suite.com`,
+                html: html3d,
+                folder: 'sent',
+                processedBySendGrid: false,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            await docSnap.ref.update({ followup3dSent: true, followup3dSentAt: admin.firestore.FieldValue.serverTimestamp() });
+            console.log(`[Followup 3d] Sent to ${d.ownerEmail}`);
+        }
+        catch (e) {
+            console.error(`[Followup 3d] Error for ${docSnap.id}:`, e);
+        }
+    }
+    const snap7 = await db.collection('tenant_onboarding_states')
+        .where('followup7dSent', '==', false)
+        .where('followup7dScheduledFor', '<=', now)
+        .limit(50)
+        .get();
+    for (const docSnap of snap7.docs) {
+        const d = docSnap.data();
+        try {
+            const html7d = `
+        <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #eef2f6; border-radius: 20px; background: #fff; color: #1e293b;">
+          <h2 style="color: #1877f2; margin: 0 0 16px 0;">SmartFlow <span style="color: #0f172a;">Hub OS</span></h2>
+          <h1 style="font-size: 20px; font-weight: 800; color: #0f172a; margin-top: 0;">Tu primera semana con SmartFlow 🎯</h1>
+          <p style="font-size: 15px; line-height: 1.7; color: #475569;">
+            ¡Ya llevas 7 días con tu Hub activo, ${d.companyName}! Esperamos que estés viendo los primeros resultados.
+          </p>
+          <p style="font-size: 15px; line-height: 1.7; color: #475569;">
+            ¿Sabías que los negocios que activan el Agente IA en su primera semana responden 3x más rápido y cierran hasta un 40% más de leads?
+            Si aún no lo tienes activo, agrégalo desde tu panel de herramientas.
+          </p>
+          <div style="text-align: center; margin: 28px 0;">
+            <a href="https://hub.smartflow-suite.com" style="background: #1877f2; color: #fff; text-decoration: none; padding: 14px 36px; border-radius: 30px; font-weight: bold; font-size: 14px; display: inline-block;">
+              VER MI HUB →
+            </a>
+          </div>
+          <p style="font-size: 13px; color: #94a3b8; text-align: center;">¿Tienes dudas? Escríbenos a <a href="mailto:hola@smartflow-suite.com" style="color: #1877f2;">hola@smartflow-suite.com</a></p>
+        </div>`;
+            await db.collection('admin_emails').add({
+                to: d.ownerEmail,
+                subject: `Tu primera semana con SmartFlow Hub 🎯`,
+                text: `¡${d.companyName}, llevas 7 días con tu Hub! ¿Ya activaste el Agente IA? Entra en https://hub.smartflow-suite.com`,
+                html: html7d,
+                folder: 'sent',
+                processedBySendGrid: false,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            await docSnap.ref.update({ followup7dSent: true, followup7dSentAt: admin.firestore.FieldValue.serverTimestamp() });
+            console.log(`[Followup 7d] Sent to ${d.ownerEmail}`);
+        }
+        catch (e) {
+            console.error(`[Followup 7d] Error for ${docSnap.id}:`, e);
+        }
+    }
+});
+/**
+ * CLOUD FUNCTION: checkSubscriptionRenewals
+ * Corre diariamente. Envía recordatorio 3 días antes del vencimiento y suspende
+ * herramientas premium 7 días después si no se ha renovado.
+ */
+exports.checkSubscriptionRenewals = (0, scheduler_1.onSchedule)({ schedule: 'every 24 hours', timeZone: 'America/Costa_Rica', region: 'us-central1' }, async () => {
+    const now = Date.now();
+    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const snapshot = await db.collection('tenant_onboarding_states').get();
+    for (const docSnap of snapshot.docs) {
+        const d = docSnap.data();
+        if (!d.renewalDate)
+            continue;
+        const tenantId = docSnap.id;
+        const renewalMs = new Date(d.renewalDate).getTime();
+        const msUntilRenewal = renewalMs - now;
+        const msSinceRenewal = now - renewalMs;
+        // --- Recordatorio 3 días antes ---
+        if (msUntilRenewal > 0 && msUntilRenewal <= threeDaysMs && !d.renewalReminderSent) {
+            try {
+                const daysLeft = Math.ceil(msUntilRenewal / (24 * 60 * 60 * 1000));
+                await db.collection('admin_emails').add({
+                    to: d.ownerEmail,
+                    subject: `Tu suscripción SmartFlow vence en ${daysLeft} día${daysLeft === 1 ? '' : 's'}`,
+                    html: `
+              <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px">
+                <h2 style="color:#1877F2">Recordatorio de renovación</h2>
+                <p>Hola <strong>${d.ownerName || d.ownerEmail}</strong>,</p>
+                <p>Tu suscripción de <strong>${d.tradeName || tenantId}</strong> vence en <strong>${daysLeft} día${daysLeft === 1 ? '' : 's'}</strong>.</p>
+                <p>Para mantener acceso a tus herramientas premium, realiza tu pago antes de la fecha de vencimiento.</p>
+                <a href="https://hub.smartflow-suite.com/tienda" style="display:inline-block;background:#1877F2;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:16px">Renovar ahora</a>
+                <p style="margin-top:24px;color:#888;font-size:12px">SmartFlow Hub OS · hub.smartflow-suite.com</p>
+              </div>
+            `,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+                await docSnap.ref.update({ renewalReminderSent: true });
+                console.log(`[Renewal reminder] Sent to ${d.ownerEmail} (${daysLeft}d left)`);
+            }
+            catch (e) {
+                console.error(`[Renewal reminder] Error for ${tenantId}:`, e);
+            }
+        }
+        // --- Suspensión 7 días después del vencimiento ---
+        if (msSinceRenewal >= sevenDaysMs && !d.suspended) {
+            try {
+                const premiumFeatures = {
+                    hasMultiAgent: false,
+                    hasAiAgent: false,
+                    hasQualityAuditor: false,
+                    hasPaymentLinks: false,
+                    hasQuotes: false,
+                    hasCatalog: false,
+                    hasAgenda: false,
+                };
+                await db.collection('tenants').doc(tenantId).update({
+                    ...premiumFeatures,
+                    suspended: true,
+                });
+                const settingsSnap = await db.collection('tenants').doc(tenantId)
+                    .collection('settings').doc('general').get();
+                if (settingsSnap.exists) {
+                    await settingsSnap.ref.update(premiumFeatures);
+                }
+                await docSnap.ref.update({ suspended: true });
+                await db.collection('admin_emails').add({
+                    to: d.ownerEmail,
+                    subject: 'Tu suscripción SmartFlow ha sido suspendida',
+                    html: `
+              <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px">
+                <h2 style="color:#ef4444">Acceso suspendido</h2>
+                <p>Hola <strong>${d.ownerName || d.ownerEmail}</strong>,</p>
+                <p>Las herramientas premium de <strong>${d.tradeName || tenantId}</strong> han sido desactivadas por falta de pago.</p>
+                <p>Tus datos están seguros. Reactiva tu cuenta para recuperar el acceso completo.</p>
+                <a href="https://hub.smartflow-suite.com/tienda" style="display:inline-block;background:#1877F2;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;margin-top:16px">Reactivar cuenta</a>
+                <p style="margin-top:24px;color:#888;font-size:12px">SmartFlow Hub OS · hub.smartflow-suite.com</p>
+              </div>
+            `,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+                console.log(`[Suspension] Suspended ${tenantId} (${d.ownerEmail})`);
+            }
+            catch (e) {
+                console.error(`[Suspension] Error for ${tenantId}:`, e);
+            }
+        }
     }
 });
 /**
@@ -2147,11 +2667,10 @@ Estructura requerida del JSON:
  * Esto previene que se creen tenants sin pago real.
  */
 exports.verifyPaypalOrder = (0, https_1.onCall)({}, async (request) => {
-    // SEGURIDAD: antes era publica y cualquiera podia invocarla con un orderId
-    // arbitrario, intentando capturar/replay pagos de otros tenants.
-    if (!request.auth) {
-        throw new https_1.HttpsError('unauthenticated', 'Debes iniciar sesion para verificar pagos.');
-    }
+    // Auth es opcional: el checkout crea la cuenta DESPUÉS del pago, así que el
+    // usuario aún no está autenticado cuando llama esta función. La seguridad
+    // se mantiene por: validación regex del orderId, captura real contra PayPal
+    // API, e idempotencia (un orderId solo se procesa una vez).
     const { orderId, tenantId } = request.data;
     // Validacion estricta del orderId (PayPal usa IDs alfanumericos cortos)
     if (!orderId || typeof orderId !== 'string' || !/^[A-Z0-9_-]{6,40}$/i.test(orderId)) {
@@ -2201,7 +2720,7 @@ exports.verifyPaypalOrder = (0, https_1.onCall)({}, async (request) => {
             payer: order.payer ?? null,
             capturedAt: admin.firestore.FieldValue.serverTimestamp(),
             tenantId: tenantId ?? null,
-            requestedBy: request.auth.uid,
+            requestedBy: request.auth?.uid ?? null,
         });
         return { success: true, orderId, status: order.status };
     }
@@ -2250,18 +2769,23 @@ exports.checkWindowExpiry = (0, scheduler_1.onSchedule)({
         return settingsCache[tenantId];
     };
     // ── PASO 1: Enviar re-engagement (ventana entre 23h y 23.5h atrás) ──
+    // Nota: usamos solo el rango en lastInboundDate para evitar índice compuesto.
+    // Los filtros de status/source se aplican en código.
     const p1Start = admin.firestore.Timestamp.fromMillis(now - 23.5 * HOUR);
     const p1End = admin.firestore.Timestamp.fromMillis(now - 23 * HOUR);
     const approaching = await db.collection('conversations')
-        .where('status', '==', 'active')
-        .where('source', '==', 'whatsapp')
         .where('lastInboundDate', '>=', p1Start)
         .where('lastInboundDate', '<=', p1End)
-        .limit(50)
+        .limit(100)
         .get();
-    console.log(`[WindowExpiry] Paso 1: ${approaching.size} conversaciones cerca del límite`);
+    console.log(`[WindowExpiry] Paso 1: ${approaching.size} conversaciones en ventana 23h-23.5h`);
     for (const convDoc of approaching.docs) {
         const conv = convDoc.data();
+        // Filtros en código para evitar índice compuesto
+        if (conv.status !== 'active')
+            continue;
+        if (conv.source !== 'whatsapp')
+            continue;
         if (conv.reEngagementSent)
             continue; // Ya enviado — no repetir
         const integration = await getIntegration(conv.tenantId);
@@ -2314,14 +2838,16 @@ exports.checkWindowExpiry = (0, scheduler_1.onSchedule)({
     // ── PASO 2: Mover a "Perdido" si no respondió después de 25h ──
     const p2Cutoff = admin.firestore.Timestamp.fromMillis(now - 25 * HOUR);
     const expired = await db.collection('conversations')
-        .where('status', '==', 'active')
-        .where('source', '==', 'whatsapp')
         .where('lastInboundDate', '<=', p2Cutoff)
-        .limit(50)
+        .limit(100)
         .get();
     console.log(`[WindowExpiry] Paso 2: ${expired.size} conversaciones expiradas para evaluar`);
     for (const convDoc of expired.docs) {
         const conv = convDoc.data();
+        if (conv.status !== 'active')
+            continue;
+        if (conv.source !== 'whatsapp')
+            continue;
         // Solo procesar si ya enviamos el re-engagement y el cliente no ha respondido
         if (!conv.reEngagementSent || !conv.leadId)
             continue;
@@ -2341,5 +2867,75 @@ exports.checkWindowExpiry = (0, scheduler_1.onSchedule)({
         }
     }
     console.log('[WindowExpiry] Ejecución completada.');
+});
+/**
+ * Reparación de un solo uso: corrige leads huérfanos en TODOS los tenants.
+ * Un lead queda huérfano cuando su `stage` no coincide con ninguna etiqueta del
+ * pipeline del tenant (antes los webhooks hardcodeaban 'Nuevo'), o cuando le falta
+ * `orderIndex` (Firestore excluye del CRM los docs sin el campo del orderBy).
+ *
+ * Se ejecuta vía HTTP con token: /repairOrphanLeads?token=REPAIR_2026
+ */
+const DEFAULT_PIPELINE_LABELS = ['Nuevo', 'Seguimiento', 'Visita Técnica', 'Venta Realizada', 'Perdido'];
+exports.repairOrphanLeads = functions.https.onRequest(async (req, res) => {
+    if (req.query.token !== 'REPAIR_2026') {
+        res.status(403).send('Forbidden');
+        return;
+    }
+    const report = { tenantsWithSettings: 0, leadsScanned: 0, leadsFixed: 0, details: [] };
+    // 1. Cargar pipeline (etiquetas válidas + etapa por defecto) por tenant
+    const settingsSnap = await db.collection('settings').get();
+    const pipelineByTenant = {};
+    for (const docSnap of settingsSnap.docs) {
+        const stages = docSnap.data()?.pipeline?.stages;
+        if (Array.isArray(stages) && stages.length > 0) {
+            const valid = new Set();
+            for (const s of stages)
+                if (s?.label)
+                    valid.add(s.label);
+            const d = stages.find((s) => s.isDefault)
+                || stages.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0];
+            pipelineByTenant[docSnap.id] = { valid, def: d?.label || 'Nuevo' };
+        }
+        else {
+            // Tenant sin pipeline custom: el frontend muestra el pipeline por defecto
+            pipelineByTenant[docSnap.id] = { valid: new Set(DEFAULT_PIPELINE_LABELS), def: 'Nuevo' };
+        }
+    }
+    report.tenantsWithSettings = settingsSnap.size;
+    // 2. Recorrer todos los leads y reparar huérfanos
+    const leadsSnap = await db.collection('leads').get();
+    report.leadsScanned = leadsSnap.size;
+    let batch = db.batch();
+    let ops = 0;
+    for (const leadDoc of leadsSnap.docs) {
+        const lead = leadDoc.data();
+        const pipe = pipelineByTenant[lead.tenantId]
+            || { valid: new Set(DEFAULT_PIPELINE_LABELS), def: 'Nuevo' };
+        const updates = {};
+        if (!lead.stage || !pipe.valid.has(lead.stage)) {
+            updates.stage = pipe.def;
+        }
+        if (lead.orderIndex === undefined || lead.orderIndex === null) {
+            updates.orderIndex = Date.now();
+        }
+        if (Object.keys(updates).length > 0) {
+            batch.update(leadDoc.ref, updates);
+            ops++;
+            report.leadsFixed++;
+            if (report.details.length < 100) {
+                report.details.push({ id: leadDoc.id, tenantId: lead.tenantId, oldStage: lead.stage || null, ...updates });
+            }
+            if (ops >= 400) {
+                await batch.commit();
+                batch = db.batch();
+                ops = 0;
+            }
+        }
+    }
+    if (ops > 0)
+        await batch.commit();
+    console.log(`[RepairOrphanLeads] ${report.leadsFixed}/${report.leadsScanned} leads reparados.`);
+    res.json(report);
 });
 //# sourceMappingURL=index.js.map

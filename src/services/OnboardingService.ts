@@ -2,6 +2,7 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { TenantFeatures, TenantPlan } from '@/types';
+import { slugifyTenantId } from '@/utils/slug';
 
 export interface OnboardingData {
   businessName: string;
@@ -11,6 +12,7 @@ export interface OnboardingData {
   phone: string;
   industry: string;
   selectedFeatures: string[]; // Viene como array de llaves desde el Checkout
+  currency?: string;
   whatsappConfig?: {
     businessId: string;
     accessToken: string;
@@ -45,7 +47,7 @@ export const OnboardingService = {
     }
 
     // 2. Determinar el Tenant ID (usando tradeName si es posible)
-    const tenantId = data.tradeName.toLowerCase().replace(/[^a-z0-9]/g, '') || `t-${Date.now()}`;
+    const tenantId = slugifyTenantId(data.tradeName) || `t-${Date.now()}`;
     const now = new Date().toISOString();
 
     // Convertir array de features a objeto TenantFeatures
@@ -88,13 +90,20 @@ export const OnboardingService = {
     });
 
     // 4. Configuración inicial (Settings) clonada del Hub Maestro
-    let initialSettings = {
+    const initialSettings = {
       tenantId,
       company: {
         legalName: data.businessName,
         tradeName: data.tradeName,
         email: data.email,
         phone: data.phone,
+      },
+      commercial: {
+        currency: data.currency || 'USD',
+        quoteValidityDays: 15,
+        maxDiscountPercent: 10,
+        taxRatePercent: 0,
+        defaultPaymentTerms: '',
       },
       features: featuresObj,
       onboarding: {

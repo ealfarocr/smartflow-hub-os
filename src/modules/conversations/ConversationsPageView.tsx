@@ -11,8 +11,9 @@ import {
   MessageSquareText, Loader2, CheckCheck, AlertCircle,
   LayoutTemplate, ArrowLeft, Zap, CreditCard,
   Camera, Globe, Sparkles, UserPlus, Package,
-  FileText, Download, X, Bot, Settings2, Paperclip, Mic, Play,
+  FileText, Download, X, Bot, Settings2, Paperclip, Mic, Play, Trash2,
 } from 'lucide-react';
+import { VoiceRecorder } from '@/utils/audioRecorder';
 import { useTeam } from '@/hooks/useTeam';
 import { CreatePaymentLinkModal } from '@/modules/payments/CreatePaymentLinkModal';
 import { WhatsappWindowBadge } from './WhatsappWindowBadge';
@@ -74,7 +75,16 @@ export const ConversationsPageView = () => {
   const [selectedCatalogItemForPayment, setSelectedCatalogItemForPayment] = useState<CatalogItem | null>(null);
   const [isUploading, setIsUploading]             = useState(false);
   const fileInputRef                              = useRef<HTMLInputElement>(null);
-  const audioFileInputRef                         = useRef<HTMLInputElement>(null);
+
+  // Grabación de notas de voz estilo WhatsApp (MP3 compatible con WhatsApp)
+  const [isRecording, setIsRecording]   = useState(false);
+  const [isLocked, setIsLocked]         = useState(false);
+  const [slideCancel, setSlideCancel]   = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const recorderRef                     = useRef<VoiceRecorder | null>(null);
+  const recordTimerRef                  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordStartRef                  = useRef<{ x: number; y: number; time: number } | null>(null);
+  const lockedRef                       = useRef(false);
 
   useEffect(() => {
     if (!activeMembership?.tenantId) return;
@@ -139,16 +149,26 @@ export const ConversationsPageView = () => {
       activeMembership.tenantId, null, null, template.metaTemplateName, template.languageCode, components);
   };
 
+  const uploadToStorage = async (file: File): Promise<string> => {
+    const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+    const { storage } = await import('@/lib/firebase');
+    const path = `chat-attachments/${activeMembership!.tenantId}/${Date.now()}-${file.name}`;
+    const storageRef = ref(storage, path);
+    await uploadBytes(storageRef, file, { contentType: file.type });
+    return getDownloadURL(storageRef);
+  };
+
   const handleFileUpload = async (file: File) => {
     if (!activeMembership?.tenantId) return;
+    // WhatsApp acepta video/documento hasta 16MB. Evita subir algo que luego rechaza.
+    const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|3gp|webm)$/i.test(file.name);
+    if (file.size > 16 * 1024 * 1024) {
+      addToast(`El archivo pesa ${(file.size / 1048576).toFixed(1)}MB. WhatsApp acepta máximo 16MB${isVideo ? ' para video' : ''}.`, 'error');
+      return;
+    }
     setIsUploading(true);
     try {
-      const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-      const { storage } = await import('@/lib/firebase');
-      const path = `chat-attachments/${activeMembership.tenantId}/${Date.now()}-${file.name}`;
-      const storageRef = ref(storage, path);
-      await uploadBytes(storageRef, file, { contentType: file.type });
-      const url = await getDownloadURL(storageRef);
+      const url = await uploadToStorage(file);
       setMediaUrl(url);
       setMediaFilename(file.name);
     } catch {
@@ -158,13 +178,108 @@ export const ConversationsPageView = () => {
     }
   };
 
+  // ── Grabación estilo WhatsApp ──────────────────────────────
+  const clearRecordTimer = () => {
+    if (recordTimerRef.current) { clearInterval(recordTimerRef.current); recordTimerRef.current = null; }
+  };
+
+  const startRecording = async () => {
+    if (isRecording) return;
+    try {
+      const recorder = new VoiceRecorder();
+      await recorder.start();
+      recorderRef.current = recorder;
+      setRecordSeconds(0);
+      setSlideCancel(false);
+      setIsRecording(true);
+      recordTimerRef.current = setInterval(() => setRecordSeconds(s => s + 1), 1000);
+    } catch {
+      recordStartRef.current = null;
+      addToast('No se pudo acceder al micrófono. Revisá los permisos.', 'error');
+    }
+  };
+
+  const cancelRecording = () => {
+    clearRecordTimer();
+    recorderRef.current?.cancel();
+    recorderRef.current = null;
+    lockedRef.current = false;
+    recordStartRef.current = null;
+    setIsRecording(false); setIsLocked(false); setSlideCancel(false); setRecordSeconds(0);
+  };
+
+  const finishRecordingAndSend = async () => {
+    if (!recorderRef.current || !activeConversation || !activeMembership?.tenantId) { cancelRecording(); return; }
+    clearRecordTimer();
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    lockedRef.current = false;
+    setIsRecording(false); setIsLocked(false); setSlideCancel(false);
+    setIsUploading(true);
+    try {
+      const file = await recorder.stop();
+      if (file.size < 1200) { addToast('La nota de voz quedó muy corta.', 'info'); return; }
+      const url = await uploadToStorage(file);
+      await sendMessage(activeConversation, '', 'advisor', activeMembership.tenantId, url, file.name);
+    } catch {
+      addToast('Error al enviar la nota de voz.', 'error');
+    } finally {
+      setIsUploading(false);
+      setRecordSeconds(0);
+    }
+  };
+
+  // Gestos: mantener para grabar · deslizar ← cancela · deslizar ↑ bloquea · soltar envía
+  const SLIDE_CANCEL_PX = 90;
+  const SLIDE_LOCK_PX   = 90;
+
+  const onMicPointerDown = (e: React.PointerEvent) => {
+    if (isUploading || isRecording) return;
+    e.preventDefault();
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
+    recordStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
+    lockedRef.current = false;
+    startRecording();
+  };
+
+  const onMicPointerMove = (e: React.PointerEvent) => {
+    const start = recordStartRef.current;
+    if (!start || lockedRef.current) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (dy < -SLIDE_LOCK_PX) {
+      lockedRef.current = true;
+      setIsLocked(true); setSlideCancel(false);
+      return;
+    }
+    setSlideCancel(dx < -SLIDE_CANCEL_PX);
+  };
+
+  const onMicPointerUp = (e: React.PointerEvent) => {
+    if (lockedRef.current) return; // modo bloqueado: sigue grabando hasta tocar enviar/cancelar
+    const start = recordStartRef.current;
+    recordStartRef.current = null;
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    const dur = Date.now() - start.time;
+    if (dx < -SLIDE_CANCEL_PX) { cancelRecording(); return; }
+    if (dur < 600) { cancelRecording(); addToast('Mantené presionado para grabar 🎤', 'info'); return; }
+    finishRecordingAndSend();
+  };
+
+  // Liberar el micrófono si el componente se desmonta mientras graba
+  useEffect(() => () => {
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    recorderRef.current?.cancel();
+  }, []);
+
   const getSourceIcon = (source: string) => {
     if (source === 'instagram') return <Camera className="w-3.5 h-3.5 text-pink-500" />;
     if (source === 'facebook')  return <Globe className="w-3.5 h-3.5 text-blue-600" />;
     return (
       <div className="flex items-center gap-1">
         <Phone className="w-3.5 h-3.5 text-emerald-500" />
-        <span className="text-[7px] font-black bg-emerald-500/10 text-emerald-600 px-1 rounded uppercase tracking-tighter">Business</span>
+        <span className="text-[9px] font-black bg-emerald-500/10 text-emerald-600 px-1 rounded uppercase tracking-tighter">WA</span>
       </div>
     );
   };
@@ -248,7 +363,7 @@ export const ConversationsPageView = () => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className={`text-sm truncate max-w-[115px] ${
+                    <span className={`text-sm truncate max-w-[38%] sm:max-w-[115px] ${
                       unread
                         ? 'font-black text-slate-900 dark:text-white'
                         : 'font-medium text-slate-500 dark:text-slate-400'
@@ -271,12 +386,12 @@ export const ConversationsPageView = () => {
                     <div className="flex items-center gap-1 flex-wrap">
                       <WhatsappWindowBadge lastInboundDate={conv.lastInboundDate || (conv.lastMessageSender === 'lead' ? conv.lastMessageDate : null)} />
                       {isSeguimiento && (
-                        <span className="text-[8px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">
+                        <span className="text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">
                           Seguimiento
                         </span>
                       )}
                       {isAgendado && (
-                        <span className="text-[8px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
+                        <span className="text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
                           Agendado
                         </span>
                       )}
@@ -323,8 +438,8 @@ export const ConversationsPageView = () => {
                   </p>
                 </div>
 
-                {/* Assign agent */}
-                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl shrink-0">
+                {/* Assign agent — oculto en móvil */}
+                <div className="hidden md:flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl shrink-0">
                   <UserPlus className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <select
                     value={activeChat.advisorId || ''}
@@ -338,25 +453,25 @@ export const ConversationsPageView = () => {
                   </select>
                 </div>
 
-                {/* Lead Score */}
-                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-black shrink-0 ${scoreColor(activeChat.aiScore || 0)}`}>
+                {/* Lead Score — oculto en móvil */}
+                <div className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-black shrink-0 ${scoreColor(activeChat.aiScore || 0)}`}>
                   <Zap className="w-3.5 h-3.5 fill-current" />
                   <span>{activeChat.aiScore || 0}</span>
                 </div>
 
-                {/* Window badge */}
-                <WhatsappWindowBanner windowInfo={windowInfo} />
+                {/* Window badge — oculto en móvil */}
+                <div className="hidden md:block"><WhatsappWindowBanner windowInfo={windowInfo} /></div>
 
                 {/* Action buttons */}
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-0.5 sm:gap-1 shrink-0 ml-auto md:ml-0">
                   <button
                     onClick={() => {
                       const phone = activeChat.phoneRaw || activeChat.phoneE164;
                       phone ? window.open(`tel:${phone}`, '_self') : addToast('Sin número válido', 'error');
                     }}
-                    className="flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl hover:bg-blue-50 text-[#1877F2] transition-colors" title="Llamar">
+                    className="flex flex-col items-center gap-0.5 w-11 h-11 justify-center rounded-xl hover:bg-blue-50 text-[#1877F2] transition-colors" title="Llamar">
                     <Phone className="w-4 h-4" />
-                    <span className="text-[8px] font-black">Llamar</span>
+                    <span className="text-[9px] font-black hidden sm:block">Llamar</span>
                   </button>
                   <button
                     onClick={async () => {
@@ -364,36 +479,35 @@ export const ConversationsPageView = () => {
                       await toggleBot(activeChat.id, on);
                       addToast(on ? '🤖 Bot activado' : '👤 Bot desactivado', 'success');
                     }}
-                    className={`flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl transition-colors ${
+                    className={`flex flex-col items-center gap-0.5 w-11 h-11 justify-center rounded-xl transition-colors ${
                       (activeChat as any).botEnabled ? 'bg-emerald-50 text-emerald-600' : 'hover:bg-slate-100 text-slate-400'
                     }`} title="Bot IA">
                     <Bot className="w-4 h-4" />
-                    <span className="text-[8px] font-black">{(activeChat as any).botEnabled ? 'Bot ON' : 'Bot OFF'}</span>
+                    <span className="text-[9px] font-black hidden sm:block">{(activeChat as any).botEnabled ? 'Bot ON' : 'Bot OFF'}</span>
                   </button>
                   <button
                     onClick={() => addToast(`${activeChat.contactName} · ${activeChat.phoneE164 || 'Sin número'}`, 'info')}
-                    className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors" title="Opciones">
+                    className="flex flex-col items-center gap-0.5 w-10 h-11 justify-center rounded-xl hover:bg-slate-100 text-slate-400 transition-colors" title="Opciones">
                     <MoreVertical className="w-4 h-4" />
-                    <span className="text-[8px] font-black">Más</span>
+                    <span className="text-[9px] font-black hidden sm:block">Más</span>
                   </button>
                 </div>
               </div>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3 scrollbar-hide">
+            <div className="flex-1 overflow-y-auto px-3 md:px-6 py-4 space-y-3 scrollbar-hide">
               {activeMessages.map(msg => (
                 <div key={msg.id} className={`flex flex-col ${msg.sender === 'advisor' ? 'items-end' : 'items-start'}`}>
-                  <div className={`max-w-[72%] rounded-2xl px-4 py-3 shadow-sm ${
+                  <div className={`max-w-[85%] md:max-w-[72%] rounded-2xl px-3 md:px-4 py-3 shadow-sm ${
                     msg.sender === 'advisor'
                       ? 'bg-[#d9fdd3] dark:bg-[#005c4b] text-slate-900 dark:text-white rounded-tr-none'
                       : 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-tl-none'
                   }`}>
                     {msg.type === 'audio' ? (
                       msg.mediaUrl ? (
-                        <div className="mb-1 min-w-[230px]">
-                          {/* Reproductor nativo con múltiples formatos */}
-                          <audio controls preload="metadata" className="w-full rounded-xl" style={{ height: '42px', minWidth: '230px' }}>
+                        <div className="mb-1 w-full">
+                          <audio controls preload="metadata" className="w-full rounded-xl" style={{ height: '42px' }}>
                             <source src={msg.mediaUrl} type="audio/ogg; codecs=opus" />
                             <source src={msg.mediaUrl} type="audio/mp4" />
                             <source src={msg.mediaUrl} type="audio/mpeg" />
@@ -419,6 +533,10 @@ export const ConversationsPageView = () => {
                       <div className="mb-2 rounded-xl overflow-hidden max-h-56 border border-black/5">
                         <img src={msg.mediaUrl} alt="adjunto" className="w-full h-full object-cover cursor-pointer"
                           onClick={() => window.open(msg.mediaUrl, '_blank')} />
+                      </div>
+                    ) : msg.mediaUrl && (msg.type === 'video' || /\.(mp4|mov|3gp|webm)($|\?)/i.test(msg.mediaUrl) || msg.text?.includes('[Video Enviado]')) ? (
+                      <div className="mb-2 rounded-xl overflow-hidden max-h-64 border border-black/5">
+                        <video src={msg.mediaUrl} controls preload="metadata" className="w-full max-h-64 rounded-xl bg-black" />
                       </div>
                     ) : msg.mediaUrl ? (
                       <div className="mb-2 flex items-center gap-2 p-2.5 bg-black/5 dark:bg-white/5 rounded-xl">
@@ -488,7 +606,7 @@ export const ConversationsPageView = () => {
                         <MessageSquare className="w-3.5 h-3.5" /> Plantillas
                       </button>
                       {showQuickTemplates && (
-                        <div className="absolute bottom-full left-0 mb-2 w-72 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden">
+                        <div className="absolute bottom-full left-0 mb-2 w-[calc(100vw-2rem)] sm:w-72 max-w-sm bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden">
                           <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-700">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Plantillas rápidas</p>
                             <p className="text-[9px] text-slate-400 mt-0.5">Se rellenan con el nombre del cliente automáticamente</p>
@@ -565,43 +683,83 @@ export const ConversationsPageView = () => {
                         </button>
                       </div>
                     )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.mp4,.mov,.3gp,.ogg,.mp3,.m4a,.aac,.wav,.opus"
+                      className="hidden"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
+                    />
                     <div className="flex items-center gap-2">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*,.pdf,.doc,.docx"
-                        className="hidden"
-                        onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
-                      />
-                      <input
-                        ref={audioFileInputRef}
-                        type="file"
-                        accept="audio/*,.ogg,.mp3,.m4a,.aac,.wav,.opus"
-                        className="hidden"
-                        onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
-                      />
+                      {/* Adjuntar (oculto mientras se graba) */}
                       <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}
-                        title="Adjuntar imagen o documento"
-                        className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40">
+                        title="Adjuntar imagen, audio o documento"
+                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
                         {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
                       </button>
-                      <button type="button" onClick={() => audioFileInputRef.current?.click()} disabled={isUploading}
-                        title="Enviar audio"
-                        className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/20 text-slate-500 hover:text-emerald-600 rounded-xl transition-colors shrink-0 disabled:opacity-40">
+
+                      {/* Área central: texto (reposo) · indicador de grabación */}
+                      <div className="flex-1 min-w-0">
+                        {isRecording ? (
+                          isLocked ? (
+                            <div className="flex items-center gap-2 bg-rose-50 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900 rounded-2xl pl-2 pr-1.5 py-1.5">
+                              <button type="button" onClick={cancelRecording} title="Cancelar"
+                                className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-500 transition-colors shrink-0">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                              <span className="text-sm font-bold text-rose-600 tabular-nums flex-1">
+                                {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:{String(recordSeconds % 60).padStart(2, '0')}
+                              </span>
+                              <button type="button" onClick={finishRecordingAndSend} title="Enviar nota de voz"
+                                className="w-10 h-10 flex items-center justify-center bg-emerald-500 text-white rounded-2xl shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-all shrink-0">
+                                <Send className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className={`flex items-center gap-2 rounded-2xl px-4 py-3 select-none transition-colors ${slideCancel ? 'bg-rose-100 dark:bg-rose-900/40' : 'bg-rose-50 dark:bg-rose-950/30'}`}>
+                              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                              <span className="text-sm font-bold text-rose-600 tabular-nums">
+                                {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:{String(recordSeconds % 60).padStart(2, '0')}
+                              </span>
+                              <span className="text-xs font-semibold text-rose-500/80 truncate ml-1">
+                                {slideCancel ? 'Suelta para cancelar' : '‹ Desliza para cancelar · ↑ Bloquear'}
+                              </span>
+                            </div>
+                          )
+                        ) : (
+                          <textarea
+                            value={inputText}
+                            onChange={e => setInputText(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(e); } }}
+                            placeholder="Escribí un mensaje..."
+                            rows={1}
+                            className="w-full bg-slate-50 dark:bg-slate-900 rounded-2xl px-4 py-3 text-sm outline-none resize-none border-2 border-transparent focus:border-[#1877F2]/20 transition-colors"
+                          />
+                        )}
+                      </div>
+
+                      {/* Micrófono persistente — mantener para grabar (oculto en modo bloqueado) */}
+                      <button type="button"
+                        onPointerDown={onMicPointerDown}
+                        onPointerMove={onMicPointerMove}
+                        onPointerUp={onMicPointerUp}
+                        onPointerCancel={() => cancelRecording()}
+                        onContextMenu={e => e.preventDefault()}
+                        disabled={isUploading}
+                        title="Mantené presionado para grabar"
+                        style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}
+                        className={`flex items-center justify-center rounded-2xl transition-all shrink-0 disabled:opacity-40 ${isLocked ? 'hidden' : ''} ${isRecording ? 'w-12 h-12 bg-rose-500 text-white scale-110 shadow-lg shadow-rose-500/30' : 'w-9 h-9 bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/20'}`}>
                         <Mic className="w-4 h-4" />
                       </button>
-                      <textarea
-                        value={inputText}
-                        onChange={e => setInputText(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(e); } }}
-                        placeholder="Escribí un mensaje..."
-                        rows={1}
-                        className="flex-1 bg-slate-50 dark:bg-slate-900 rounded-2xl px-4 py-3 text-sm outline-none resize-none border-2 border-transparent focus:border-[#1877F2]/20 transition-colors"
-                      />
-                      <button type="submit" disabled={(!inputText.trim() && !mediaUrl) || isSending}
-                        className="w-11 h-11 flex items-center justify-center bg-[#1877F2] text-white rounded-2xl shadow-lg shadow-[#1877F2]/20 hover:bg-blue-600 disabled:opacity-40 transition-all shrink-0">
-                        {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                      </button>
+
+                      {/* Enviar texto (solo en reposo) */}
+                      {!isRecording && (
+                        <button type="submit" disabled={(!inputText.trim() && !mediaUrl) || isSending}
+                          className="w-11 h-11 flex items-center justify-center bg-[#1877F2] text-white rounded-2xl shadow-lg shadow-[#1877F2]/20 hover:bg-blue-600 disabled:opacity-40 transition-all shrink-0">
+                          {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        </button>
+                      )}
                     </div>
                   </form>
                 )}

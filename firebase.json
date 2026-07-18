@@ -44,14 +44,20 @@
       ],
       "headers": [
         {
+          "source": "/index.html",
+          "headers": [
+            { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+          ]
+        },
+        {
           "source": "**",
           "headers": [
             { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
             { "key": "X-Content-Type-Options", "value": "nosniff" },
             { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-            { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
+            { "key": "Permissions-Policy", "value": "camera=(), microphone=(self), geolocation=()" },
             { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
-            { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.paypal.com https://www.paypalobjects.com https://apis.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.firebasestorage.app https://www.paypalobjects.com; connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://*.cloudfunctions.net https://*.run.app https://api.paypal.com https://www.paypal.com wss://*.firebaseio.com; frame-src https://www.paypal.com https://accounts.google.com;" }
+            { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.paypal.com https://www.paypalobjects.com https://apis.google.com https://www.gstatic.com https://connect.facebook.net https://www.facebook.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.firebasestorage.app https://www.paypalobjects.com https://www.facebook.com https://*.facebook.com; connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://*.cloudfunctions.net https://*.run.app https://api.paypal.com https://www.paypal.com wss://*.firebaseio.com https://www.facebook.com https://connect.facebook.net; frame-src https://www.paypal.com https://accounts.google.com https://paneles-solares-bcs-mx.firebaseapp.com https://*.firebaseapp.com;" }
           ]
         }
       ],

@@ -318,6 +318,9 @@ export const MarketingView = () => {
   const [igImageUrl, setIgImageUrl] = useState<string | null>(null);
   const [fbImageUrl, setFbImageUrl] = useState<string | null>(null);
   const [blogImageUrl, setBlogImageUrl] = useState<string | null>(null);
+  const [igStorageUrl, setIgStorageUrl] = useState<string | null>(null);
+  const [fbStorageUrl, setFbStorageUrl] = useState<string | null>(null);
+  const [blogStorageUrl, setBlogStorageUrl] = useState<string | null>(null);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [activeTab, setActiveTab] = useState<'instagram' | 'facebook' | 'blog'>('instagram');
   
@@ -362,7 +365,7 @@ export const MarketingView = () => {
             cta: result.blog.cta || '',
             metaDescription: result.blog.metaDescription || '',
             topic,
-            imageUrl: blogImageUrl || '',
+            imageUrl: blogStorageUrl || blogImageUrl || '',
             createdAt: new Date().toISOString(),
           });
           setPublishResults(prev => ({ ...prev, blog: 'success' }));
@@ -378,10 +381,12 @@ export const MarketingView = () => {
       if (isFbConnected && realPageId && realPageToken) {
         try {
           const messageBody = `${result.facebook.hook}\n\n${result.facebook.body}\n\n${result.facebook.cta}`;
+          const fbPostBody: Record<string, string> = { message: messageBody, access_token: realPageToken };
+          if (fbStorageUrl) fbPostBody.link = fbStorageUrl;
           const res = await fetch(`https://graph.facebook.com/v18.0/${realPageId}/feed`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: messageBody, access_token: realPageToken })
+            body: JSON.stringify(fbPostBody)
           });
           const fbData = await res.json();
           if (fbData.error) {
@@ -403,8 +408,7 @@ export const MarketingView = () => {
       if (isIgConnected && realIgBusinessId && realPageToken) {
         try {
           const captionText = `${result.instagram.caption}\n\n${result.instagram.hashtags}`;
-          // Instagram requiere imagen pública — si tenemos URL de Pollinations la usamos como fallback
-          const igImagePublicUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(result.blog.title + ' professional tech business dark background')}&width=1080&height=1350&nologo=true`;
+          const igImagePublicUrl = igStorageUrl || `https://image.pollinations.ai/prompt/${encodeURIComponent(result.blog.title + ' professional tech business dark background')}&width=1080&height=1350&nologo=true`;
           const containerRes = await fetch(`https://graph.facebook.com/v18.0/${realIgBusinessId}/media`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -541,6 +545,9 @@ export const MarketingView = () => {
         setIgImageUrl(null);
         setFbImageUrl(null);
         setBlogImageUrl(null);
+        setIgStorageUrl(null);
+        setFbStorageUrl(null);
+        setBlogStorageUrl(null);
         addToast('¡Campaña generada! Creando imágenes con DALL-E 3... 🎨', 'success');
 
         // Guardar en Firestore Historial de forma asíncrona
@@ -572,6 +579,9 @@ export const MarketingView = () => {
           setIgImageUrl(igRes.data?.imageUrl || null);
           setFbImageUrl(fbRes.data?.imageUrl || null);
           setBlogImageUrl(blogRes.data?.imageUrl || null);
+          setIgStorageUrl(igRes.data?.storageUrl || null);
+          setFbStorageUrl(fbRes.data?.storageUrl || null);
+          setBlogStorageUrl(blogRes.data?.storageUrl || null);
           addToast('¡Imágenes GPT-4o listas! 🖼️', 'success');
         } catch (imgErr: any) {
           console.error('Error generando imágenes gpt-image-1:', imgErr);
@@ -1777,7 +1787,7 @@ export const MarketingView = () => {
                         updatedConnections = {
                           facebook: {
                             isConnected: true,
-                            pageId: realPageId || '906688959199328',
+                            pageId: realPageId || '',
                             pageName: selectedFbPage || 'SmartFlow Suite (@smartflowsuite)',
                             accessToken: realPageToken || 'EAACEdEose0cBA...',
                             avatarUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe'
