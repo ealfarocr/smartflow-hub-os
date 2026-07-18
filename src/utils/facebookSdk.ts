@@ -56,6 +56,7 @@ export function loadFacebookSdk(): Promise<void> {
     script.async = true;
     script.defer = true;
     script.onerror = () => {
+      script.remove();
       sdkPromise = null;
       reject(new Error('No se pudo cargar el SDK de Facebook'));
     };
