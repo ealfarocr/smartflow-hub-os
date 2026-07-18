@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { X, Smartphone, Globe, CheckCircle2, Zap, AlertCircle, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { loadFacebookSdk, launchWhatsappEmbeddedSignup } from '@/utils/facebookSdk';
+import { WhatsappIntegrationService } from '@/services/firebase/WhatsappIntegrationService';
 
 interface ConnectionType {
   id: 'api' | 'coexistent';
@@ -32,26 +34,47 @@ const types: ConnectionType[] = [
   }
 ];
 
-export const WhatsappConnectionModal = ({ onClose }: { onClose: () => void }) => {
+type FlowStatus = 'idle' | 'loading-sdk' | 'waiting-popup' | 'saving' | 'success' | 'error';
+
+export const WhatsappConnectionModal = ({ onClose, tenantId }: { onClose: () => void; tenantId: string }) => {
   const [selected, setSelected] = useState<'api' | 'coexistent' | null>(null);
   const [step, setStep] = useState(1);
-  const [isGeneratingQR, setIsGeneratingQR] = useState(false);
-  const [showQR, setShowQR] = useState(false);
+  const [status, setStatus] = useState<FlowStatus>('idle');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [connectedInfo, setConnectedInfo] = useState<{ displayPhoneNumber: string | null; verifiedName: string | null } | null>(null);
+
+  const runEmbeddedSignup = useCallback(async (connectionType: 'api' | 'coexistent') => {
+    setStatus('loading-sdk');
+    setErrorMessage('');
+    try {
+      await loadFacebookSdk();
+      setStatus('waiting-popup');
+      const result = await launchWhatsappEmbeddedSignup(connectionType);
+      setStatus('saving');
+      const response = await WhatsappIntegrationService.completeEmbeddedSignup({
+        code: result.code,
+        tenantId,
+        wabaId: result.wabaId,
+        phoneNumberId: result.phoneNumberId,
+        connectionType,
+      });
+      setConnectedInfo({ displayPhoneNumber: response.displayPhoneNumber, verifiedName: response.verifiedName });
+      setStatus('success');
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'No se pudo completar la conexión con WhatsApp');
+      setStatus('error');
+    }
+  }, [tenantId]);
 
   useEffect(() => {
-    if (step === 2 && selected === 'coexistent') {
-      setIsGeneratingQR(true);
-      const timer = setTimeout(() => {
-        setIsGeneratingQR(false);
-        setShowQR(true);
-      }, 2500);
-      return () => clearTimeout(timer);
+    if (step === 2 && selected) {
+      runEmbeddedSignup(selected);
     }
-  }, [step, selected]);
+  }, [step, selected, runEmbeddedSignup]);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 backdrop-blur-md bg-slate-900/20 animate-in fade-in duration-300">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         className="bg-white dark:bg-slate-800 w-full max-w-2xl rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden"
@@ -74,7 +97,7 @@ export const WhatsappConnectionModal = ({ onClose }: { onClose: () => void }) =>
         <div className="p-8">
           <AnimatePresence mode="wait">
             {step === 1 ? (
-              <motion.div 
+              <motion.div
                 key="step1"
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -94,8 +117,8 @@ export const WhatsappConnectionModal = ({ onClose }: { onClose: () => void }) =>
                       key={t.id}
                       onClick={() => setSelected(t.id)}
                       className={`relative p-6 rounded-[2rem] border-2 transition-all duration-300 text-left group ${
-                        selected === t.id 
-                          ? 'bg-slate-900 border-slate-900 text-white dark:bg-white dark:border-white dark:text-slate-900' 
+                        selected === t.id
+                          ? 'bg-slate-900 border-slate-900 text-white dark:bg-white dark:border-white dark:text-slate-900'
                           : 'bg-white border-slate-100 dark:bg-slate-900 dark:border-slate-700 hover:border-emerald-500/30'
                       }`}
                     >
@@ -129,7 +152,7 @@ export const WhatsappConnectionModal = ({ onClose }: { onClose: () => void }) =>
                 </button>
               </motion.div>
             ) : (
-              <motion.div 
+              <motion.div
                 key="step2"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -137,67 +160,54 @@ export const WhatsappConnectionModal = ({ onClose }: { onClose: () => void }) =>
                 className="text-center space-y-8 py-4"
               >
                 <div className="flex justify-center">
-                  {selected === 'coexistent' && showQR ? (
-                    <motion.div 
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="relative p-6 bg-white rounded-3xl shadow-xl border border-slate-100"
-                    >
-                      <img 
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=SMARTFLOW-HUB-SESSION-${Date.now()}`} 
-                        alt="WhatsApp QR Code"
-                        className="w-48 h-48 rounded-lg"
-                      />
-                      <div className="absolute inset-0 border-4 border-emerald-500/20 rounded-3xl pointer-events-none" />
-                    </motion.div>
+                  {status === 'success' ? (
+                    <CheckCircle2 className="w-20 h-20 text-emerald-500" />
+                  ) : status === 'error' ? (
+                    <AlertCircle className="w-20 h-20 text-red-500" />
                   ) : (
                     <div className="relative">
                       <div className="w-32 h-32 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin" />
                       <div className="absolute inset-0 flex items-center justify-center">
-                        <CheckCircle2 className="w-12 h-12 text-emerald-500" />
+                        <Loader2 className="w-10 h-10 text-emerald-500 animate-spin" />
                       </div>
                     </div>
                   )}
                 </div>
-                
+
                 <div className="space-y-2">
                   <h4 className="text-xl font-black text-slate-900 dark:text-white">
-                    {selected === 'api' ? 'Configurando API de Meta' : (showQR ? 'Escanea el Código QR' : 'Sincronizando WhatsApp Coexistente')}
+                    {status === 'loading-sdk' && 'Cargando conexión con Meta'}
+                    {status === 'waiting-popup' && 'Esperando autorización'}
+                    {status === 'saving' && 'Guardando tu conexión'}
+                    {status === 'success' && '¡WhatsApp conectado!'}
+                    {status === 'error' && 'No se pudo conectar'}
                   </h4>
                   <p className="text-sm font-medium text-slate-500 max-w-sm mx-auto leading-relaxed">
-                    {selected === 'api' 
-                      ? 'Estamos validando tus credenciales de Meta Business Suite. Esto puede tardar unos segundos.'
-                      : (showQR 
-                          ? 'Abre WhatsApp en tu teléfono > Dispositivos vinculados > Vincular un dispositivo.' 
-                          : 'Preparando sesión segura para tu WhatsApp Business App. Por favor, espera un momento.'
-                        )
-                    }
+                    {status === 'loading-sdk' && 'Preparando el inicio de sesión seguro de Meta.'}
+                    {status === 'waiting-popup' && 'Completa el proceso en la ventana emergente de Facebook. No la cierres.'}
+                    {status === 'saving' && 'Estamos vinculando tu número con tu Hub.'}
+                    {status === 'success' && connectedInfo?.displayPhoneNumber && `Número conectado: ${connectedInfo.displayPhoneNumber}${connectedInfo.verifiedName ? ` (${connectedInfo.verifiedName})` : ''}`}
+                    {status === 'error' && errorMessage}
                   </p>
                 </div>
-
-                {selected === 'coexistent' && showQR && (
-                  <div className="bg-emerald-50 dark:bg-emerald-900/10 p-4 rounded-2xl inline-flex items-center gap-3">
-                    <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
-                    <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">Esperando escaneo...</span>
-                  </div>
-                )}
 
                 <div className="flex gap-4 pt-4">
                   <button
                     onClick={() => {
                       setStep(1);
-                      setShowQR(false);
-                      setIsGeneratingQR(false);
+                      setStatus('idle');
+                      setErrorMessage('');
                     }}
                     className="flex-1 py-4 text-slate-400 font-black text-xs uppercase tracking-widest hover:text-slate-600 transition-colors"
                   >
-                    Volver
+                    {status === 'error' ? 'Reintentar' : 'Volver'}
                   </button>
                   <button
                     onClick={onClose}
-                    className="flex-1 bg-slate-900 dark:bg-white dark:text-slate-900 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg hover:scale-[1.02] transition-transform"
+                    disabled={status === 'loading-sdk' || status === 'waiting-popup' || status === 'saving'}
+                    className="flex-1 bg-slate-900 dark:bg-white dark:text-slate-900 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg hover:scale-[1.02] transition-transform disabled:opacity-40"
                   >
-                    {showQR ? 'Cerrar' : 'Entendido'}
+                    Cerrar
                   </button>
                 </div>
               </motion.div>
