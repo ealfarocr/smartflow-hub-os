@@ -42,7 +42,7 @@ export function loadFacebookSdk(): Promise<void> {
     window.fbAsyncInit = () => {
       window.FB!.init({
         appId: import.meta.env.VITE_META_APP_ID,
-        version: 'v17.0',
+        version: 'v21.0', // v17.0 está deprecada por Meta (causaba "Identificador de aplicación no válido"); v25.0 es la última al momento de escribir esto
         xfbml: false,
       });
       resolve();

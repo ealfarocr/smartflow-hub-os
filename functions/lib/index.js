@@ -1637,7 +1637,7 @@ exports.completeWhatsappEmbeddedSignup = (0, https_1.onCall)({
     }
     let accessToken;
     try {
-        const tokenRes = await axios_1.default.get('https://graph.facebook.com/v17.0/oauth/access_token', {
+        const tokenRes = await axios_1.default.get('https://graph.facebook.com/v21.0/oauth/access_token', {
             params: { client_id: metaAppId, client_secret: appSecret, code },
             timeout: 10000,
         });
@@ -1650,7 +1650,7 @@ exports.completeWhatsappEmbeddedSignup = (0, https_1.onCall)({
         throw new https_1.HttpsError('failed-precondition', `No se pudo intercambiar el código con Meta: ${metaMessage}`);
     }
     try {
-        await axios_1.default.post(`https://graph.facebook.com/v17.0/${wabaId}/subscribed_apps`, {}, { params: { access_token: accessToken }, timeout: 10000 });
+        await axios_1.default.post(`https://graph.facebook.com/v21.0/${wabaId}/subscribed_apps`, {}, { params: { access_token: accessToken }, timeout: 10000 });
     }
     catch (err) {
         const metaMessage = err?.response?.data?.error?.message || err.message;
@@ -1659,7 +1659,7 @@ exports.completeWhatsappEmbeddedSignup = (0, https_1.onCall)({
     let displayPhoneNumber = null;
     let verifiedName = null;
     try {
-        const phoneRes = await axios_1.default.get(`https://graph.facebook.com/v17.0/${phoneNumberId}`, {
+        const phoneRes = await axios_1.default.get(`https://graph.facebook.com/v21.0/${phoneNumberId}`, {
             params: { fields: 'display_phone_number,verified_name', access_token: accessToken },
             timeout: 10000,
         });
