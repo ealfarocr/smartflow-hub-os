@@ -1727,7 +1727,7 @@ export const completeWhatsappEmbeddedSignup = onCall({
 
   let accessToken: string;
   try {
-    const tokenRes = await axios.get('https://graph.facebook.com/v21.0/oauth/access_token', {
+    const tokenRes = await axios.get('https://graph.facebook.com/v25.0/oauth/access_token', {
       params: { client_id: metaAppId, client_secret: appSecret, code },
       timeout: 10000,
     });
@@ -1740,7 +1740,7 @@ export const completeWhatsappEmbeddedSignup = onCall({
 
   try {
     await axios.post(
-      `https://graph.facebook.com/v21.0/${wabaId}/subscribed_apps`,
+      `https://graph.facebook.com/v25.0/${wabaId}/subscribed_apps`,
       {},
       { params: { access_token: accessToken }, timeout: 10000 }
     );
@@ -1752,7 +1752,7 @@ export const completeWhatsappEmbeddedSignup = onCall({
   let displayPhoneNumber: string | null = null;
   let verifiedName: string | null = null;
   try {
-    const phoneRes = await axios.get(`https://graph.facebook.com/v21.0/${phoneNumberId}`, {
+    const phoneRes = await axios.get(`https://graph.facebook.com/v25.0/${phoneNumberId}`, {
       params: { fields: 'display_phone_number,verified_name', access_token: accessToken },
       timeout: 10000,
     });
