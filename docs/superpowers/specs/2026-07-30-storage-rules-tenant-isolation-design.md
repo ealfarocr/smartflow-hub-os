@@ -60,10 +60,16 @@ function isSuperAdmin() {
   return request.auth != null && (
     request.auth.uid == 'qsiEuc1lBWUOkjUQRiYvsRf3Syn2' ||
     request.auth.token.email == 'publicidadynegociosenlinea@gmail.com' ||
-    firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.isSuperAdmin == true
+    (firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+     firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.isSuperAdmin == true)
   );
 }
 ```
+
+(El `firestore.exists()` antes del `firestore.get()` en la última rama evita un
+error de evaluación si `/users/{uid}` no existe — no cambia a quién se considera
+SuperAdmin, ya que el `||` de arriba hace cortocircuito antes de llegar ahí para
+el UID/email hardcodeados.)
 
 (Los mismos fallbacks de UID/email que ya usa `firestore.rules:41` para el
 SuperAdmin, para no depender de un único mecanismo.)
@@ -80,7 +86,7 @@ SuperAdmin, para no depender de un único mecanismo.)
 | `media-library/{tenantId}/{fileName}` | write: cualquier autenticado; read: pública | write: `isTenantMember(tenantId) \|\| isSuperAdmin()`; **read: sin cambio (pública)** |
 | `whatsapp-media/{tenantId}/{fileName}` | write: nadie (correcto, solo Admin SDK); read: pública sin auth | write: sin cambio; read: `isTenantMember(tenantId) \|\| isSuperAdmin()` (son fotos/audios de clientes, no deben ser públicas sin login) |
 | `agent-global/{fileName}` | write: cualquier autenticado; read: pública | **write: `isSuperAdmin()` únicamente**; read: sin cambio (pública — es contenido base no sensible, compartido a propósito) |
-| `admin_attachments/{fileName}` | write/read: cualquier autenticado | write: `isSuperAdmin()`; read: sin cambio |
+| `admin_attachments/{fileName}` | write/read: cualquier autenticado | write/read: `isSuperAdmin()` únicamente |
 
 Todas las validaciones de tamaño/tipo MIME existentes se mantienen igual, solo se
 añade la condición de membresía con `&&`.

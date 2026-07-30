@@ -278,9 +278,13 @@ service firebase.storage {
       return request.auth != null && (
         request.auth.uid == 'qsiEuc1lBWUOkjUQRiYvsRf3Syn2' ||
         request.auth.token.email == 'publicidadynegociosenlinea@gmail.com' ||
-        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.isSuperAdmin == true
+        (firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+         firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.isSuperAdmin == true)
       );
     }
+    // El firestore.exists() antes del get() evita un error si /users/{uid} no
+    // existe; no cambia a quien se considera SuperAdmin (el || ya corto-circuita
+    // en el UID/email hardcodeados antes de llegar a esta rama).
 
     // Cotizaciones PDF — solo miembros del tenant, max 10MB, solo PDF.
     // Los enlaces compartidos vía getDownloadURL llevan token y bypasean
