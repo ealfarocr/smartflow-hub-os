@@ -1,5 +1,9 @@
 // Prueba las reglas de seguridad de Firebase Storage contra el emulador.
-// Uso: firebase emulators:exec --only firestore,storage "node scripts/test-storage-rules.mjs"
+// Uso: firebase emulators:exec --project smartflow-hub-os-test --only firestore,storage "node scripts/test-storage-rules.mjs"
+// El flag --project DEBE coincidir con PROJECT_ID abajo: sin él, el emulador usa el
+// proyecto por defecto de .firebaserc (paneles-solares-bcs-mx) y las llamadas
+// cross-service firestore.exists()/get() desde Storage Rules no encuentran los
+// documentos sembrados por este script (bug conocido: firebase/firebase-js-sdk#6803).
 import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
 import { readFileSync } from 'node:fs';
 import { ref, uploadBytes, getBytes } from 'firebase/storage';

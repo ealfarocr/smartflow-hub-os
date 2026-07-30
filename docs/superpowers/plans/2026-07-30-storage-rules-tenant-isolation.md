@@ -91,7 +91,11 @@ git commit -m "chore: agregar emulador de Storage y rules-unit-testing para prue
 
 ```javascript
 // Prueba las reglas de seguridad de Firebase Storage contra el emulador.
-// Uso: firebase emulators:exec --only firestore,storage "node scripts/test-storage-rules.mjs"
+// Uso: firebase emulators:exec --project smartflow-hub-os-test --only firestore,storage "node scripts/test-storage-rules.mjs"
+// El flag --project DEBE coincidir con el projectId hardcodeado abajo (PROJECT_ID):
+// sin él, el emulador usa el proyecto por defecto de .firebaserc (paneles-solares-bcs-mx),
+// lo que rompe las llamadas cross-service firestore.exists()/get() desde Storage Rules
+// (bug documentado: https://github.com/firebase/firebase-js-sdk/issues/6803).
 import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
 import { readFileSync } from 'node:fs';
 import { ref, uploadBytes, getBytes } from 'firebase/storage';
@@ -218,8 +222,10 @@ run();
 - [ ] **Paso 2: Ejecutar el script contra las reglas ACTUALES (sin corregir) y confirmar que falla**
 
 ```bash
-firebase emulators:exec --only firestore,storage "node scripts/test-storage-rules.mjs"
+firebase emulators:exec --project smartflow-hub-os-test --only firestore,storage "node scripts/test-storage-rules.mjs"
 ```
+
+(El flag `--project smartflow-hub-os-test` es obligatorio y debe coincidir exactamente con `PROJECT_ID` en el script — sin él, el emulador arranca con el proyecto por defecto de `.firebaserc`, `paneles-solares-bcs-mx`, y las llamadas cross-service a Firestore dentro de `storage.rules` no encuentran los documentos que el script siembra, aunque en esta Task específica eso no se nota porque las reglas viejas no hacen ninguna llamada cross-service todavía.)
 
 Esperado: termina con código de salida distinto de `0`, y la salida muestra `FALLO` específicamente en:
 - `tenant A no puede escribir en ai-agent de tenant B`
@@ -373,8 +379,10 @@ service firebase.storage {
 - [ ] **Paso 2: Ejecutar el script de prueba y confirmar que todas las verificaciones pasan**
 
 ```bash
-firebase emulators:exec --only firestore,storage "node scripts/test-storage-rules.mjs"
+firebase emulators:exec --project smartflow-hub-os-test --only firestore,storage "node scripts/test-storage-rules.mjs"
 ```
+
+(El flag `--project smartflow-hub-os-test` es obligatorio — ver nota en Task 2 Paso 2. En esta Task SÍ importa, porque `storage.rules` ya usa `firestore.exists()`/`firestore.get()`: sin el flag correcto, esas llamadas no encuentran los documentos de membership sembrados por el test y todo se deniega incorrectamente.)
 
 Esperado: código de salida `0`, última línea `Todas las verificaciones de aislamiento pasaron.`, sin ninguna línea `FALLO`.
 
@@ -397,7 +405,7 @@ git commit -m "fix: aislar Storage por tenant y restringir escritura de agent-gl
 - [ ] **Paso 1: Re-ejecutar la suite completa una vez más de forma limpia**
 
 ```bash
-firebase emulators:exec --only firestore,storage "node scripts/test-storage-rules.mjs"
+firebase emulators:exec --project smartflow-hub-os-test --only firestore,storage "node scripts/test-storage-rules.mjs"
 ```
 
 Esperado: mismo resultado que en Task 3 Paso 2 (todo `OK`, salida `0`) — confirma que el resultado es reproducible, no accidental.
