@@ -1692,6 +1692,106 @@ export const sendWhatsappMessage = onCall({
 });
 
 /**
+ * completeWhatsappEmbeddedSignup — recibe el código de autorización que
+ * devuelve el popup de Embedded Signup de Meta, lo intercambia por un token
+ * de acceso, suscribe la app a los webhooks de la WABA del cliente, y
+ * crea/actualiza el documento de integración en Firestore.
+ */
+export const completeWhatsappEmbeddedSignup = onCall({
+  maxInstances: 10,
+  timeoutSeconds: 60,
+}, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Usuario no autenticado');
+  }
+
+  const { code, tenantId, wabaId, phoneNumberId, connectionType } = request.data;
+  const uid = request.auth.uid;
+
+  if (!code || !tenantId || !wabaId || !phoneNumberId) {
+    throw new HttpsError('invalid-argument', 'Faltan parámetros obligatorios (code, tenantId, wabaId, phoneNumberId)');
+  }
+
+  const membershipRef = db.collection('memberships').doc(`${uid}_${tenantId}`);
+  const membershipDoc = await membershipRef.get();
+  if (!membershipDoc.exists || membershipDoc.data()?.status !== 'active') {
+    throw new HttpsError('permission-denied', 'No tienes una membresía activa en este tenant');
+  }
+
+  const metaAppId = '265699977219364152'; // Meta App ID de SmartFlow Hub Connect (público)
+  const appSecret = (process.env.WHATSAPP_APP_SECRET || '').trim();
+
+  if (!appSecret) {
+    throw new HttpsError('failed-precondition', 'Falta configurar WHATSAPP_APP_SECRET en functions/.env');
+  }
+
+  let accessToken: string;
+  try {
+    const tokenRes = await axios.get('https://graph.facebook.com/v25.0/oauth/access_token', {
+      params: { client_id: metaAppId, client_secret: appSecret, code },
+      timeout: 10000,
+    });
+    accessToken = tokenRes.data?.access_token;
+    if (!accessToken) throw new Error('Meta no devolvió access_token');
+  } catch (err: any) {
+    const metaMessage = err?.response?.data?.error?.message || err.message;
+    throw new HttpsError('failed-precondition', `No se pudo intercambiar el código con Meta: ${metaMessage}`);
+  }
+
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v25.0/${wabaId}/subscribed_apps`,
+      {},
+      { params: { access_token: accessToken }, timeout: 10000 }
+    );
+  } catch (err: any) {
+    const metaMessage = err?.response?.data?.error?.message || err.message;
+    throw new HttpsError('failed-precondition', `No se pudo suscribir la app a la cuenta de WhatsApp: ${metaMessage}`);
+  }
+
+  let displayPhoneNumber: string | null = null;
+  let verifiedName: string | null = null;
+  try {
+    const phoneRes = await axios.get(`https://graph.facebook.com/v25.0/${phoneNumberId}`, {
+      params: { fields: 'display_phone_number,verified_name', access_token: accessToken },
+      timeout: 10000,
+    });
+    displayPhoneNumber = phoneRes.data?.display_phone_number || null;
+    verifiedName = phoneRes.data?.verified_name || null;
+  } catch (err: any) {
+    console.warn('[completeWhatsappEmbeddedSignup] No se pudo leer info del número:', err?.response?.data || err.message);
+  }
+
+  const existingSnapshot = await db.collection('integrations')
+    .where('tenantId', '==', tenantId)
+    .where('provider', '==', 'whatsapp')
+    .limit(1)
+    .get();
+
+  const integrationData = {
+    tenantId,
+    provider: 'whatsapp',
+    isActive: true,
+    phoneNumberId,
+    wabaId,
+    accessToken,
+    connectionType: connectionType === 'coexistent' ? 'coexistent' : 'api',
+    displayPhoneNumber,
+    verifiedName,
+    connectedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (existingSnapshot.empty) {
+    await db.collection('integrations').add(integrationData);
+  } else {
+    await existingSnapshot.docs[0].ref.set(integrationData, { merge: true });
+  }
+
+  return { success: true, displayPhoneNumber, verifiedName };
+});
+
+/**
  * Vincula una invitación pendiente con el usuario autenticado (Google/Email).
  * Usa el Admin SDK para bypassear las reglas de Firestore durante el vínculo inicial.
  */

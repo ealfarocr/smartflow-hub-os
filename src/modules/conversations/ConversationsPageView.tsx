@@ -792,7 +792,12 @@ export const ConversationsPageView = () => {
           initialCurrency={selectedCatalogItemForPayment?.currency}
         />
       )}
-      {showConnectionModal && <WhatsappConnectionModal onClose={() => setShowConnectionModal(false)} />}
+      {showConnectionModal && activeMembership?.tenantId && (
+        <WhatsappConnectionModal
+          onClose={() => setShowConnectionModal(false)}
+          tenantId={activeMembership.tenantId}
+        />
+      )}
 
       {/* Catalog Drawer */}
       {showCatalogDrawer && (
