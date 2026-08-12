@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
 import { useAuthStore } from '@/stores/authStore';
 import { AuthService } from '@/services/AuthService';
 import { Mail, Lock, Loader2, Globe } from 'lucide-react';
@@ -11,6 +13,7 @@ export const LoginView = () => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Redirigir si está autenticado y tiene membresías
@@ -54,6 +57,28 @@ export const LoginView = () => {
         setError('Demasiados intentos fallidos. Intenta más tarde.');
       } else {
         setError('Error al iniciar sesión. Verifica tus datos.');
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      setError('Escribe tu correo arriba primero, luego toca "¿Olvidaste tu contraseña?".');
+      return;
+    }
+    setIsProcessing(true);
+    setError('');
+    setInfo('');
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      setInfo('Te enviamos un correo para restablecer tu contraseña. Revisa tu bandeja (y spam).');
+    } catch (err: any) {
+      if (err.code === 'auth/user-not-found') {
+        setError('Este correo no tiene cuenta creada todavía.');
+      } else {
+        setError('No se pudo enviar el correo de restablecimiento. Intenta de nuevo.');
       }
     } finally {
       setIsProcessing(false);
@@ -160,6 +185,11 @@ export const LoginView = () => {
                 {error}
               </div>
             )}
+            {info && (
+              <div className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 p-3 rounded-lg text-sm font-medium border border-emerald-200 dark:border-emerald-800 text-center">
+                {info}
+              </div>
+            )}
             
             {view === 'register' && (
               <div>
@@ -207,6 +237,16 @@ export const LoginView = () => {
                   placeholder="••••••••"
                 />
               </div>
+              {view === 'login' && (
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={isProcessing}
+                  className="mt-2 text-xs font-medium text-[#1877F2] hover:underline"
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              )}
             </div>
 
             <div>
