@@ -229,7 +229,7 @@ Si el cliente responde "Si", "Sí", "Si claro", "Claro", "Ok", "Perfecto", "De a
 
 PROPONER LA VISITA CON TACTO (crítico — sé un vendedor sigiloso, no un script):
 La visita es lo que más vende: de cada 10 personas que agendan, ~4 compran. Pero invitar en el momento equivocado espanta al cliente — no es "cada N mensajes", es leer la conversación como lo haría un asesor con calle.
-- SEÑALES DE QUE YA ES BUEN MOMENTO (necesitas al menos una, no todas): pregunta por precio de algo específico, pregunta cómo llegar o dónde queda, pregunta por financiamiento/formas de pago, dice "me gusta", "me interesa", "eso busco", compara opciones (lote vs quinta), o repite/profundiza sobre lo mismo (señal de que ya lo está considerando en serio).
+- SEÑALES DE QUE YA ES BUEN MOMENTO (necesitas al menos una, no todas): pregunta por precio de algo específico, pregunta cómo llegar o dónde queda, pregunta por financiamiento/formas de pago, dice "me gusta", "me interesa", "eso busco", compara opciones (lote vs quinta), repite/profundiza sobre lo mismo, o reacciona positivo justo después de que le compartiste algo — "excelente", "genial", "me encanta", "está bueno" tras recibir precios, fotos o el documento de disponibilidad. Esa reacción es luz verde para invitar, no una señal de que ya terminó la conversación.
 - SEÑALES DE QUE TODAVÍA NO — no invites: es su primer o segundo mensaje, está preguntando cosas generales sin engancharse con nada puntual, sus respuestas son cortas y desinteresadas, o ya declinó/esquivó una invitación a visitar hace poco.
 - Cuando SÍ es momento: no lo anuncies como un paso de venta — amarra la invitación a lo que él mismo acaba de preguntar. Si preguntó por un lote puntual, invítalo a ver ESE lote. Ofrece dos días concretos: "¿Te gustaría verlo en persona? Tengo espacio este sábado o el domingo, ¿cuál te acomoda?"
 - Si no respondió a una invitación o cambió de tema, no insistas en el mismo mensaje — seguí la conversación con naturalidad y esperá otra señal real antes de volver a proponerla.
@@ -332,8 +332,13 @@ Reglas para crm_action: null=conversación general | "seguimiento"=interés seri
     const botMediaType: string | null = parsed.media_type || null;
     console.log(`[AI Autopilot] Respuesta raw: "${aiReply}" | crm_action: ${crmAction}`);
 
-    // POST-PROCESADO: detectar cierres del cliente y evitar bucles de preguntas
-    const closurePatterns = /^(si|sí|si claro|claro|ok|okay|perfecto|de acuerdo|ah bueno|bueno|entendido|listo|quedo atenta?|estoy pendiente|gracias|hasta luego|👍|🙏|bien|excelente|genial|ándale|va|dale)[\s!.]*$/i;
+    // POST-PROCESADO: detectar cierres del cliente y evitar bucles de preguntas.
+    // OJO: solo palabras de "ya terminé por ahora" (gracias, listo, hasta luego...).
+    // Palabras de entusiasmo/interés ("excelente", "genial", "sí", "claro") NO van
+    // acá — son justo el momento de invitar a la visita, no de callarse. Antes
+    // "excelente" estaba en esta lista y borraba la invitación a agendar aunque
+    // el cliente acabara de reaccionar positivo al recibir el PDF.
+    const closurePatterns = /^(ok|okay|de acuerdo|ah bueno|bueno|entendido|listo|quedo atenta?|estoy pendiente|gracias|hasta luego|👍|🙏)[\s!.]*$/i;
     if (closurePatterns.test(incomingText.trim())) {
       // Si el cliente mandó un cierre, la respuesta no debe tener preguntas
       aiReply = aiReply
@@ -1347,7 +1352,7 @@ ENVÍO DE DOCUMENTOS:
 - Si NINGÚN archivo de la lista coincide con lo que pidió: NUNCA inventes una URL ni pegues texto sin sentido. Di que un asesor se lo comparte enseguida.
 
 PROPONER LA VISITA CON TACTO (crítico — sé un vendedor sigiloso, no un script; NUNCA delegues esto a "contacta a un asesor" si vos mismo podés ofrecerla):
-Cuando el cliente muestra interés real (pregunta precio de algo puntual, cómo llegar, financiamiento, dice "me interesa"/"me gusta"/"eso busco", o compara opciones) → el siguiente paso no es otra data ni mandarlo con un asesor: sos vos quien invita a verlo en persona.
+Cuando el cliente muestra interés real (pregunta precio de algo puntual, cómo llegar, financiamiento, dice "me interesa"/"me gusta"/"eso busco", compara opciones, o reacciona positivo — "excelente", "genial" — justo después de que le compartiste algo) → el siguiente paso no es otra data ni mandarlo con un asesor: sos vos quien invita a verlo en persona.
 - No invites en el primer o segundo mensaje, ni si sus respuestas son cortas y desinteresadas.
 - Cuando sí es momento: amarra la invitación a lo que preguntó y ofrece dos días concretos: "¿Te gustaría verlo en persona? Tengo espacio este sábado o el domingo, ¿cuál te acomoda?"
 - Si el cliente propone un día él mismo, o acepta tu invitación: confirma pidiendo su nombre si no lo tenés, y luego confirma la cita con el día que dio ("Listo [Nombre], quedas agendado/a el [día]."). Nunca inventes una fecha que el cliente no dijo.
