@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { isToday, format } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -26,6 +28,13 @@ import { useUIStore } from '@/stores/uiStore';
 import { TenantService } from '@/services/firebase/TenantService';
 import { WhatsappConnectionModal } from './WhatsappConnectionModal';
 import { CatalogService } from '@/services/firebase/CatalogService';
+
+// Hoy: solo hora (como antes). Otro día: día + mes + hora, para no confundir
+// mensajes de distintos días cuando solo se mostraba la hora.
+function formatChatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  return isToday(d) ? format(d, 'HH:mm') : format(d, "d MMM, HH:mm", { locale: es });
+}
 
 export const ConversationsPageView = () => {
   const {
@@ -375,7 +384,7 @@ export const ConversationsPageView = () => {
                         </span>
                       )}
                       <span className="text-[10px] text-slate-400">
-                        {conv.lastMessageDate ? new Date(conv.lastMessageDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                        {conv.lastMessageDate ? formatChatTimestamp(conv.lastMessageDate) : ''}
                       </span>
                     </div>
                   </div>
@@ -555,7 +564,7 @@ export const ConversationsPageView = () => {
                     )}
                     <div className="flex justify-end items-center gap-1 mt-1.5 opacity-40">
                       <span className="text-[10px]">
-                        {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+                        {msg.timestamp ? formatChatTimestamp(msg.timestamp) : '...'}
                       </span>
                       {msg.sender === 'advisor' && <CheckCheck className="w-3.5 h-3.5 text-[#1877F2]" />}
                     </div>
