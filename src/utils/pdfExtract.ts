@@ -1,8 +1,17 @@
 /**
  * Extrae texto de archivos TXT o PDF.
- * Para PDFs usa una extracción básica de texto plano sin worker externo.
- * Si el PDF es escaneado (imagen) no se puede extraer texto — usar el campo manual.
+ * Los PDF se leen con pdfjs-dist (el mismo motor que usa Firefox) para
+ * decodificar streams comprimidos y fuentes correctamente — un regex
+ * casero no puede hacer eso y termina "leyendo" bytes internos del PDF
+ * como si fueran texto.
+ * Si el PDF es escaneado (imagen, sin capa de texto) no se puede
+ * extraer texto — usar el campo manual.
  */
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
 export async function extractTextFromFile(file: File): Promise<string> {
   if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
     return await file.text();
@@ -17,39 +26,19 @@ export async function extractTextFromFile(file: File): Promise<string> {
 
 async function extractPdfText(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const raw = new TextDecoder('latin1').decode(bytes);
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
 
-  // Extraer strings entre paréntesis en flujos de contenido PDF
-  const textChunks: string[] = [];
-
-  // Buscar bloques de texto BT ... ET
-  const btEt = raw.match(/BT[\s\S]*?ET/g) || [];
-  for (const block of btEt) {
-    // Capturar strings: (texto) Tj o [(texto)] TJ
-    const strings = block.match(/\(([^)]*)\)\s*T[jJ]/g) || [];
-    for (const s of strings) {
-      const m = s.match(/\(([^)]*)\)/);
-      if (m) textChunks.push(m[1]);
-    }
+  const pageTexts: string[] = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map((item: any) => item.str || '').join(' ');
+    pageTexts.push(pageText);
   }
 
-  // Fallback: buscar cualquier string legible entre paréntesis
-  if (textChunks.length === 0) {
-    const all = raw.match(/\(([^\x00-\x08\x0e-\x1f\x7f-\xff]{3,})\)/g) || [];
-    for (const s of all) {
-      const m = s.match(/\((.+)\)/);
-      if (m) textChunks.push(m[1]);
-    }
-  }
-
-  const result = textChunks
-    .join(' ')
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, ' ')
-    .replace(/\\\(/g, '(')
-    .replace(/\\\)/g, ')')
-    .replace(/\s{3,}/g, ' ')
+  const result = pageTexts
+    .join('\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
     .trim();
 
   if (!result || result.length < 50) {
