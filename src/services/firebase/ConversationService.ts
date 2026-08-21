@@ -48,9 +48,13 @@ export class ConversationService {
   }
 
   static subscribeToMessages(conversationId: string, callback: (messages: Message[]) => void, errorCallback?: (error: any) => void) {
+    // orderBy 'asc' + limit trae los N mensajes MAS VIEJOS, no los recientes.
+    // Se pide 'desc' (los mas nuevos primero) y se revierte el array antes de
+    // mostrarlo, para que el chat no se quede congelado una vez que la
+    // conversacion pasa de 100 mensajes.
     const q = query(
       collection(db, this.collectionName, conversationId, 'messages'),
-      orderBy('timestamp', 'asc'),
+      orderBy('timestamp', 'desc'),
       limit(100) // Optimization: latest 100 messages
     );
 
@@ -58,10 +62,10 @@ export class ConversationService {
       const messages = snapshot.docs.map(doc => ({
         ...doc.data(),
         id: doc.id,
-        timestamp: doc.data().timestamp instanceof Timestamp 
-          ? doc.data().timestamp.toDate().toISOString() 
+        timestamp: doc.data().timestamp instanceof Timestamp
+          ? doc.data().timestamp.toDate().toISOString()
           : doc.data().timestamp
-      })) as Message[];
+      })).reverse() as Message[];
       callback(messages);
     }, (error) => {
       console.error("Error subscribing to messages:", error);
