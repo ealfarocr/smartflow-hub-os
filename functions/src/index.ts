@@ -533,11 +533,33 @@ Reglas para crm_action: null=conversación general | "seguimiento"=interés seri
       };
       const newStage = resolveStageLabel(crmAction);
       if (newStage) {
-        await db.collection('leads').doc(convData.leadId).update({
-          stage: newStage,
-          lastActivity: new Date().toISOString(),
-        }).catch((e: any) => console.warn('[AI Autopilot] CRM update error:', e.message));
-        console.log(`[AI Autopilot] CRM: Lead ${convData.leadId} → ${newStage}`);
+        // El leadId guardado en la conversación puede haber quedado huérfano
+        // (documento borrado/movido). Si el update falla por "not-found",
+        // se busca el lead real por tenantId+telefono (mismo criterio que al
+        // crearlo) en vez de perder el movimiento de CRM silenciosamente.
+        let leadRef = db.collection('leads').doc(convData.leadId);
+        let leadSnap = await leadRef.get();
+        if (!leadSnap.exists && convData.phoneRaw) {
+          const byPhone = await db.collection('leads')
+            .where('tenantId', '==', tenantId)
+            .where('phone', '==', convData.phoneRaw)
+            .limit(1)
+            .get();
+          if (!byPhone.empty) {
+            leadRef = byPhone.docs[0].ref;
+            leadSnap = byPhone.docs[0];
+            console.warn(`[AI Autopilot] leadId ${convData.leadId} huérfano, usando lead real ${leadRef.id} por teléfono`);
+          }
+        }
+        if (leadSnap.exists) {
+          await leadRef.update({
+            stage: newStage,
+            lastActivity: new Date().toISOString(),
+          }).then(() => console.log(`[AI Autopilot] CRM: Lead ${leadRef.id} → ${newStage}`))
+            .catch((e: any) => console.error('[AI Autopilot] CRM update error:', e.message));
+        } else {
+          console.error(`[AI Autopilot] CRM: no se encontró ningún lead (ni por id ni por teléfono) para mover a "${newStage}"`);
+        }
       }
 
       if (crmAction === 'venta') {
