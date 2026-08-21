@@ -1304,6 +1304,17 @@ export const chatWithAgent = onCall({
     .join('\n\n');
   const knowledgeContext = knowledgeContextRaw.length > 10000 ? knowledgeContextRaw.slice(0, 10000) + '\n[...]' : knowledgeContextRaw;
 
+  // Archivos reales que el agente puede enlazar (mismo criterio que triggerAiAutopilot):
+  // excluye documentos de entrenamiento/confidenciales, solo los que tienen URL real.
+  const INTERNAL_DOC_RX = /entrenamiento|training|interno|confidencial|instrucci[oó]n|system\s*prompt|prompt\s*del|configuraci[oó]n\s*del\s*agente/i;
+  const sendableFiles: any[] = [
+    ...allFiles,
+    ...(agentConfig.mediaLibrary || []),
+  ].filter((f: any) => f?.url && !INTERNAL_DOC_RX.test(f.name || ''));
+  const mediaContext = sendableFiles.length > 0
+    ? `\nARCHIVOS DISPONIBLES PARA COMPARTIR (usa esta URL exacta si el cliente pide alguno de estos, nunca inventes otra):\n${sendableFiles.map((m: any) => `- "${m.name}": ${m.url}`).join('\n')}\n`
+    : '';
+
   const platformKnowledgeCRM = `SMARTFLOW HUB OS — CRM multicanal con IA para negocios que venden por WhatsApp.
 
 MÓDULOS:
@@ -1330,6 +1341,10 @@ FORMATO DE RESPUESTA:
 - Si el usuario dice "Gracias", "No", "Ok", "Listo", "Adiós" o cierra el tema → despídete de forma natural, sin forzar más preguntas
 - Nunca hagas dos preguntas en el mismo mensaje
 
+ENVÍO DE DOCUMENTOS:
+- Si el cliente pide un documento (master plan, planos, catálogo, disponibilidad, brochure) y está en ARCHIVOS DISPONIBLES: comparte esa URL exacta, tal cual, sin modificarla ni envolverla en formato markdown raro.
+- Si NINGÚN archivo de la lista coincide con lo que pidió: NUNCA inventes una URL ni pegues texto sin sentido. Di que un asesor se lo comparte enseguida.
+${mediaContext}
 DOCUMENTOS DE ENTRENAMIENTO (máxima prioridad — definen tu identidad y conocimiento):
 ${knowledgeContext}`
     : `Eres Sofía, asesora de SmartFlow Hub OS. Eres consultora, no vendedora.
