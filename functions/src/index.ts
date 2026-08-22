@@ -997,6 +997,7 @@ export const whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }
                 lastMessageSender: 'lead',
                 lastInboundDate: admin.firestore.FieldValue.serverTimestamp(), // Actualizar para ventana 24h
                 unreadCount: admin.firestore.FieldValue.increment(1),
+                visitNudgeSent: false, // El lead volvio a escribir: habilita un futuro nudge de visita
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
               });
             }
@@ -1237,6 +1238,7 @@ export const metaWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).ht
                 lastMessageDate: admin.firestore.FieldValue.serverTimestamp(),
                 lastMessageSender: 'lead',
                 unreadCount: admin.firestore.FieldValue.increment(1),
+                visitNudgeSent: false, // El lead volvio a escribir: habilita un futuro nudge de visita
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
               });
             }
@@ -3112,10 +3114,14 @@ export const checkWindowExpiry = onSchedule({
     const integrationCache: Record<string, any> = {};
     const settingsCache: Record<string, any> = {};
 
+    // Filtra por provider 'whatsapp' explícitamente: desde que un tenant puede
+    // tener varias integraciones activas (WhatsApp + Facebook + Instagram), sin
+    // este filtro esta consulta podía traer cualquiera de las tres al azar.
     const getIntegration = async (tenantId: string) => {
       if (integrationCache[tenantId] !== undefined) return integrationCache[tenantId];
       const snap = await db.collection('integrations')
         .where('tenantId', '==', tenantId)
+        .where('provider', '==', 'whatsapp')
         .where('isActive', '==', true)
         .limit(1)
         .get();
@@ -3244,6 +3250,135 @@ export const checkWindowExpiry = onSchedule({
 
     console.log('[WindowExpiry] Ejecución completada.');
   });
+
+/**
+ * CLOUD FUNCTION: checkSilentLeads
+ * Corre cada 2 minutos. Si el bot fue el último en escribir en una conversación
+ * activa y el lead no respondió en 2 minutos, le manda UNA sola invitación a
+ * agendar visita (no se repite: se marca visitNudgeSent y solo se limpia si el
+ * lead vuelve a escribir). No molesta a leads ya agendados, vendidos o perdidos.
+ */
+export const checkSilentLeads = onSchedule({
+  schedule: 'every 2 minutes',
+  timeZone: 'America/Costa_Rica',
+  memory: '256MiB',
+  timeoutSeconds: 300,
+}, async () => {
+  const now = Date.now();
+  const MINUTE = 60 * 1000;
+  // Ventana acotada (2 a 6 min atrás), no solo "<= cutoff": sin límite inferior,
+  // con el tiempo se acumulan miles de conversaciones viejas que ya matchean
+  // ese "<=", y el limit(200) las devolvería a ELLAS (las más antiguas) en vez
+  // de las recién calladas, dejando esta función efectivamente inerte a escala
+  // (mismo tipo de bug que el de mensajes: rango sin acotar + limit).
+  const windowStart = admin.firestore.Timestamp.fromMillis(now - 6 * MINUTE);
+  const windowEnd = admin.firestore.Timestamp.fromMillis(now - 2 * MINUTE);
+
+  const integrationCache: Record<string, any> = {};
+  const settingsCache: Record<string, any> = {};
+
+  const getIntegrationFor = async (tenantId: string, provider: string) => {
+    const key = `${tenantId}:${provider}`;
+    if (integrationCache[key] !== undefined) return integrationCache[key];
+    const snap = await db.collection('integrations')
+      .where('tenantId', '==', tenantId)
+      .where('provider', '==', provider)
+      .where('isActive', '==', true)
+      .limit(1)
+      .get();
+    integrationCache[key] = snap.empty ? null : snap.docs[0].data();
+    return integrationCache[key];
+  };
+
+  const getSettings = async (tenantId: string) => {
+    if (settingsCache[tenantId] !== undefined) return settingsCache[tenantId];
+    const snap = await db.collection('settings').doc(tenantId).get();
+    settingsCache[tenantId] = snap.data() || {};
+    return settingsCache[tenantId];
+  };
+
+  const candidates = await db.collection('conversations')
+    .where('lastMessageDate', '>=', windowStart)
+    .where('lastMessageDate', '<=', windowEnd)
+    .limit(200)
+    .get();
+
+  console.log(`[SilentLeads] ${candidates.size} conversaciones candidatas a revisar`);
+
+  for (const convDoc of candidates.docs) {
+    const conv = convDoc.data();
+    if (conv.status !== 'active') continue;
+    if (conv.botEnabled !== true) continue;
+    if (conv.lastMessageSender !== 'advisor') continue; // estamos esperando al lead, no al revés
+    if (conv.visitNudgeSent) continue; // ya se mandó una vez, no repetir
+    if (!conv.leadId) continue;
+
+    try {
+      const leadSnap = await db.collection('leads').doc(conv.leadId).get();
+      if (!leadSnap.exists) continue;
+      const leadStage = leadSnap.data()?.stage;
+
+      const settings = await getSettings(conv.tenantId);
+      const stages: any[] = settings.pipeline?.stages || [];
+      const stageMeta = stages.find((s) => s.label === leadStage);
+      // No insistir si ya está agendado, vendido o marcado como perdido.
+      if (stageMeta?.isClosed || stageMeta?.id === 'visita-tecnica') continue;
+
+      const integration = await getIntegrationFor(conv.tenantId, conv.source);
+      if (!integration?.accessToken) continue;
+
+      const firstName = (conv.contactName || '').split(' ')[0] || '';
+      const isGeneric = !firstName || /^(usuario|desconocido|cliente|sin\s|\+?[0-9\s-]+)$/i.test(firstName);
+      const nudgeMsg = isGeneric
+        ? '¿Te gustaría ir a verlo en persona? Puedo agendarte una visita cuando gustes. 🏡'
+        : `${firstName}, ¿te gustaría ir a verlo en persona? Puedo agendarte una visita cuando gustes. 🏡`;
+
+      if (conv.source === 'whatsapp') {
+        const phoneNumberId = integration.phoneNumberId;
+        const destinationPhone = conv.phoneE164 || conv.phoneRaw;
+        if (!phoneNumberId || !destinationPhone) continue;
+        await axios.post(`https://graph.facebook.com/v17.0/${phoneNumberId}/messages`, {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: destinationPhone.replace('+', ''),
+          type: 'text',
+          text: { body: nudgeMsg }
+        }, { headers: { Authorization: `Bearer ${integration.accessToken}`, 'Content-Type': 'application/json' } });
+      } else {
+        const recipientId = conv.platformId;
+        if (!recipientId) continue;
+        await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${integration.accessToken}`, {
+          recipient: { id: recipientId },
+          message: { text: nudgeMsg }
+        }, { headers: { 'Content-Type': 'application/json' } });
+      }
+
+      await db.collection('conversations').doc(convDoc.id).collection('messages').add({
+        text: nudgeMsg,
+        sender: 'advisor',
+        direction: 'outbound',
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        type: 'text',
+        status: 'sent',
+        externalId: `visitnudge.${crypto.randomBytes(8).toString('hex')}`
+      });
+
+      await convDoc.ref.update({
+        visitNudgeSent: true,
+        lastMessage: nudgeMsg,
+        lastMessageDate: admin.firestore.FieldValue.serverTimestamp(),
+        lastMessageSender: 'advisor',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      console.log(`[SilentLeads] Nudge de visita enviado → conv: ${convDoc.id} (${conv.source})`);
+    } catch (err: any) {
+      console.error(`[SilentLeads] Error en conv ${convDoc.id}:`, err?.response?.data || err.message);
+    }
+  }
+
+  console.log('[SilentLeads] Ejecución completada.');
+});
 
 /**
  * Reparación de un solo uso: corrige leads huérfanos en TODOS los tenants.
