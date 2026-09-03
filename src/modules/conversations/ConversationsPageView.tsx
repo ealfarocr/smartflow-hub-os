@@ -47,6 +47,8 @@ export const ConversationsPageView = () => {
   const { leads } = useLeadStore();
   const [showQuickTemplates, setShowQuickTemplates] = useState(false);
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
+  const [showToolsPanel, setShowToolsPanel] = useState(false);
+  const [showCameraChoice, setShowCameraChoice] = useState(false);
   const { addToast } = useUIStore();
 
   const [inputText, setInputText]   = useState('');
@@ -86,6 +88,7 @@ export const ConversationsPageView = () => {
   const [isUploading, setIsUploading]             = useState(false);
   const fileInputRef                              = useRef<HTMLInputElement>(null);
   const cameraInputRef                            = useRef<HTMLInputElement>(null);
+  const cameraVideoInputRef                       = useRef<HTMLInputElement>(null);
 
   // Grabación de notas de voz estilo WhatsApp (MP3 compatible con WhatsApp)
   const [isRecording, setIsRecording]   = useState(false);
@@ -445,7 +448,9 @@ export const ConversationsPageView = () => {
                     {getSourceIcon(activeChat.source)}
                   </div>
                   <p className="text-[10px] text-slate-400">
-                    {activeChat.source === 'whatsapp' ? activeChat.phoneE164 : activeChat.source === 'instagram' ? 'Instagram DM' : 'Messenger'}
+                    {activeChat.phoneE164 || activeChat.phoneRaw
+                      ? (activeChat.phoneE164 || activeChat.phoneRaw)
+                      : activeChat.source === 'instagram' ? 'Instagram DM' : 'Messenger'}
                   </p>
                 </div>
 
@@ -626,10 +631,20 @@ export const ConversationsPageView = () => {
                 )
               )}
               <div className="px-4 py-3">
-                <WhatsappWindowHint status={windowInfo.status} />
+                {!isWindowExpired && (
+                  <button
+                    type="button"
+                    onClick={() => setShowToolsPanel(v => !v)}
+                    className="w-full flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5"
+                  >
+                    <span>Plantillas, catálogo y más</span>
+                    <span>{showToolsPanel ? '▲' : '▼'}</span>
+                  </button>
+                )}
+                {(isWindowExpired || showToolsPanel) && <WhatsappWindowHint status={windowInfo.status} />}
 
                 {/* Action shortcuts */}
-                {!isWindowExpired && (
+                {!isWindowExpired && showToolsPanel && (
                   <div className="flex items-center gap-2 mb-2.5 flex-wrap">
                     {/* Quick templates dropdown */}
                     <div className="relative">
@@ -724,11 +739,21 @@ export const ConversationsPageView = () => {
                       className="hidden"
                       onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
                     />
-                    {/* capture="environment" abre la camara directo en celular (foto o video), en vez de la galeria */}
+                    {/* capture="environment" abre la camara directo en celular, no la galeria.
+                        accept mezclado "image/*,video/*" no abre la camara en varios navegadores
+                        de Android — un solo tipo por input es lo confiable. */}
                     <input
                       ref={cameraInputRef}
                       type="file"
-                      accept="image/*,video/*"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
+                    />
+                    <input
+                      ref={cameraVideoInputRef}
+                      type="file"
+                      accept="video/*"
                       capture="environment"
                       className="hidden"
                       onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
@@ -740,12 +765,30 @@ export const ConversationsPageView = () => {
                         className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
                         {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
                       </button>
-                      {/* Cámara: toma foto o graba video al momento y lo sube igual que un adjunto */}
-                      <button type="button" onClick={() => cameraInputRef.current?.click()} disabled={isUploading}
-                        title="Tomar foto o video"
-                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
-                        <Camera className="w-4 h-4" />
-                      </button>
+                      {/* Cámara: toma foto o graba video al momento y lo sube igual que un adjunto.
+                          Dos inputs separados (foto/video) porque un solo input con accept
+                          mezclado no abre la cámara de forma confiable en Android. */}
+                      <div className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
+                        <button type="button" onClick={() => setShowCameraChoice(v => !v)} disabled={isUploading}
+                          title="Tomar foto o video"
+                          className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors disabled:opacity-40">
+                          <Camera className="w-4 h-4" />
+                        </button>
+                        {showCameraChoice && (
+                          <div className="absolute bottom-full left-0 mb-2 w-36 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden">
+                            <button type="button"
+                              onClick={() => { setShowCameraChoice(false); cameraInputRef.current?.click(); }}
+                              className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2">
+                              <Camera className="w-3.5 h-3.5" /> Foto
+                            </button>
+                            <button type="button"
+                              onClick={() => { setShowCameraChoice(false); cameraVideoInputRef.current?.click(); }}
+                              className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 border-t border-slate-100 dark:border-slate-700">
+                              <Play className="w-3.5 h-3.5" /> Video
+                            </button>
+                          </div>
+                        )}
+                      </div>
 
                       {/* Área central: texto (reposo) · indicador de grabación */}
                       <div className="flex-1 min-w-0">
