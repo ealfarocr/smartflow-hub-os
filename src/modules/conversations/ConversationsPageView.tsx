@@ -46,6 +46,7 @@ export const ConversationsPageView = () => {
   const { whatsappTemplates, templates: quickTemplates, company } = useSettingsStore();
   const { leads } = useLeadStore();
   const [showQuickTemplates, setShowQuickTemplates] = useState(false);
+  const [showQuotaPanel, setShowQuotaPanel] = useState(false);
   const { addToast } = useUIStore();
 
   const [inputText, setInputText]   = useState('');
@@ -599,7 +600,30 @@ export const ConversationsPageView = () => {
 
             {/* Input area */}
             <div className="bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700 shrink-0">
-              {isWindowExpired && <WhatsappUsageStats quota={activeQuota} onUpgrade={() => setShowCreditsModal(true)} />}
+              {isWindowExpired && (
+                showQuotaPanel ? (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowQuotaPanel(false)}
+                      className="w-full flex items-center justify-between px-4 pt-3 text-[10px] font-black text-slate-400 uppercase tracking-widest"
+                    >
+                      Ocultar estado de cuotas
+                      <span>▲</span>
+                    </button>
+                    <WhatsappUsageStats quota={activeQuota} onUpgrade={() => setShowCreditsModal(true)} />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowQuotaPanel(true)}
+                    className="w-full flex items-center justify-between px-4 py-2 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700 text-[10px] font-black text-slate-400 uppercase tracking-widest"
+                  >
+                    <span className="flex items-center gap-1.5"><Zap className="w-3 h-3 text-amber-500" /> Estado de cuotas WhatsApp</span>
+                    <span>▼</span>
+                  </button>
+                )
+              )}
               <div className="px-4 py-3">
                 <WhatsappWindowHint status={windowInfo.status} />
 
