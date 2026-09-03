@@ -206,7 +206,19 @@ export const ConversationsPageView = () => {
       setRecordSeconds(0);
       setSlideCancel(false);
       setIsRecording(true);
-      recordTimerRef.current = setInterval(() => setRecordSeconds(s => s + 1), 1000);
+      // Tope de 3 min: ScriptProcessorNode acumula todo el audio crudo en memoria
+      // (no hay streaming), así que una grabación muy larga puede volverse pesada
+      // y sentirse "colgada" en celulares de gama baja — se corta sola y se envía.
+      const MAX_RECORD_SECONDS = 180;
+      recordTimerRef.current = setInterval(() => {
+        setRecordSeconds(s => {
+          if (s + 1 >= MAX_RECORD_SECONDS) {
+            finishRecordingAndSend();
+            return s;
+          }
+          return s + 1;
+        });
+      }, 1000);
     } catch {
       recordStartRef.current = null;
       addToast('No se pudo acceder al micrófono. Revisá los permisos.', 'error');
@@ -280,6 +292,24 @@ export const ConversationsPageView = () => {
     if (dur < 600) { cancelRecording(); addToast('Mantené presionado para grabar 🎤', 'info'); return; }
     finishRecordingAndSend();
   };
+
+  // Red de seguridad: en algunos navegadores Android, setPointerCapture puede
+  // perder el evento de soltar el dedo (por scroll, cambio de foco, etc.) y el
+  // botón del mic nunca recibe onPointerUp — la grabación queda "colgada" sin
+  // forma de tocar nada para pararla. Este listener global agarra el soltar
+  // en cualquier parte de la pantalla mientras se está grabando sin bloquear,
+  // y simplemente envía lo grabado hasta ese momento (mejor eso que quedar
+  // trabado sin poder hacer nada).
+  useEffect(() => {
+    if (!isRecording || isLocked) return;
+    const finish = () => { if (recordStartRef.current) { recordStartRef.current = null; finishRecordingAndSend(); } };
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+    return () => {
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+    };
+  }, [isRecording, isLocked]);
 
   // Liberar el micrófono si el componente se desmonta mientras graba
   useEffect(() => () => {
