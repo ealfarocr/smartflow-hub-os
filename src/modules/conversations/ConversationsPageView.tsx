@@ -85,6 +85,7 @@ export const ConversationsPageView = () => {
   const [selectedCatalogItemForPayment, setSelectedCatalogItemForPayment] = useState<CatalogItem | null>(null);
   const [isUploading, setIsUploading]             = useState(false);
   const fileInputRef                              = useRef<HTMLInputElement>(null);
+  const cameraInputRef                            = useRef<HTMLInputElement>(null);
 
   // Grabación de notas de voz estilo WhatsApp (MP3 compatible con WhatsApp)
   const [isRecording, setIsRecording]   = useState(false);
@@ -723,12 +724,27 @@ export const ConversationsPageView = () => {
                       className="hidden"
                       onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
                     />
+                    {/* capture="environment" abre la camara directo en celular (foto o video), en vez de la galeria */}
+                    <input
+                      ref={cameraInputRef}
+                      type="file"
+                      accept="image/*,video/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
+                    />
                     <div className="flex items-center gap-2">
                       {/* Adjuntar (oculto mientras se graba) */}
                       <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}
                         title="Adjuntar imagen, audio o documento"
                         className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
                         {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+                      </button>
+                      {/* Cámara: toma foto o graba video al momento y lo sube igual que un adjunto */}
+                      <button type="button" onClick={() => cameraInputRef.current?.click()} disabled={isUploading}
+                        title="Tomar foto o video"
+                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
+                        <Camera className="w-4 h-4" />
                       </button>
 
                       {/* Área central: texto (reposo) · indicador de grabación */}
