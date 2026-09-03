@@ -920,9 +920,9 @@ export const whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }
               lastMessageSender: 'lead',
               unreadCount: 1,
               status: 'active',
-              // El bot queda ON por defecto si el tenant tiene el Piloto Automático activado
-              // (isAiAutomated). El asesor puede apagarlo por chat con el toggle "Bot ON/OFF".
-              botEnabled: integrationData.isAiAutomated === true,
+              // El bot SIEMPRE arranca apagado — el asesor lo activa a mano por
+              // chat con el toggle "Bot ON/OFF". Pedido explícito: nunca auto-ON.
+              botEnabled: false,
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
               advisorId: 'u-1'
             });
@@ -1191,8 +1191,8 @@ export const metaWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).ht
               lastMessageSender: 'lead',
               unreadCount: 1,
               status: 'active',
-              // Bot ON por defecto si el tenant tiene el Piloto Automático activado
-              botEnabled: integrationData.isAiAutomated === true,
+              // El bot SIEMPRE arranca apagado — el asesor lo activa a mano.
+              botEnabled: false,
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
               advisorId: 'u-1',
               phoneRaw: '',
