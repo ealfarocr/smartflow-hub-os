@@ -13,7 +13,7 @@ import {
   MessageSquareText, Loader2, CheckCheck, AlertCircle,
   LayoutTemplate, ArrowLeft, Zap, CreditCard,
   Camera, Globe, Sparkles, UserPlus, Package,
-  FileText, Download, X, Bot, Settings2, Paperclip, Mic, Play, Trash2,
+  FileText, Download, X, Bot, Settings2, Paperclip, Mic, Play, Trash2, Image,
 } from 'lucide-react';
 import { VoiceRecorder } from '@/utils/audioRecorder';
 import { useTeam } from '@/hooks/useTeam';
@@ -89,6 +89,7 @@ export const ConversationsPageView = () => {
   const fileInputRef                              = useRef<HTMLInputElement>(null);
   const cameraInputRef                            = useRef<HTMLInputElement>(null);
   const cameraVideoInputRef                       = useRef<HTMLInputElement>(null);
+  const galleryInputRef                           = useRef<HTMLInputElement>(null);
 
   // Grabación de notas de voz estilo WhatsApp (MP3 compatible con WhatsApp)
   const [isRecording, setIsRecording]   = useState(false);
@@ -172,11 +173,25 @@ export const ConversationsPageView = () => {
     return getDownloadURL(storageRef);
   };
 
-  const handleFileUpload = async (file: File) => {
-    if (!activeMembership?.tenantId) return;
+  // Instrumentación temporal: el reporte en producción es que el chooser nativo de
+  // Android/iOS abre bien, pero el archivo capturado/elegido no siempre vuelve al chat.
+  // Estos logs marcan cada paso (click → input disparado → change → archivo recibido →
+  // attachment creado) para poder ver en remote debugging (chrome://inspect) exactamente
+  // dónde se corta el flujo en un teléfono real. Quitar una vez confirmado en producción.
+  const debugAttach = (tag: string, data?: unknown) => {
+    console.log(`[ATTACH] ${tag}`, data ?? '');
+  };
+
+  const handleFileUpload = async (file: File, source: 'PHOTO' | 'VIDEO' | 'GALLERY' | 'ATTACH' = 'ATTACH') => {
+    debugAttach(`${source}_FILE_RECEIVED`, { name: file.name, size: file.size, type: file.type });
+    if (!activeMembership?.tenantId) {
+      debugAttach(`${source}_ABORTED_NO_TENANT`);
+      return;
+    }
     // WhatsApp acepta video/documento hasta 16MB. Evita subir algo que luego rechaza.
     const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|3gp|webm)$/i.test(file.name);
     if (file.size > 16 * 1024 * 1024) {
+      debugAttach(`${source}_REJECTED_TOO_LARGE`, { size: file.size });
       addToast(`El archivo pesa ${(file.size / 1048576).toFixed(1)}MB. WhatsApp acepta máximo 16MB${isVideo ? ' para video' : ''}.`, 'error');
       return;
     }
@@ -185,7 +200,9 @@ export const ConversationsPageView = () => {
       const url = await uploadToStorage(file);
       setMediaUrl(url);
       setMediaFilename(file.name);
-    } catch {
+      debugAttach(`${source}_ATTACHMENT_CREATED`, { url, name: file.name });
+    } catch (err) {
+      debugAttach(`${source}_UPLOAD_ERROR`, err);
       addToast('Error al subir archivo', 'error');
     } finally {
       setIsUploading(false);
@@ -202,6 +219,15 @@ export const ConversationsPageView = () => {
     try {
       const recorder = new VoiceRecorder();
       await recorder.start();
+      // El permiso de micrófono puede tardar en resolverse (diálogo nativo del navegador,
+      // sobre todo la primera vez) y el dedo ya se pudo haber soltado mientras tanto. Sin
+      // este chequeo la grabación arranca "fantasma" después de soltar, sin nadie sosteniendo
+      // el botón para pararla — queda grabando hasta el próximo toque en cualquier parte
+      // de la pantalla (o hasta el tope de 3 min).
+      if (!recordStartRef.current && !lockedRef.current) {
+        recorder.cancel();
+        return;
+      }
       recorderRef.current = recorder;
       setRecordSeconds(0);
       setSlideCancel(false);
@@ -767,7 +793,14 @@ export const ConversationsPageView = () => {
                       type="file"
                       accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.mp4,.mov,.3gp,.ogg,.mp3,.m4a,.aac,.wav,.opus"
                       className="hidden"
-                      onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
+                      onChange={async e => {
+                        const f = e.target.files?.[0];
+                        // Ojo: el reset de e.target.value se hace DESPUÉS de procesar el
+                        // archivo (no antes) — limpiarlo antes de terminar de leerlo puede
+                        // invalidar el File en algunos navegadores móviles.
+                        if (f) await handleFileUpload(f, 'ATTACH');
+                        e.target.value = '';
+                      }}
                     />
                     {/* capture="environment" abre la camara directo en celular, no la galeria.
                         accept mezclado "image/*,video/*" no abre la camara en varios navegadores
@@ -778,7 +811,12 @@ export const ConversationsPageView = () => {
                       accept="image/*"
                       capture="environment"
                       className="hidden"
-                      onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
+                      onChange={async e => {
+                        debugAttach('PHOTO_CHANGE', { filesLength: e.target.files?.length ?? 0 });
+                        const f = e.target.files?.[0];
+                        if (f) await handleFileUpload(f, 'PHOTO');
+                        e.target.value = '';
+                      }}
                     />
                     <input
                       ref={cameraVideoInputRef}
@@ -786,7 +824,28 @@ export const ConversationsPageView = () => {
                       accept="video/*"
                       capture="environment"
                       className="hidden"
-                      onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
+                      onChange={async e => {
+                        debugAttach('VIDEO_CHANGE', { filesLength: e.target.files?.length ?? 0 });
+                        const f = e.target.files?.[0];
+                        if (f) await handleFileUpload(f, 'VIDEO');
+                        e.target.value = '';
+                      }}
+                    />
+                    {/* Galería: sin "capture", así el navegador abre el selector de fotos/videos
+                        del teléfono en vez de la cámara. Input separado del de "Adjuntar" (que
+                        acepta también audio/documentos) para que el punto de entrada quede
+                        claro junto a Foto/Video en el mismo menú. */}
+                    <input
+                      ref={galleryInputRef}
+                      type="file"
+                      accept="image/*,video/*"
+                      className="hidden"
+                      onChange={async e => {
+                        debugAttach('GALLERY_CHANGE', { filesLength: e.target.files?.length ?? 0 });
+                        const f = e.target.files?.[0];
+                        if (f) await handleFileUpload(f, 'GALLERY');
+                        e.target.value = '';
+                      }}
                     />
                     <div className="flex items-center gap-2">
                       {/* Adjuntar (oculto mientras se graba) */}
@@ -800,21 +859,41 @@ export const ConversationsPageView = () => {
                           mezclado no abre la cámara de forma confiable en Android. */}
                       <div className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
                         <button type="button" onClick={() => setShowCameraChoice(v => !v)} disabled={isUploading}
-                          title="Tomar foto o video"
+                          title="Cámara o galería"
                           className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors disabled:opacity-40">
                           <Camera className="w-4 h-4" />
                         </button>
                         {showCameraChoice && (
                           <div className="absolute bottom-full left-0 mb-2 w-36 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden">
                             <button type="button"
-                              onClick={() => { setShowCameraChoice(false); cameraInputRef.current?.click(); }}
+                              onClick={() => {
+                                debugAttach('PHOTO_CLICK');
+                                setShowCameraChoice(false);
+                                cameraInputRef.current?.click();
+                                debugAttach('PHOTO_INPUT_TRIGGERED');
+                              }}
                               className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2">
                               <Camera className="w-3.5 h-3.5" /> Foto
                             </button>
                             <button type="button"
-                              onClick={() => { setShowCameraChoice(false); cameraVideoInputRef.current?.click(); }}
+                              onClick={() => {
+                                debugAttach('VIDEO_CLICK');
+                                setShowCameraChoice(false);
+                                cameraVideoInputRef.current?.click();
+                                debugAttach('VIDEO_INPUT_TRIGGERED');
+                              }}
                               className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 border-t border-slate-100 dark:border-slate-700">
                               <Play className="w-3.5 h-3.5" /> Video
+                            </button>
+                            <button type="button"
+                              onClick={() => {
+                                debugAttach('GALLERY_CLICK');
+                                setShowCameraChoice(false);
+                                galleryInputRef.current?.click();
+                                debugAttach('GALLERY_INPUT_TRIGGERED');
+                              }}
+                              className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 border-t border-slate-100 dark:border-slate-700">
+                              <Image className="w-3.5 h-3.5" /> Galería
                             </button>
                           </div>
                         )}
