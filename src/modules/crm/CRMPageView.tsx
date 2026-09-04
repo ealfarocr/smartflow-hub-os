@@ -5,7 +5,7 @@ import { useUIStore } from '@/stores/uiStore';
 import {
   Plus, Phone, MapPin, DollarSign, Loader2, AlertCircle,
   MessageCircle, Calendar, Edit2, Trash2, Filter, Search,
-  MessageSquare, GitMerge, X, Save, Sparkles, ArrowRight, MoreVertical
+  MessageSquare, GitMerge, X, Save, Sparkles, ArrowRight, MoreVertical, ChevronLeft, ChevronRight, Circle, CheckCircle2
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -54,6 +54,8 @@ export const CRMPageView = () => {
   // Vista compacta mobile: una sola etapa visible a la vez (ver handleChangeLeadStage / getStageLeads)
   const [mobileStage, setMobileStage] = useState<string | null>(null);
   const [actionSheetLead, setActionSheetLead] = useState<Lead | null>(null);
+  const [sheetMode, setSheetMode] = useState<'menu' | 'move'>('menu');
+  const closeActionSheet = () => { setActionSheetLead(null); setSheetMode('menu'); };
 
   const { commercial, pipeline, subscribe: subscribeSettings, updateSettings } = useSettingsStore();
   const currency = commercial?.currency || 'MX';
@@ -284,15 +286,16 @@ export const CRMPageView = () => {
 
   return (
     <div className="flex flex-col md:h-[calc(100vh-8rem)]">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-0 mb-4 md:mb-6">
+      {/* ═══ Header DESKTOP / TABLET (md+) — markup original, sin cambios ═══ */}
+      <div className="hidden md:flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">CRM / Pipeline</h1>
-        <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 w-full md:w-auto">
-          <div className="relative group w-full md:w-auto">
+        <div className="flex flex-col md:flex-row md:items-center gap-4">
+          <div className="relative group">
             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#1877F2] transition-colors" />
             <select
               value={agentFilter}
               onChange={(e) => setAgentFilter(e.target.value)}
-              className="pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all appearance-none w-full md:w-auto md:min-w-[180px] shadow-sm"
+              className="pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all appearance-none min-w-[180px] shadow-sm"
             >
                <option value="all">👥 Todos los Agentes</option>
                <option value="unassigned">👤 Sin Asignar</option>
@@ -302,21 +305,21 @@ export const CRMPageView = () => {
             </select>
           </div>
 
-          <div className="relative group w-full md:w-auto">
+          <div className="relative group">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#1877F2] transition-colors" />
             <input
               type="text"
               placeholder="Buscar por nombre o celular..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all w-full md:w-auto md:min-w-[240px] shadow-sm"
+              className="pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all min-w-[240px] shadow-sm"
             />
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex space-x-2">
             <button
               onClick={handleNewLead}
-              className="flex-1 md:flex-none bg-[#1877F2] hover:bg-blue-700 text-white px-6 py-2 rounded-xl text-sm font-black transition-all flex items-center justify-center shadow-lg shadow-blue-600/20 uppercase tracking-widest"
+              className="bg-[#1877F2] hover:bg-blue-700 text-white px-6 py-2 rounded-xl text-sm font-black transition-all flex items-center shadow-lg shadow-blue-600/20 uppercase tracking-widest"
             >
               <Plus className="h-4 w-4 mr-2" />
               Nuevo Lead
@@ -329,6 +332,47 @@ export const CRMPageView = () => {
               <GitMerge className="h-5 w-5" />
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* ═══ Header MOBILE (< md) — compacto, prioriza espacio para los leads ═══ */}
+      <div className="md:hidden mb-3">
+        <h1 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight mb-2">CRM / Pipeline</h1>
+        <div className="relative mb-2">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Buscar lead..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9 pr-3 py-2 w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+          />
+        </div>
+        <div className="flex gap-2">
+          <select
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
+            className="flex-1 min-w-0 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 outline-none appearance-none"
+          >
+             <option value="all">👥 Todos los agentes</option>
+             <option value="unassigned">👤 Sin asignar</option>
+             {agents.map(agent => (
+               <option key={agent.id} value={agent.id}>👤 {agent.name}</option>
+             ))}
+          </select>
+          <button
+            onClick={handleNewLead}
+            className="shrink-0 bg-[#1877F2] hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1 shadow-sm shadow-blue-600/20"
+          >
+            <Plus className="h-3.5 w-3.5" /> Lead
+          </button>
+          <button
+            onClick={handleOpenPipeline}
+            className="shrink-0 p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-500 dark:text-slate-300"
+            title="Configurar Pipeline"
+          >
+            <GitMerge className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
@@ -547,56 +591,57 @@ export const CRMPageView = () => {
               })}
             </div>
 
-            {/* Tarjetas compactas de la etapa seleccionada */}
-            <div className="flex-1 overflow-y-auto space-y-2 pb-4">
+            {/* Lista vertical compacta de la etapa seleccionada — ~70-95px por tarjeta */}
+            <div className="flex-1 overflow-y-auto space-y-1.5 pb-4">
               {mobileStageLeads.length === 0 ? (
-                <p className="text-center text-sm text-slate-400 py-6">Sin leads en esta etapa</p>
+                <div className="min-h-[120px] max-h-[180px] flex items-center justify-center">
+                  <p className="text-sm text-slate-400">Sin leads en {activeMobileStage}</p>
+                </div>
               ) : (
-                mobileStageLeads.map(lead => (
-                  <div
-                    key={lead.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setActionSheetLead(lead)}
-                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setActionSheetLead(lead); }}
-                    className="w-full text-left bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-3 flex items-start gap-2 active:bg-slate-50 dark:active:bg-slate-700/40 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <p className="font-semibold text-sm text-slate-900 dark:text-white truncate">{lead.name}</p>
-                        {(lead.aiPropensity !== undefined || lead.aiScore !== undefined) && (
-                          <span className="shrink-0 text-[11px]" title={lead.aiScoreReason}>
-                            {lead.aiSentiment === 'positive' ? '😍' :
-                             lead.aiSentiment === 'critical' ? '😡' :
-                             (lead.aiPropensity || lead.aiScore || 0) >= 80 ? '🔥' : '❄️'}
+                mobileStageLeads.map(lead => {
+                  const hasAmount = lead.keyData && lead.keyData !== 'Pendiente de calificar';
+                  return (
+                    <div
+                      key={lead.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setActionSheetLead(lead)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setActionSheetLead(lead); }}
+                      className="w-full text-left bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 active:bg-slate-50 dark:active:bg-slate-700/40 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="shrink-0">{getSourceIcon(lead.source)}</span>
+                          <p className="font-semibold text-sm text-slate-900 dark:text-white truncate">{lead.name}</p>
+                        </div>
+                        <MoreVertical className="w-4 h-4 text-slate-300 shrink-0" />
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        <span className="flex items-center gap-1 min-w-0 truncate"><Phone className="w-3 h-3 shrink-0" />{lead.phone}</span>
+                        {hasAmount && (
+                          <span className="flex items-center gap-0.5 shrink-0 font-bold text-[#1877F2] dark:text-primary-400">
+                            <DollarSign className="w-3 h-3" />{lead.keyData}
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{lead.phone}</p>
-                      <div className="flex items-center gap-2.5 mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+                      <div className="flex items-center justify-between gap-2 mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
+                        <span className="truncate">{agents.find(a => a.id === lead.advisorId)?.name || 'Sin asesor'}</span>
                         <span className="shrink-0">{formatLeadActivity(lead.lastActivity)}</span>
-                        <span className="truncate">
-                          Asesor: {agents.find(a => a.id === lead.advisorId)?.name || 'Sin asignar'}
-                        </span>
                       </div>
-                      {lead.keyData && lead.keyData !== 'Pendiente de calificar' && (
-                        <p className="text-xs font-bold text-[#1877F2] dark:text-primary-400 mt-1">{lead.keyData}</p>
-                      )}
                     </div>
-                    <MoreVertical className="w-4 h-4 text-slate-300 shrink-0 mt-0.5" />
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </>
         )}
       </div>
 
-      {/* Action sheet mobile — reutiliza los mismos handlers del desktop (cambiar etapa, agendar, editar, eliminar) */}
+      {/* Action sheet mobile — reutiliza los mismos handlers del desktop (handleChangeLeadStage, handleOpenAgenda, handleEditLead, handleDeleteLead) */}
       {actionSheetLead && (
         <div
           className="md:hidden fixed inset-0 z-[110] flex items-end"
-          onClick={() => setActionSheetLead(null)}
+          onClick={closeActionSheet}
         >
           <div className="absolute inset-0 bg-slate-900/50" />
           <div
@@ -605,56 +650,94 @@ export const CRMPageView = () => {
             onClick={e => e.stopPropagation()}
           >
             <div className="w-10 h-1 bg-slate-300 dark:bg-slate-600 rounded-full mx-auto mb-4" />
-            <div className="mb-3 px-1">
-              <p className="font-bold text-sm text-slate-900 dark:text-white">{actionSheetLead.name}</p>
-              <p className="text-xs text-slate-400">{actionSheetLead.phone}</p>
-            </div>
 
-            <button
-              onClick={() => { navigate(`/conversaciones?leadId=${actionSheetLead.id}`); setActionSheetLead(null); }}
-              className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 text-sm font-semibold text-slate-700 dark:text-slate-200"
-            >
-              <MessageCircle className="w-4 h-4 text-green-600" /> Abrir conversación
-            </button>
+            {sheetMode === 'menu' ? (
+              <>
+                <div className="mb-3 px-1">
+                  <p className="font-bold text-sm text-slate-900 dark:text-white">{actionSheetLead.name}</p>
+                  <p className="text-xs text-slate-400">{actionSheetLead.phone}</p>
+                </div>
 
-            <div className="px-3 py-2">
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Cambiar etapa</label>
-              <select
-                value={actionSheetLead.stage}
-                onChange={(e) => { handleChangeLeadStage(actionSheetLead, e.target.value); setActionSheetLead(null); }}
-                className="w-full text-sm font-bold bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 outline-none"
-              >
-                {stages.map(s => (
-                  <option key={s.id} value={s.label}>{s.label}</option>
-                ))}
-              </select>
-            </div>
+                <button
+                  onClick={() => { navigate(`/conversaciones?leadId=${actionSheetLead.id}`); closeActionSheet(); }}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 text-sm font-semibold text-slate-700 dark:text-slate-200"
+                >
+                  <MessageCircle className="w-4 h-4 text-green-600" /> Abrir conversación
+                </button>
+                <button
+                  onClick={() => { handleOpenAgenda(actionSheetLead); closeActionSheet(); }}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 text-sm font-semibold text-slate-700 dark:text-slate-200"
+                >
+                  <Calendar className="w-4 h-4 text-blue-600" /> Agendar cita
+                </button>
+                <button
+                  onClick={() => { handleEditLead(actionSheetLead); closeActionSheet(); }}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 text-sm font-semibold text-slate-700 dark:text-slate-200"
+                >
+                  <Edit2 className="w-4 h-4 text-slate-500" /> Editar
+                </button>
+                <button
+                  onClick={() => setSheetMode('move')}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 text-sm font-semibold text-slate-700 dark:text-slate-200"
+                >
+                  <ArrowRight className="w-4 h-4 text-[#1877F2]" /> Mover a...
+                  <ChevronRight className="w-4 h-4 text-slate-300 ml-auto" />
+                </button>
+                <button
+                  onClick={() => { handleDeleteLead(actionSheetLead); closeActionSheet(); }}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-semibold text-red-600"
+                >
+                  <Trash2 className="w-4 h-4" /> Eliminar
+                </button>
 
-            <button
-              onClick={() => { handleOpenAgenda(actionSheetLead); setActionSheetLead(null); }}
-              className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 text-sm font-semibold text-slate-700 dark:text-slate-200"
-            >
-              <Calendar className="w-4 h-4 text-blue-600" /> Agendar cita
-            </button>
-            <button
-              onClick={() => { handleEditLead(actionSheetLead); setActionSheetLead(null); }}
-              className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 text-sm font-semibold text-slate-700 dark:text-slate-200"
-            >
-              <Edit2 className="w-4 h-4 text-slate-500" /> Editar
-            </button>
-            <button
-              onClick={() => { handleDeleteLead(actionSheetLead); setActionSheetLead(null); }}
-              className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-semibold text-red-600"
-            >
-              <Trash2 className="w-4 h-4" /> Eliminar
-            </button>
-
-            <button
-              onClick={() => setActionSheetLead(null)}
-              className="w-full mt-2 py-3 text-sm font-bold text-slate-400"
-            >
-              Cancelar
-            </button>
+                <button
+                  onClick={closeActionSheet}
+                  className="w-full mt-2 py-3 text-sm font-bold text-slate-400"
+                >
+                  Cancelar
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 mb-3 px-1">
+                  <button onClick={() => setSheetMode('menu')} className="p-1 -ml-1 text-slate-400 hover:text-slate-600">
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Mover a</p>
+                </div>
+                <div className="space-y-0.5 max-h-[50vh] overflow-y-auto">
+                  {stages.map(s => {
+                    const isCurrent = s.label === actionSheetLead.stage;
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => { handleChangeLeadStage(actionSheetLead, s.label); closeActionSheet(); }}
+                        disabled={isCurrent}
+                        className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-semibold transition-colors ${
+                          isCurrent
+                            ? 'text-slate-400 dark:text-slate-500'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                        }`}
+                      >
+                        {isCurrent ? (
+                          <CheckCircle2 className="w-4 h-4" style={{ color: s.color }} />
+                        ) : (
+                          <Circle className="w-4 h-4 text-slate-300" />
+                        )}
+                        {s.label}
+                        {isCurrent && <span className="ml-auto text-[10px] uppercase tracking-widest">Actual</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={closeActionSheet}
+                  className="w-full mt-2 py-3 text-sm font-bold text-slate-400"
+                >
+                  Cancelar
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
