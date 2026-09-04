@@ -23,6 +23,7 @@ const TOOLS_FALLBACK: ToolLibraryRecord[] = [
   { id: 't2',  key: 'hasTasks',           label: 'Gestor de Listas',      desc: 'Organiza tareas y pendientes de tu negocio de forma ágil.',          iconName: 'LayoutList',    color: '#1877F2', isActive: true, order: 0.5, price: 0,  isFree: true  },
   { id: 't3',  key: 'hasPackages',        label: 'Paquetes Comerciales',  desc: 'Agrupa ofertas para cargarlas en bloque al cotizar. Incluido.',      iconName: 'Package',       color: '#EC4899', isActive: true, order: 1,   price: 0,  isFree: true  },
   { id: 't4',  key: 'hasMultiAgent',      label: 'WhatsApp Administrado', desc: 'CRM multi-agente con WhatsApp API oficial y 300 créditos.',          iconName: 'MessageSquare', color: '#25D366', isActive: true, order: 2,   price: 69, isFree: false },
+  { id: 'multi-agent', key: 'hasMultiAgentPanel', label: 'Multi-Agente', desc: 'Panel de distribución de conversaciones entre agentes del equipo.', iconName: 'Headset', color: '#25D366', isActive: true, order: 2.5, price: 0, isFree: true },
   { id: 't5',  key: 'hasAiAgent',         label: 'Agente IA 24/7',        desc: 'IA que responde, califica prospectos y agenda citas automáticamente.',iconName: 'Bot',           color: '#8B5CF6', isActive: true, order: 3,   price: 49, isFree: false },
   { id: 't6',  key: 'hasQualityAuditor',  label: 'Auditor de Vendedores', desc: 'Analiza chats y detecta cierres perdidos con IA.',                  iconName: 'ShieldCheck',   color: '#F59E0B', isActive: true, order: 4,   price: 25, isFree: false },
   { id: 't7',  key: 'hasPaymentLinks',    label: 'Links de Pago',         desc: 'Cobra por WhatsApp con enlaces seguros de pago con tarjeta o PayPal.',iconName: 'CreditCard',   color: '#1877F2', isActive: true, order: 5,   price: 12, isFree: false },
@@ -135,7 +136,7 @@ export const MarketplaceView = () => {
     if (!activeMembership?.tenantId) return;
     setIsSaving(true);
     try {
-      const all: TenantFeatures = { hasCrm: true, hasQuotes: true, hasPackages: true, hasAgenda: true, hasAiAgent: true, hasMultiAgent: true, hasQualityAuditor: true, hasPaymentLinks: true, hasCatalog: true, hasIntegrations: true };
+      const all: TenantFeatures = { hasCrm: true, hasQuotes: true, hasPackages: true, hasAgenda: true, hasAiAgent: true, hasMultiAgent: true, hasMultiAgentPanel: true, hasQualityAuditor: true, hasPaymentLinks: true, hasCatalog: true, hasIntegrations: true };
       await updateSettings(activeMembership.tenantId, { features: all });
       setLocalFeatures(all);
       addToast('Modo Prueba: todas las herramientas activadas.', 'success');

@@ -103,7 +103,7 @@ export const AppRouter = () => {
             <Route element={<FeatureGuard feature="hasAiAgent" />}>
               <Route path="ai-agent" element={<AIAgentView />} />
             </Route>
-            <Route element={<FeatureGuard feature="hasMultiAgent" />}>
+            <Route element={<FeatureGuard feature="hasMultiAgentPanel" />}>
               <Route path="multi-agent" element={<MultiAgentView />} />
             </Route>
             <Route element={<FeatureGuard feature="hasQualityAuditor" />}>
