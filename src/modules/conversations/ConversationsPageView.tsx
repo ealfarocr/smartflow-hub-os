@@ -28,8 +28,6 @@ import { useUIStore } from '@/stores/uiStore';
 import { TenantService } from '@/services/firebase/TenantService';
 import { WhatsappConnectionModal } from './WhatsappConnectionModal';
 import { CatalogService } from '@/services/firebase/CatalogService';
-import { VideoRecorderModal } from './components/VideoRecorderModal';
-import { getSupportedVideoMimeType } from './components/videoMime';
 import { AudioMessagePlayer } from './components/AudioMessagePlayer';
 
 // Hoy: solo hora (como antes). Otro día: día + mes + hora, para no confundir
@@ -52,7 +50,6 @@ export const ConversationsPageView = () => {
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
   const [showToolsPanel, setShowToolsPanel] = useState(false);
   const [showCameraChoice, setShowCameraChoice] = useState(false);
-  const [showVideoRecorder, setShowVideoRecorder] = useState(false);
   const { addToast } = useUIStore();
 
   const [inputText, setInputText]   = useState('');
@@ -112,15 +109,20 @@ export const ConversationsPageView = () => {
   const cameraVideoInputRef                       = useRef<HTMLInputElement>(null);
   const galleryInputRef                           = useRef<HTMLInputElement>(null);
 
-  // Grabación de notas de voz estilo WhatsApp (MP3 compatible con WhatsApp)
+  // Grabación de notas de voz por TAP (no mantener presionado, estilo WhatsApp
+  // actual): un toque inicia, otro detiene y pasa a una vista previa reproducible
+  // antes de enviar — igual que el patrón ya usado para video (grabar → preview →
+  // confirmar/regrabar), en vez del gesto de mantener+deslizar que tenía antes.
   const [isRecording, setIsRecording]   = useState(false);
-  const [isLocked, setIsLocked]         = useState(false);
-  const [slideCancel, setSlideCancel]   = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  const [voicePreview, setVoicePreview] = useState<{ url: string; file: File } | null>(null);
   const recorderRef                     = useRef<VoiceRecorder | null>(null);
   const recordTimerRef                  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const recordStartRef                  = useRef<{ x: number; y: number; time: number } | null>(null);
-  const lockedRef                       = useRef(false);
+  const voicePreviewRef                 = useRef<{ url: string; file: File } | null>(null);
+  // Evita que un segundo tap (querer "detener") dispare start() otra vez si el
+  // primer tap todavía está esperando el permiso de micrófono (diálogo nativo).
+  const isStartingRecorderRef           = useRef(false);
+  const cancelPendingStartRef           = useRef(false);
 
   useEffect(() => {
     if (!activeMembership?.tenantId) return;
@@ -326,45 +328,45 @@ export const ConversationsPageView = () => {
     pendingMediaRef.current.forEach(m => URL.revokeObjectURL(m.localPreviewUrl));
   }, []);
 
-  // ── Grabación estilo WhatsApp ──────────────────────────────
+  // ── Grabación de notas de voz por TAP ──────────────────────────────
   const clearRecordTimer = () => {
     if (recordTimerRef.current) { clearInterval(recordTimerRef.current); recordTimerRef.current = null; }
   };
 
   const startRecording = async () => {
-    if (isRecording) return;
+    if (isRecording || isStartingRecorderRef.current) return;
+    isStartingRecorderRef.current = true;
+    cancelPendingStartRef.current = false;
     try {
       const recorder = new VoiceRecorder();
       await recorder.start();
-      // El permiso de micrófono puede tardar en resolverse (diálogo nativo del navegador,
-      // sobre todo la primera vez) y el dedo ya se pudo haber soltado mientras tanto. Sin
-      // este chequeo la grabación arranca "fantasma" después de soltar, sin nadie sosteniendo
-      // el botón para pararla — queda grabando hasta el próximo toque en cualquier parte
-      // de la pantalla (o hasta el tope de 3 min).
-      if (!recordStartRef.current && !lockedRef.current) {
+      // El permiso de micrófono puede tardar en resolverse (diálogo nativo del
+      // navegador, sobre todo la primera vez) — si el usuario ya tocó "detener"
+      // mientras tanto, no arrancar la grabación "fantasma".
+      if (cancelPendingStartRef.current) {
         recorder.cancel();
         return;
       }
       recorderRef.current = recorder;
       setRecordSeconds(0);
-      setSlideCancel(false);
       setIsRecording(true);
       // Tope de 3 min: ScriptProcessorNode acumula todo el audio crudo en memoria
       // (no hay streaming), así que una grabación muy larga puede volverse pesada
-      // y sentirse "colgada" en celulares de gama baja — se corta sola y se envía.
+      // y sentirse "colgada" en celulares de gama baja — se corta sola y pasa a preview.
       const MAX_RECORD_SECONDS = 180;
       recordTimerRef.current = setInterval(() => {
         setRecordSeconds(s => {
           if (s + 1 >= MAX_RECORD_SECONDS) {
-            finishRecordingAndSend();
+            stopRecordingToPreview();
             return s;
           }
           return s + 1;
         });
       }, 1000);
     } catch {
-      recordStartRef.current = null;
       addToast('No se pudo acceder al micrófono. Revisá los permisos.', 'error');
+    } finally {
+      isStartingRecorderRef.current = false;
     }
   };
 
@@ -372,24 +374,43 @@ export const ConversationsPageView = () => {
     clearRecordTimer();
     recorderRef.current?.cancel();
     recorderRef.current = null;
-    lockedRef.current = false;
-    recordStartRef.current = null;
-    setIsRecording(false); setIsLocked(false); setSlideCancel(false); setRecordSeconds(0);
+    setIsRecording(false);
+    setRecordSeconds(0);
   };
 
-  const finishRecordingAndSend = async () => {
-    if (!recorderRef.current || !activeConversation || !activeMembership?.tenantId) { cancelRecording(); return; }
+  const discardVoicePreview = () => {
+    if (voicePreviewRef.current) { URL.revokeObjectURL(voicePreviewRef.current.url); voicePreviewRef.current = null; }
+    setVoicePreview(null);
+  };
+
+  // Segundo tap: detiene y pasa a una vista previa reproducible — todavía NO
+  // sube ni envía nada (eso queda para "Enviar", igual que Regrabar/Usar video).
+  const stopRecordingToPreview = async () => {
+    if (!recorderRef.current) { cancelRecording(); return; }
     clearRecordTimer();
     const recorder = recorderRef.current;
     recorderRef.current = null;
-    lockedRef.current = false;
-    setIsRecording(false); setIsLocked(false); setSlideCancel(false);
-    setIsUploading(true);
+    setIsRecording(false);
     try {
       const file = await recorder.stop();
-      if (file.size < 1200) { addToast('La nota de voz quedó muy corta.', 'info'); return; }
-      const url = await uploadToStorage(file);
-      await sendMessage(activeConversation, '', 'advisor', activeMembership.tenantId, url, file.name);
+      if (file.size < 1200) { addToast('La nota de voz quedó muy corta.', 'info'); setRecordSeconds(0); return; }
+      const url = URL.createObjectURL(file);
+      voicePreviewRef.current = { url, file };
+      setVoicePreview({ url, file });
+    } catch {
+      addToast('Error al procesar la nota de voz.', 'error');
+      setRecordSeconds(0);
+    }
+  };
+
+  const confirmSendVoicePreview = async () => {
+    const preview = voicePreviewRef.current;
+    if (!preview || !activeConversation || !activeMembership?.tenantId) return;
+    setIsUploading(true);
+    try {
+      const url = await uploadToStorage(preview.file);
+      await sendMessage(activeConversation, '', 'advisor', activeMembership.tenantId, url, preview.file.name);
+      discardVoicePreview();
     } catch {
       addToast('Error al enviar la nota de voz.', 'error');
     } finally {
@@ -398,66 +419,21 @@ export const ConversationsPageView = () => {
     }
   };
 
-  // Gestos: mantener para grabar · deslizar ← cancela · deslizar ↑ bloquea · soltar envía
-  const SLIDE_CANCEL_PX = 90;
-  const SLIDE_LOCK_PX   = 90;
-
-  const onMicPointerDown = (e: React.PointerEvent) => {
-    if (isUploading || isRecording) return;
-    e.preventDefault();
-    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
-    recordStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
-    lockedRef.current = false;
+  // Tap único en el botón de mic: inicia si está en reposo, detiene (a preview)
+  // si ya está grabando. Si el tap de "detener" llega mientras el permiso del
+  // micrófono todavía está pendiente, se marca para cancelar apenas resuelva.
+  const handleMicTap = () => {
+    if (isUploading) return;
+    if (isRecording) { stopRecordingToPreview(); return; }
+    if (isStartingRecorderRef.current) { cancelPendingStartRef.current = true; return; }
     startRecording();
   };
 
-  const onMicPointerMove = (e: React.PointerEvent) => {
-    const start = recordStartRef.current;
-    if (!start || lockedRef.current) return;
-    const dx = e.clientX - start.x;
-    const dy = e.clientY - start.y;
-    if (dy < -SLIDE_LOCK_PX) {
-      lockedRef.current = true;
-      setIsLocked(true); setSlideCancel(false);
-      return;
-    }
-    setSlideCancel(dx < -SLIDE_CANCEL_PX);
-  };
-
-  const onMicPointerUp = (e: React.PointerEvent) => {
-    if (lockedRef.current) return; // modo bloqueado: sigue grabando hasta tocar enviar/cancelar
-    const start = recordStartRef.current;
-    recordStartRef.current = null;
-    if (!start) return;
-    const dx = e.clientX - start.x;
-    const dur = Date.now() - start.time;
-    if (dx < -SLIDE_CANCEL_PX) { cancelRecording(); return; }
-    if (dur < 600) { cancelRecording(); addToast('Mantené presionado para grabar 🎤', 'info'); return; }
-    finishRecordingAndSend();
-  };
-
-  // Red de seguridad: en algunos navegadores Android, setPointerCapture puede
-  // perder el evento de soltar el dedo (por scroll, cambio de foco, etc.) y el
-  // botón del mic nunca recibe onPointerUp — la grabación queda "colgada" sin
-  // forma de tocar nada para pararla. Este listener global agarra el soltar
-  // en cualquier parte de la pantalla mientras se está grabando sin bloquear,
-  // y simplemente envía lo grabado hasta ese momento (mejor eso que quedar
-  // trabado sin poder hacer nada).
-  useEffect(() => {
-    if (!isRecording || isLocked) return;
-    const finish = () => { if (recordStartRef.current) { recordStartRef.current = null; finishRecordingAndSend(); } };
-    window.addEventListener('pointerup', finish);
-    window.addEventListener('pointercancel', finish);
-    return () => {
-      window.removeEventListener('pointerup', finish);
-      window.removeEventListener('pointercancel', finish);
-    };
-  }, [isRecording, isLocked]);
-
-  // Liberar el micrófono si el componente se desmonta mientras graba
+  // Liberar el micrófono y la vista previa si el componente se desmonta
   useEffect(() => () => {
     if (recordTimerRef.current) clearInterval(recordTimerRef.current);
     recorderRef.current?.cancel();
+    if (voicePreviewRef.current) URL.revokeObjectURL(voicePreviewRef.current.url);
   }, []);
 
   const getSourceIcon = (source: string) => {
@@ -994,16 +970,16 @@ export const ConversationsPageView = () => {
                       }}
                     />
                     <div className="flex items-center gap-2">
-                      {/* Adjuntar (oculto mientras se graba) */}
+                      {/* Adjuntar (oculto mientras se graba o se revisa una nota de voz) */}
                       <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}
                         title="Adjuntar imagen, audio o documento"
-                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
+                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording || voicePreview ? 'hidden' : ''}`}>
                         {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
                       </button>
                       {/* Cámara: toma foto o graba video al momento y lo sube igual que un adjunto.
                           Dos inputs separados (foto/video) porque un solo input con accept
                           mezclado no abre la cámara de forma confiable en Android. */}
-                      <div className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
+                      <div className={`relative shrink-0 ${isRecording || voicePreview ? 'hidden' : ''}`}>
                         <button type="button" onClick={() => setShowCameraChoice(v => !v)} disabled={isUploading}
                           title="Cámara o galería"
                           className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors disabled:opacity-40">
@@ -1025,16 +1001,18 @@ export const ConversationsPageView = () => {
                               onClick={() => {
                                 debugAttach('VIDEO_CLICK');
                                 setShowCameraChoice(false);
-                                // Grabador propio (MP4/H.264, tamaño controlado) solo si el
-                                // dispositivo realmente puede producir ese formato — si no,
-                                // el flujo nativo de siempre (sin cambios).
-                                if (getSupportedVideoMimeType()) {
-                                  setShowVideoRecorder(true);
-                                } else {
-                                  debugAttach('VIDEO_RECORDER_FALLBACK_NATIVE', { reason: 'no_supported_mime_at_click' });
-                                  cameraVideoInputRef.current?.click();
-                                  debugAttach('VIDEO_INPUT_TRIGGERED');
-                                }
+                                // Grabador propio (VideoRecorderModal) desactivado: dos rondas de
+                                // QA física en Android confirmaron que el MP4 que produce el
+                                // MediaRecorder del navegador no tiene duración/metadata válida
+                                // (preview negro, 0:00) — no es un problema de qué candidato de
+                                // mimeType se pide, es el propio encoder/muxer de Android. El gate
+                                // de reproducibilidad lo bloquearía igual, así que en vez de
+                                // insistir se usa directo el flujo nativo de cámara del teléfono
+                                // (ya valida el límite de 16MB y da preview+enviar vía
+                                // addPendingMedia, igual que cualquier otro adjunto).
+                                debugAttach('VIDEO_RECORDER_FALLBACK_NATIVE', { reason: 'custom_recorder_disabled_unreliable_mp4' });
+                                cameraVideoInputRef.current?.click();
+                                debugAttach('VIDEO_INPUT_TRIGGERED');
                               }}
                               className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 border-t border-slate-100 dark:border-slate-700">
                               <Play className="w-3.5 h-3.5" /> Video
@@ -1053,35 +1031,30 @@ export const ConversationsPageView = () => {
                         )}
                       </div>
 
-                      {/* Área central: texto (reposo) · indicador de grabación */}
+                      {/* Área central: texto (reposo) · grabando · preview de nota de voz */}
                       <div className="flex-1 min-w-0">
                         {isRecording ? (
-                          isLocked ? (
-                            <div className="flex items-center gap-2 bg-rose-50 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900 rounded-2xl pl-2 pr-1.5 py-1.5">
-                              <button type="button" onClick={cancelRecording} title="Cancelar"
-                                className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-500 transition-colors shrink-0">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
-                              <span className="text-sm font-bold text-rose-600 tabular-nums flex-1">
-                                {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:{String(recordSeconds % 60).padStart(2, '0')}
-                              </span>
-                              <button type="button" onClick={finishRecordingAndSend} title="Enviar nota de voz"
-                                className="w-10 h-10 flex items-center justify-center bg-emerald-500 text-white rounded-2xl shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-all shrink-0">
-                                <Send className="w-4 h-4" />
-                              </button>
+                          <div className="flex items-center gap-2 bg-rose-50 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900 rounded-2xl pl-2 pr-3 py-1.5">
+                            <button type="button" onClick={cancelRecording} title="Cancelar"
+                              className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-500 transition-colors shrink-0">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                            <span className="text-sm font-bold text-rose-600 tabular-nums flex-1">
+                              {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:{String(recordSeconds % 60).padStart(2, '0')}
+                            </span>
+                            <span className="text-xs font-semibold text-rose-500/70 truncate">Tocá el mic para detener</span>
+                          </div>
+                        ) : voicePreview ? (
+                          <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl pl-1.5 pr-2 py-1.5">
+                            <button type="button" onClick={discardVoicePreview} title="Eliminar" disabled={isUploading}
+                              className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-500 transition-colors shrink-0 disabled:opacity-40">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <AudioMessagePlayer src={voicePreview.url} />
                             </div>
-                          ) : (
-                            <div className={`flex items-center gap-2 rounded-2xl px-4 py-3 select-none transition-colors ${slideCancel ? 'bg-rose-100 dark:bg-rose-900/40' : 'bg-rose-50 dark:bg-rose-950/30'}`}>
-                              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
-                              <span className="text-sm font-bold text-rose-600 tabular-nums">
-                                {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:{String(recordSeconds % 60).padStart(2, '0')}
-                              </span>
-                              <span className="text-xs font-semibold text-rose-500/80 truncate ml-1">
-                                {slideCancel ? 'Suelta para cancelar' : '‹ Desliza para cancelar · ↑ Bloquear'}
-                              </span>
-                            </div>
-                          )
+                          </div>
                         ) : (
                           <textarea
                             value={inputText}
@@ -1094,22 +1067,24 @@ export const ConversationsPageView = () => {
                         )}
                       </div>
 
-                      {/* Micrófono persistente — mantener para grabar (oculto en modo bloqueado) */}
-                      <button type="button"
-                        onPointerDown={onMicPointerDown}
-                        onPointerMove={onMicPointerMove}
-                        onPointerUp={onMicPointerUp}
-                        onPointerCancel={() => cancelRecording()}
-                        onContextMenu={e => e.preventDefault()}
-                        disabled={isUploading}
-                        title="Mantené presionado para grabar"
-                        style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}
-                        className={`flex items-center justify-center rounded-2xl transition-all shrink-0 disabled:opacity-40 ${isLocked ? 'hidden' : ''} ${isRecording ? 'w-12 h-12 bg-rose-500 text-white scale-110 shadow-lg shadow-rose-500/30' : 'w-9 h-9 bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/20'}`}>
-                        <Mic className="w-4 h-4" />
-                      </button>
+                      {/* Micrófono — un tap inicia, otro tap detiene (oculto mientras se revisa la nota) */}
+                      {!voicePreview && (
+                        <button type="button"
+                          onClick={handleMicTap}
+                          disabled={isUploading}
+                          title={isRecording ? 'Tocá para detener' : 'Tocá para grabar'}
+                          className={`flex items-center justify-center rounded-2xl transition-all shrink-0 disabled:opacity-40 ${isRecording ? 'w-12 h-12 bg-rose-500 text-white scale-110 shadow-lg shadow-rose-500/30' : 'w-9 h-9 bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/20'}`}>
+                          <Mic className="w-4 h-4" />
+                        </button>
+                      )}
 
-                      {/* Enviar texto (solo en reposo) */}
-                      {!isRecording && (
+                      {/* Enviar: texto (reposo) o nota de voz (preview) */}
+                      {voicePreview ? (
+                        <button type="button" onClick={confirmSendVoicePreview} disabled={isUploading} title="Enviar nota de voz"
+                          className="w-11 h-11 flex items-center justify-center bg-[#1877F2] text-white rounded-2xl shadow-lg shadow-[#1877F2]/20 hover:bg-blue-600 disabled:opacity-40 transition-all shrink-0">
+                          {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        </button>
+                      ) : !isRecording && (
                         <button type="submit"
                           disabled={(!inputText.trim() && !mediaUrl && pendingMedia.length === 0) || isSending || pendingMedia.some(m => m.status === 'uploading')}
                           title={pendingMedia.some(m => m.status === 'uploading') ? 'Esperando a que terminen de subir los adjuntos…' : undefined}
@@ -1155,22 +1130,6 @@ export const ConversationsPageView = () => {
           tenantId={activeMembership.tenantId}
         />
       )}
-      {showVideoRecorder && (
-        <VideoRecorderModal
-          onClose={() => setShowVideoRecorder(false)}
-          onVideoReady={(file) => {
-            setShowVideoRecorder(false);
-            // Mismo pipeline que Foto/Galería/Adjuntar: valida tamaño real,
-            // crea el preview local y sube — sin duplicar nada de eso acá.
-            addPendingMedia(file, 'VIDEO');
-          }}
-          onFallbackNative={() => {
-            setShowVideoRecorder(false);
-            cameraVideoInputRef.current?.click();
-          }}
-        />
-      )}
-
       {/* Catalog Drawer */}
       {showCatalogDrawer && (
         <div className="fixed inset-y-0 right-0 z-50 w-full max-w-sm bg-white dark:bg-slate-800 shadow-2xl border-l border-slate-200 dark:border-slate-700 flex flex-col">

@@ -38,9 +38,13 @@ check(
   !/galleryInputRef[\s\S]{0,300}capture=/.test(source.slice(source.indexOf('galleryInputRef'), source.indexOf('galleryInputRef') + 400))
 );
 
+// La grabación por tap (no por mantener presionado) reemplazó el gesto de
+// hold/slide — el invariante protegido es el mismo (no arrancar una
+// grabación "fantasma" si el usuario ya tocó "detener" mientras el permiso
+// de micrófono todavía estaba pendiente), ahora vía cancelPendingStartRef.
 check(
-  'startRecording cancela si el usuario ya soltó el dedo mientras esperaba el permiso de micrófono',
-  /if \(!recordStartRef\.current && !lockedRef\.current\)/.test(source)
+  'startRecording cancela si el usuario ya tocó "detener" mientras esperaba el permiso de micrófono',
+  /if \(cancelPendingStartRef\.current\)/.test(source)
 );
 
 // Los 4 <input type="file"> deben vivir como hijos directos del <form>, ANTES del bloque
