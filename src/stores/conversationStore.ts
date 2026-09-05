@@ -25,7 +25,7 @@ interface ConversationState {
     templateName?: string,
     languageCode?: string,
     components?: any[]
-  ) => Promise<void>;
+  ) => Promise<{ success: boolean; messageId?: string; status?: string; externalId?: string; errorMessage?: string | null } | undefined>;
   markAsRead: (conversationId: string) => Promise<void>;
   assignAgent: (conversationId: string, advisorId: string) => Promise<void>;
   toggleBot: (conversationId: string, enabled: boolean) => Promise<void>;
@@ -83,20 +83,26 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     );
   },
 
-  sendMessage: async (conversationId, text, sender, tenantId, mediaUrl, mediaFilename, templateName, languageCode, components) => {
+  sendMessage: async (conversationId, text, sender, tenantId, mediaUrl, mediaFilename, templateName, languageCode, components): Promise<{ success: boolean; messageId?: string; status?: string; externalId?: string; errorMessage?: string | null } | undefined> => {
     // Buscar la fuente en las conversaciones cargadas
     const { conversations } = useConversationStore.getState();
     const source = conversations.find(c => c.id === conversationId)?.source || 'whatsapp';
     
-    await ConversationService.sendMessage(
-      conversationId, 
-      text, 
-      sender, 
-      tenantId, 
-      mediaUrl, 
-      mediaFilename, 
-      templateName, 
-      languageCode, 
+    // Devuelve el resultado del callable (antes se descartaba) — para audio/imagen/
+    // documento nadie lo necesitaba, pero para video es la ÚNICA forma de saber si
+    // Meta rechazó el envío: sendWhatsappMessage NO tira excepción cuando Meta
+    // responde con error, solo devuelve { success: false, status: 'failed',
+    // errorMessage }. Sin este valor de retorno, ese caso queda indistinguible
+    // de un envío exitoso desde el frontend.
+    return await ConversationService.sendMessage(
+      conversationId,
+      text,
+      sender,
+      tenantId,
+      mediaUrl,
+      mediaFilename,
+      templateName,
+      languageCode,
       components,
       source
     );

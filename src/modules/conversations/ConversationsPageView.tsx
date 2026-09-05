@@ -110,15 +110,13 @@ export const ConversationsPageView = () => {
   const galleryInputRef                           = useRef<HTMLInputElement>(null);
 
   // Grabación de notas de voz por TAP (no mantener presionado, estilo WhatsApp
-  // actual): un toque inicia, otro detiene y pasa a una vista previa reproducible
-  // antes de enviar — igual que el patrón ya usado para video (grabar → preview →
-  // confirmar/regrabar), en vez del gesto de mantener+deslizar que tenía antes.
+  // actual): un toque inicia, el mismo botón cambia de Mic a Enviar mientras
+  // graba — un segundo tap detiene Y envía directo, sin paso de preview
+  // intermedio (el flujo ya es estable, no hace falta ese paso extra).
   const [isRecording, setIsRecording]   = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
-  const [voicePreview, setVoicePreview] = useState<{ url: string; file: File } | null>(null);
   const recorderRef                     = useRef<VoiceRecorder | null>(null);
   const recordTimerRef                  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const voicePreviewRef                 = useRef<{ url: string; file: File } | null>(null);
   // Evita que un segundo tap (querer "detener") dispare start() otra vez si el
   // primer tap todavía está esperando el permiso de micrófono (diálogo nativo).
   const isStartingRecorderRef           = useRef(false);
@@ -187,7 +185,28 @@ export const ConversationsPageView = () => {
         // siempre, uno por adjunto) — el texto escrito queda como caption del primero.
         let caption = cleanText;
         for (const item of readyItems) {
-          await sendMessage(activeConversation, caption, 'advisor', activeMembership.tenantId, item.remoteUrl, item.filename);
+          const isVideoItem = item.kind === 'video';
+          if (isVideoItem) {
+            debugAttach('VIDEO_SEND_REQUEST', {
+              conversationId: activeConversation, tenantId: activeMembership.tenantId,
+              mediaUrl: item.remoteUrl, mediaFilename: item.filename, caption,
+            });
+          }
+          // sendWhatsappMessage (Cloud Function) NO tira excepción cuando Meta
+          // rechaza el mensaje — atrapa el error de Meta internamente, guarda el
+          // mensaje en Firestore con status:'failed', y devuelve { success:false,
+          // status, errorMessage } con HTTP 200. Sin leer este valor de retorno
+          // (antes se descartaba, ver conversationStore.ts) un rechazo de Meta es
+          // indistinguible de un envío exitoso — exactamente el bug reportado de
+          // "video no envía" sin ningún error visible.
+          const result = await sendMessage(activeConversation, caption, 'advisor', activeMembership.tenantId, item.remoteUrl, item.filename);
+          if (isVideoItem) {
+            debugAttach('VIDEO_SEND_RESPONSE', result);
+            if (result && result.success === false) {
+              debugAttach('VIDEO_SEND_ERROR', { status: result.status, message: result.errorMessage });
+              addToast(`WhatsApp rechazó el video: ${result.errorMessage || 'error desconocido'}`, 'error');
+            }
+          }
           caption = '';
         }
         pendingMedia.forEach(m => URL.revokeObjectURL(m.localPreviewUrl));
@@ -293,17 +312,21 @@ export const ConversationsPageView = () => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const localPreviewUrl = URL.createObjectURL(file);
     setPendingMedia(prev => [...prev, { id, localPreviewUrl, filename: file.name, kind, status: 'uploading', remoteUrl: null }]);
+    if (kind === 'video') debugAttach('VIDEO_PENDING_ADDED', { id, name: file.name, sizeMB: +(file.size / 1048576).toFixed(2) });
 
     // Se devuelve la promesa (no se usa acá) para que el <input> pueda esperar a que el
     // archivo termine de leerse antes de resetear su value — limpiarlo antes puede invalidar
     // el File en algunos navegadores móviles (mismo cuidado que ya se aplicaba acá).
+    if (kind === 'video') debugAttach('VIDEO_UPLOAD_START', { id, name: file.name });
     return uploadToStorage(file)
       .then(url => {
         debugAttach(`${source}_ATTACHMENT_CREATED`, { url, name: file.name });
+        if (kind === 'video') debugAttach('VIDEO_UPLOAD_SUCCESS', { id, mediaUrl: url });
         setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'ready', remoteUrl: url } : m));
       })
       .catch(err => {
         debugAttach(`${source}_UPLOAD_ERROR`, err);
+        if (kind === 'video') debugAttach('VIDEO_UPLOAD_ERROR', { id, code: err?.code, message: err?.message });
         setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'error' } : m));
         addToast('Error al subir archivo', 'error');
       });
@@ -352,12 +375,12 @@ export const ConversationsPageView = () => {
       setIsRecording(true);
       // Tope de 3 min: ScriptProcessorNode acumula todo el audio crudo en memoria
       // (no hay streaming), así que una grabación muy larga puede volverse pesada
-      // y sentirse "colgada" en celulares de gama baja — se corta sola y pasa a preview.
+      // y sentirse "colgada" en celulares de gama baja — se corta sola y se envía.
       const MAX_RECORD_SECONDS = 180;
       recordTimerRef.current = setInterval(() => {
         setRecordSeconds(s => {
           if (s + 1 >= MAX_RECORD_SECONDS) {
-            stopRecordingToPreview();
+            stopAndSendRecording();
             return s;
           }
           return s + 1;
@@ -378,39 +401,22 @@ export const ConversationsPageView = () => {
     setRecordSeconds(0);
   };
 
-  const discardVoicePreview = () => {
-    if (voicePreviewRef.current) { URL.revokeObjectURL(voicePreviewRef.current.url); voicePreviewRef.current = null; }
-    setVoicePreview(null);
-  };
-
-  // Segundo tap: detiene y pasa a una vista previa reproducible — todavía NO
-  // sube ni envía nada (eso queda para "Enviar", igual que Regrabar/Usar video).
-  const stopRecordingToPreview = async () => {
+  // Segundo tap (el mismo botón, ya mostrando el ícono de Enviar): detiene el
+  // MediaRecorder, espera a que termine de construir el archivo, y lo sube y
+  // envía directo — sin paso de preview intermedio, el flujo ya es estable.
+  const stopAndSendRecording = async () => {
     if (!recorderRef.current) { cancelRecording(); return; }
     clearRecordTimer();
     const recorder = recorderRef.current;
     recorderRef.current = null;
     setIsRecording(false);
-    try {
-      const file = await recorder.stop();
-      if (file.size < 1200) { addToast('La nota de voz quedó muy corta.', 'info'); setRecordSeconds(0); return; }
-      const url = URL.createObjectURL(file);
-      voicePreviewRef.current = { url, file };
-      setVoicePreview({ url, file });
-    } catch {
-      addToast('Error al procesar la nota de voz.', 'error');
-      setRecordSeconds(0);
-    }
-  };
-
-  const confirmSendVoicePreview = async () => {
-    const preview = voicePreviewRef.current;
-    if (!preview || !activeConversation || !activeMembership?.tenantId) return;
+    if (!activeConversation || !activeMembership?.tenantId) { setRecordSeconds(0); return; }
     setIsUploading(true);
     try {
-      const url = await uploadToStorage(preview.file);
-      await sendMessage(activeConversation, '', 'advisor', activeMembership.tenantId, url, preview.file.name);
-      discardVoicePreview();
+      const file = await recorder.stop();
+      if (file.size < 1200) { addToast('La nota de voz quedó muy corta.', 'info'); return; }
+      const url = await uploadToStorage(file);
+      await sendMessage(activeConversation, '', 'advisor', activeMembership.tenantId, url, file.name);
     } catch {
       addToast('Error al enviar la nota de voz.', 'error');
     } finally {
@@ -419,21 +425,21 @@ export const ConversationsPageView = () => {
     }
   };
 
-  // Tap único en el botón de mic: inicia si está en reposo, detiene (a preview)
-  // si ya está grabando. Si el tap de "detener" llega mientras el permiso del
-  // micrófono todavía está pendiente, se marca para cancelar apenas resuelva.
+  // Tap único en el botón mic/enviar: inicia si está en reposo, detiene Y
+  // envía si ya está grabando. Si el tap de "enviar" llega mientras el
+  // permiso del micrófono todavía está pendiente, se marca para cancelar
+  // apenas resuelva (evita una grabación "fantasma").
   const handleMicTap = () => {
     if (isUploading) return;
-    if (isRecording) { stopRecordingToPreview(); return; }
+    if (isRecording) { stopAndSendRecording(); return; }
     if (isStartingRecorderRef.current) { cancelPendingStartRef.current = true; return; }
     startRecording();
   };
 
-  // Liberar el micrófono y la vista previa si el componente se desmonta
+  // Liberar el micrófono si el componente se desmonta mientras graba
   useEffect(() => () => {
     if (recordTimerRef.current) clearInterval(recordTimerRef.current);
     recorderRef.current?.cancel();
-    if (voicePreviewRef.current) URL.revokeObjectURL(voicePreviewRef.current.url);
   }, []);
 
   const getSourceIcon = (source: string) => {
@@ -947,7 +953,15 @@ export const ConversationsPageView = () => {
                           filesLength: files?.length ?? 0,
                           files: files ? Array.from(files).map(f => ({ name: f.name, type: f.type, size: f.size })) : [],
                         });
-                        if (files?.length) await handleFilesSelected(files, 'VIDEO');
+                        // Instrumentación temporal: primer eslabón de la cadena
+                        // "video no envía" — confirma qué entrega REALMENTE la
+                        // cámara nativa de Android antes de cualquier procesamiento propio.
+                        if (files?.length) {
+                          Array.from(files).forEach(f => debugAttach('VIDEO_NATIVE_CHANGE', {
+                            name: f.name, type: f.type, size: f.size, sizeMB: +(f.size / 1048576).toFixed(2),
+                          }));
+                          await handleFilesSelected(files, 'VIDEO');
+                        }
                         e.target.value = '';
                       }}
                     />
@@ -970,16 +984,16 @@ export const ConversationsPageView = () => {
                       }}
                     />
                     <div className="flex items-center gap-2">
-                      {/* Adjuntar (oculto mientras se graba o se revisa una nota de voz) */}
+                      {/* Adjuntar (oculto mientras se graba) */}
                       <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}
                         title="Adjuntar imagen, audio o documento"
-                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording || voicePreview ? 'hidden' : ''}`}>
+                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
                         {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
                       </button>
                       {/* Cámara: toma foto o graba video al momento y lo sube igual que un adjunto.
                           Dos inputs separados (foto/video) porque un solo input con accept
                           mezclado no abre la cámara de forma confiable en Android. */}
-                      <div className={`relative shrink-0 ${isRecording || voicePreview ? 'hidden' : ''}`}>
+                      <div className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
                         <button type="button" onClick={() => setShowCameraChoice(v => !v)} disabled={isUploading}
                           title="Cámara o galería"
                           className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors disabled:opacity-40">
@@ -1031,29 +1045,19 @@ export const ConversationsPageView = () => {
                         )}
                       </div>
 
-                      {/* Área central: texto (reposo) · grabando · preview de nota de voz */}
+                      {/* Área central: texto (reposo) · grabando */}
                       <div className="flex-1 min-w-0">
                         {isRecording ? (
                           <div className="flex items-center gap-2 bg-rose-50 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900 rounded-2xl pl-2 pr-3 py-1.5">
-                            <button type="button" onClick={cancelRecording} title="Cancelar"
-                              className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-500 transition-colors shrink-0">
+                            <button type="button" onClick={cancelRecording} title="Cancelar" disabled={isUploading}
+                              className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-500 transition-colors shrink-0 disabled:opacity-40">
                               <Trash2 className="w-4 h-4" />
                             </button>
                             <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
                             <span className="text-sm font-bold text-rose-600 tabular-nums flex-1">
                               {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:{String(recordSeconds % 60).padStart(2, '0')}
                             </span>
-                            <span className="text-xs font-semibold text-rose-500/70 truncate">Tocá el mic para detener</span>
-                          </div>
-                        ) : voicePreview ? (
-                          <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl pl-1.5 pr-2 py-1.5">
-                            <button type="button" onClick={discardVoicePreview} title="Eliminar" disabled={isUploading}
-                              className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-500 transition-colors shrink-0 disabled:opacity-40">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                            <div className="flex-1 min-w-0">
-                              <AudioMessagePlayer src={voicePreview.url} />
-                            </div>
+                            <span className="text-xs font-semibold text-rose-500/70 truncate">Tocá enviar para mandar</span>
                           </div>
                         ) : (
                           <textarea
@@ -1067,24 +1071,19 @@ export const ConversationsPageView = () => {
                         )}
                       </div>
 
-                      {/* Micrófono — un tap inicia, otro tap detiene (oculto mientras se revisa la nota) */}
-                      {!voicePreview && (
-                        <button type="button"
-                          onClick={handleMicTap}
-                          disabled={isUploading}
-                          title={isRecording ? 'Tocá para detener' : 'Tocá para grabar'}
-                          className={`flex items-center justify-center rounded-2xl transition-all shrink-0 disabled:opacity-40 ${isRecording ? 'w-12 h-12 bg-rose-500 text-white scale-110 shadow-lg shadow-rose-500/30' : 'w-9 h-9 bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/20'}`}>
-                          <Mic className="w-4 h-4" />
-                        </button>
-                      )}
+                      {/* Mic/Enviar unificado: en reposo muestra Mic (tap inicia), grabando
+                          cambia AL INSTANTE a Enviar (mismo botón, tap detiene y envía directo,
+                          sin preview intermedio) — Cancelar arriba es la acción secundaria. */}
+                      <button type="button"
+                        onClick={handleMicTap}
+                        disabled={isUploading}
+                        title={isUploading ? 'Enviando…' : isRecording ? 'Enviar nota de voz' : 'Tocá para grabar'}
+                        className={`flex items-center justify-center rounded-2xl transition-all shrink-0 disabled:opacity-40 ${isRecording ? 'w-12 h-12 bg-emerald-500 text-white scale-110 shadow-lg shadow-emerald-500/30' : 'w-9 h-9 bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/20'}`}>
+                        {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : isRecording ? <Send className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                      </button>
 
-                      {/* Enviar: texto (reposo) o nota de voz (preview) */}
-                      {voicePreview ? (
-                        <button type="button" onClick={confirmSendVoicePreview} disabled={isUploading} title="Enviar nota de voz"
-                          className="w-11 h-11 flex items-center justify-center bg-[#1877F2] text-white rounded-2xl shadow-lg shadow-[#1877F2]/20 hover:bg-blue-600 disabled:opacity-40 transition-all shrink-0">
-                          {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                        </button>
-                      ) : !isRecording && (
+                      {/* Enviar texto (solo en reposo — mientras graba, el botón de arriba ya es Enviar) */}
+                      {!isRecording && (
                         <button type="submit"
                           disabled={(!inputText.trim() && !mediaUrl && pendingMedia.length === 0) || isSending || pendingMedia.some(m => m.status === 'uploading')}
                           title={pendingMedia.some(m => m.status === 'uploading') ? 'Esperando a que terminen de subir los adjuntos…' : undefined}

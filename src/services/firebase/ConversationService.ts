@@ -84,7 +84,7 @@ export class ConversationService {
     languageCode?: string,
     components?: any[],
     source: string = 'whatsapp'
-  ) {
+  ): Promise<{ success: boolean; messageId?: string; status?: string; externalId?: string; errorMessage?: string | null } | undefined> {
     if (sender === 'lead') {
       const batch = writeBatch(db);
       const msgRef = doc(collection(db, this.collectionName, conversationId, 'messages'));
@@ -127,7 +127,7 @@ export class ConversationService {
       ...(components && { components })
     });
 
-    return result.data;
+    return result.data as { success: boolean; messageId?: string; status?: string; externalId?: string; errorMessage?: string | null };
   }
 
   static async markAsRead(conversationId: string) {

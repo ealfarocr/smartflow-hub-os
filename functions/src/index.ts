@@ -1748,7 +1748,12 @@ export const sendWhatsappMessage = onCall({
     });
   });
 
-  return { success: status === 'sent', messageId: msgRef.id, status, externalId };
+  // errorMessage se incluye acá porque antes solo se guardaba en Firestore —
+  // el frontend no tenía forma de mostrar el error REAL de Meta al que falla
+  // (esta función nunca tira excepción cuando Meta rechaza el mensaje, solo
+  // devuelve success:false), así que sin este campo el llamador no puede
+  // saber POR QUÉ falló, solo que falló.
+  return { success: status === 'sent', messageId: msgRef.id, status, externalId, errorMessage: status === 'failed' ? errorMessage : null };
 });
 
 /**
