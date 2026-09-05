@@ -86,6 +86,23 @@ export const ConversationsPageView = () => {
   const [catalogSearch, setCatalogSearch]         = useState('');
   const [selectedCatalogItemForPayment, setSelectedCatalogItemForPayment] = useState<CatalogItem | null>(null);
   const [isUploading, setIsUploading]             = useState(false);
+  // Adjuntos múltiples del composer (Adjuntar/Galería/Foto/Video): preview local instantánea
+  // (URL.createObjectURL, antes de que termine de subir) + estado por ítem, para que la UI
+  // responda al toque de inmediato en vez de esperar la subida completa. No reemplaza el
+  // mediaUrl/mediaFilename "legacy" (nota de voz, catálogo, borrador por query param), que
+  // sigue funcionando exactamente igual.
+  type PendingMediaKind = 'image' | 'video' | 'audio' | 'document';
+  type PendingMediaItem = {
+    id: string;
+    localPreviewUrl: string;
+    filename: string;
+    kind: PendingMediaKind;
+    status: 'uploading' | 'ready' | 'error';
+    remoteUrl: string | null;
+  };
+  const [pendingMedia, setPendingMedia] = useState<PendingMediaItem[]>([]);
+  const pendingMediaRef = useRef<PendingMediaItem[]>([]);
+  useEffect(() => { pendingMediaRef.current = pendingMedia; }, [pendingMedia]);
   const fileInputRef                              = useRef<HTMLInputElement>(null);
   const cameraInputRef                            = useRef<HTMLInputElement>(null);
   const cameraVideoInputRef                       = useRef<HTMLInputElement>(null);
@@ -149,10 +166,33 @@ export const ConversationsPageView = () => {
     e.preventDefault();
     if (!activeConversation || !activeMembership?.tenantId || isSending) return;
     const cleanText = inputText.replace(/[​-‍﻿]/g, '').replace(/\r\n/g, '\n').trim();
-    if (!cleanText && !mediaUrl) return;
+    const hasPending = pendingMedia.length > 0;
+    if (!cleanText && !mediaUrl && !hasPending) return;
+    if (hasPending && pendingMedia.some(m => m.status === 'uploading')) return; // el botón ya queda disabled en este caso
+    const readyItems = hasPending ? pendingMedia.filter(m => m.status === 'ready' && m.remoteUrl) : [];
+    if (hasPending && readyItems.length === 0 && !cleanText) {
+      addToast('Todos los adjuntos tienen error. Quitalos o reintentá.', 'error');
+      return;
+    }
     setIsSending(true);
     try {
-      await sendMessage(activeConversation, cleanText, 'advisor', activeMembership.tenantId, mediaUrl, mediaFilename);
+      if (hasPending) {
+        // Cada imagen/video pendiente se envía como su propio mensaje (mismo sendMessage de
+        // siempre, uno por adjunto) — el texto escrito queda como caption del primero.
+        let caption = cleanText;
+        for (const item of readyItems) {
+          await sendMessage(activeConversation, caption, 'advisor', activeMembership.tenantId, item.remoteUrl, item.filename);
+          caption = '';
+        }
+        pendingMedia.forEach(m => URL.revokeObjectURL(m.localPreviewUrl));
+        setPendingMedia([]);
+        if (!readyItems.length && cleanText) {
+          // No había adjuntos listos (todos con error) pero sí texto: igual se envía el texto solo.
+          await sendMessage(activeConversation, cleanText, 'advisor', activeMembership.tenantId, null, null);
+        }
+      } else {
+        await sendMessage(activeConversation, cleanText, 'advisor', activeMembership.tenantId, mediaUrl, mediaFilename);
+      }
       setInputText(''); setMediaUrl(null); setMediaFilename(null);
     } catch { addToast('Error al enviar mensaje', 'error'); }
     finally { setIsSending(false); }
@@ -182,32 +222,84 @@ export const ConversationsPageView = () => {
     console.log(`[ATTACH] ${tag}`, data ?? '');
   };
 
-  const handleFileUpload = async (file: File, source: 'PHOTO' | 'VIDEO' | 'GALLERY' | 'ATTACH' = 'ATTACH') => {
+  // Clasifica el archivo por tipo real (MIME primero, extensión como respaldo) y aplica el
+  // límite de WhatsApp Cloud API que corresponde a ESE tipo — no un único límite de 16MB
+  // para todo. Antes, una imagen pesada (muy común en fotos de celular modernas) no
+  // disparaba ninguna advertencia porque 16MB es el límite de video/audio, no el de imagen
+  // (5MB) — y el mensaje de "para video" nunca debía aparecer fuera de un video, cosa que
+  // ya no puede pasar: el texto ahora se arma con el tipo real detectado, no con un ternario
+  // aparte. Límites verificados contra la documentación de Meta al momento de este cambio —
+  // revisar si Meta los actualiza.
+  const classifyFile = (file: File): PendingMediaKind => {
+    if (file.type.startsWith('video/') || /\.(mp4|mov|3gp|webm)$/i.test(file.name)) return 'video';
+    if (file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(file.name)) return 'image';
+    if (file.type.startsWith('audio/') || /\.(ogg|mp3|m4a|aac|wav|opus)$/i.test(file.name)) return 'audio';
+    return 'document';
+  };
+  const MEDIA_SIZE_LIMITS: Record<PendingMediaKind, number> = {
+    image: 5 * 1024 * 1024,
+    video: 16 * 1024 * 1024,
+    audio: 16 * 1024 * 1024,
+    document: 100 * 1024 * 1024,
+  };
+  const MEDIA_KIND_LABEL: Record<PendingMediaKind, string> = {
+    image: 'imagen', video: 'video', audio: 'audio', document: 'documento',
+  };
+
+  // Agrega un archivo al composer con preview local instantánea (URL.createObjectURL, se ve
+  // de inmediato) y sube en segundo plano — la UI nunca espera a que termine la subida para
+  // reaccionar al toque del usuario. Cada ítem trackea su propio estado (uploading/ready/error).
+  const addPendingMedia = (file: File, source: 'PHOTO' | 'VIDEO' | 'GALLERY' | 'ATTACH') => {
     debugAttach(`${source}_FILE_RECEIVED`, { name: file.name, size: file.size, type: file.type });
     if (!activeMembership?.tenantId) {
       debugAttach(`${source}_ABORTED_NO_TENANT`);
       return;
     }
-    // WhatsApp acepta video/documento hasta 16MB. Evita subir algo que luego rechaza.
-    const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|3gp|webm)$/i.test(file.name);
-    if (file.size > 16 * 1024 * 1024) {
-      debugAttach(`${source}_REJECTED_TOO_LARGE`, { size: file.size });
-      addToast(`El archivo pesa ${(file.size / 1048576).toFixed(1)}MB. WhatsApp acepta máximo 16MB${isVideo ? ' para video' : ''}.`, 'error');
+    const kind = classifyFile(file);
+    const limit = MEDIA_SIZE_LIMITS[kind];
+    if (file.size > limit) {
+      debugAttach(`${source}_REJECTED_TOO_LARGE`, { size: file.size, kind });
+      addToast(`El archivo pesa ${(file.size / 1048576).toFixed(1)}MB. WhatsApp acepta máximo ${(limit / 1048576).toFixed(0)}MB para ${MEDIA_KIND_LABEL[kind]}.`, 'error');
       return;
     }
-    setIsUploading(true);
-    try {
-      const url = await uploadToStorage(file);
-      setMediaUrl(url);
-      setMediaFilename(file.name);
-      debugAttach(`${source}_ATTACHMENT_CREATED`, { url, name: file.name });
-    } catch (err) {
-      debugAttach(`${source}_UPLOAD_ERROR`, err);
-      addToast('Error al subir archivo', 'error');
-    } finally {
-      setIsUploading(false);
-    }
+
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const localPreviewUrl = URL.createObjectURL(file);
+    setPendingMedia(prev => [...prev, { id, localPreviewUrl, filename: file.name, kind, status: 'uploading', remoteUrl: null }]);
+
+    // Se devuelve la promesa (no se usa acá) para que el <input> pueda esperar a que el
+    // archivo termine de leerse antes de resetear su value — limpiarlo antes puede invalidar
+    // el File en algunos navegadores móviles (mismo cuidado que ya se aplicaba acá).
+    return uploadToStorage(file)
+      .then(url => {
+        debugAttach(`${source}_ATTACHMENT_CREATED`, { url, name: file.name });
+        setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'ready', remoteUrl: url } : m));
+      })
+      .catch(err => {
+        debugAttach(`${source}_UPLOAD_ERROR`, err);
+        setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'error' } : m));
+        addToast('Error al subir archivo', 'error');
+      });
   };
+
+  const handleFilesSelected = (fileList: FileList, source: 'PHOTO' | 'VIDEO' | 'GALLERY' | 'ATTACH') => {
+    return Promise.all(Array.from(fileList).map(file => addPendingMedia(file, source)));
+  };
+
+  const removePendingMedia = (id: string) => {
+    setPendingMedia(prev => {
+      const item = prev.find(m => m.id === id);
+      if (item) URL.revokeObjectURL(item.localPreviewUrl);
+      return prev.filter(m => m.id !== id);
+    });
+  };
+
+  // Liberar los blob: URL de preview local al desmontar (cambio de conversación con
+  // adjuntos pendientes sin enviar) — usa el ref, no el closure de este render, para no
+  // liberar siempre el array vacío del primer render.
+  useEffect(() => () => {
+    pendingMediaRef.current.forEach(m => URL.revokeObjectURL(m.localPreviewUrl));
+  }, []);
 
   // ── Grabación estilo WhatsApp ──────────────────────────────
   const clearRecordTimer = () => {
@@ -364,7 +456,7 @@ export const ConversationsPageView = () => {
   );
 
   return (
-    <div className="h-[calc(100dvh-4rem)] md:h-[calc(100vh-8rem)] flex overflow-hidden rounded-2xl shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+    <div className="h-full md:h-[calc(100vh-8rem)] flex overflow-hidden rounded-2xl shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
 
       {/* ── Sidebar ── */}
       <div className={`${activeChat ? 'hidden md:flex' : 'flex'} w-full md:w-72 flex-col border-r border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900`}>
@@ -568,7 +660,7 @@ export const ConversationsPageView = () => {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-3 md:px-6 py-4 space-y-3 scrollbar-hide">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 md:px-6 py-4 space-y-3 scrollbar-hide">
               {activeMessages.map(msg => (
                 <div key={msg.id} className={`flex flex-col ${msg.sender === 'advisor' ? 'items-end' : 'items-start'}`}>
                   <div className={`max-w-[85%] md:max-w-[72%] rounded-2xl px-3 md:px-4 py-3 shadow-sm ${
@@ -621,7 +713,7 @@ export const ConversationsPageView = () => {
                       </div>
                     ) : null}
                     {(msg.type !== 'audio' || !msg.mediaUrl) && (
-                      <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
                         {msg.text?.replace(/^\[Imagen Enviada\]\n/, '').replace(/^\[Documento Enviado:.*?\]\n/, '').replace(/^\[Error al enviar.*?\]\n/, '')}
                       </p>
                     )}
@@ -772,6 +864,40 @@ export const ConversationsPageView = () => {
                   </div>
                 ) : (
                   <form onSubmit={handleSendMessage}>
+                    {/* Previews múltiples (Adjuntar/Galería/Foto/Video) — preview local instantánea,
+                        cada ítem muestra su propio estado de subida y se puede quitar individualmente.
+                        Scroll horizontal encapsulado a esta franja, nunca a la página. */}
+                    {pendingMedia.length > 0 && (
+                      <div className="flex items-center gap-2 mb-2 overflow-x-auto pb-1 -mx-1 px-1">
+                        {pendingMedia.map(item => (
+                          <div key={item.id} className="relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-900">
+                            {item.kind === 'image' ? (
+                              <img src={item.localPreviewUrl} alt="" className="w-full h-full object-cover" />
+                            ) : item.kind === 'video' ? (
+                              <video src={item.localPreviewUrl} muted className="w-full h-full object-cover" />
+                            ) : item.kind === 'audio' ? (
+                              <div className="w-full h-full flex items-center justify-center"><Mic className="w-5 h-5 text-slate-400" /></div>
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center"><FileText className="w-5 h-5 text-slate-400" /></div>
+                            )}
+                            {item.status === 'uploading' && (
+                              <div className="absolute inset-0 bg-black/45 flex items-center justify-center">
+                                <Loader2 className="w-4 h-4 text-white animate-spin" />
+                              </div>
+                            )}
+                            {item.status === 'error' && (
+                              <div className="absolute inset-0 bg-red-500/70 flex items-center justify-center">
+                                <AlertCircle className="w-4 h-4 text-white" />
+                              </div>
+                            )}
+                            <button type="button" onClick={() => removePendingMedia(item.id)} title="Quitar"
+                              className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/60 hover:bg-black/80 rounded-full flex items-center justify-center transition-colors">
+                              <X className="w-2.5 h-2.5 text-white" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {mediaUrl && (
                       <div className="flex items-center gap-2.5 p-2.5 bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 rounded-xl mb-2 relative max-w-sm">
                         {/\.(jpg|jpeg|png|webp|gif)($|\?)/i.test(mediaUrl) ? (
@@ -791,20 +917,19 @@ export const ConversationsPageView = () => {
                     <input
                       ref={fileInputRef}
                       type="file"
+                      multiple
                       accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.mp4,.mov,.3gp,.ogg,.mp3,.m4a,.aac,.wav,.opus"
                       className="hidden"
                       onChange={async e => {
-                        const f = e.target.files?.[0];
-                        // Ojo: el reset de e.target.value se hace DESPUÉS de procesar el
-                        // archivo (no antes) — limpiarlo antes de terminar de leerlo puede
-                        // invalidar el File en algunos navegadores móviles.
-                        if (f) await handleFileUpload(f, 'ATTACH');
+                        const files = e.target.files;
+                        if (files?.length) await handleFilesSelected(files, 'ATTACH');
                         e.target.value = '';
                       }}
                     />
                     {/* capture="environment" abre la camara directo en celular, no la galeria.
                         accept mezclado "image/*,video/*" no abre la camara en varios navegadores
-                        de Android — un solo tipo por input es lo confiable. */}
+                        de Android — un solo tipo por input es lo confiable. Sin "multiple": una
+                        captura de cámara siempre es una sola foto/video por naturaleza. */}
                     <input
                       ref={cameraInputRef}
                       type="file"
@@ -813,8 +938,8 @@ export const ConversationsPageView = () => {
                       className="hidden"
                       onChange={async e => {
                         debugAttach('PHOTO_CHANGE', { filesLength: e.target.files?.length ?? 0 });
-                        const f = e.target.files?.[0];
-                        if (f) await handleFileUpload(f, 'PHOTO');
+                        const files = e.target.files;
+                        if (files?.length) await handleFilesSelected(files, 'PHOTO');
                         e.target.value = '';
                       }}
                     />
@@ -826,24 +951,26 @@ export const ConversationsPageView = () => {
                       className="hidden"
                       onChange={async e => {
                         debugAttach('VIDEO_CHANGE', { filesLength: e.target.files?.length ?? 0 });
-                        const f = e.target.files?.[0];
-                        if (f) await handleFileUpload(f, 'VIDEO');
+                        const files = e.target.files;
+                        if (files?.length) await handleFilesSelected(files, 'VIDEO');
                         e.target.value = '';
                       }}
                     />
                     {/* Galería: sin "capture", así el navegador abre el selector de fotos/videos
                         del teléfono en vez de la cámara. Input separado del de "Adjuntar" (que
                         acepta también audio/documentos) para que el punto de entrada quede
-                        claro junto a Foto/Video en el mismo menú. */}
+                        claro junto a Foto/Video en el mismo menú. "multiple": selección de
+                        varias imágenes/videos de una sola vez. */}
                     <input
                       ref={galleryInputRef}
                       type="file"
+                      multiple
                       accept="image/*,video/*"
                       className="hidden"
                       onChange={async e => {
                         debugAttach('GALLERY_CHANGE', { filesLength: e.target.files?.length ?? 0 });
-                        const f = e.target.files?.[0];
-                        if (f) await handleFileUpload(f, 'GALLERY');
+                        const files = e.target.files;
+                        if (files?.length) await handleFilesSelected(files, 'GALLERY');
                         e.target.value = '';
                       }}
                     />
@@ -956,9 +1083,11 @@ export const ConversationsPageView = () => {
 
                       {/* Enviar texto (solo en reposo) */}
                       {!isRecording && (
-                        <button type="submit" disabled={(!inputText.trim() && !mediaUrl) || isSending}
+                        <button type="submit"
+                          disabled={(!inputText.trim() && !mediaUrl && pendingMedia.length === 0) || isSending || pendingMedia.some(m => m.status === 'uploading')}
+                          title={pendingMedia.some(m => m.status === 'uploading') ? 'Esperando a que terminen de subir los adjuntos…' : undefined}
                           className="w-11 h-11 flex items-center justify-center bg-[#1877F2] text-white rounded-2xl shadow-lg shadow-[#1877F2]/20 hover:bg-blue-600 disabled:opacity-40 transition-all shrink-0">
-                          {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                          {isSending || pendingMedia.some(m => m.status === 'uploading') ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                         </button>
                       )}
                     </div>

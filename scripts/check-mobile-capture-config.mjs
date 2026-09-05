@@ -57,17 +57,19 @@ check(
   idxCameraInput < idxDropdownBlock && idxGalleryInput < idxDropdownBlock && idxVideoInput < idxDropdownBlock
 );
 
-// El reset de e.target.value debe ocurrir DESPUÉS de esperar handleFileUpload, no antes —
+// El reset de e.target.value debe ocurrir DESPUÉS de esperar handleFilesSelected, no antes —
 // limpiarlo antes de terminar de leer el archivo puede invalidar el File en algunos
 // navegadores móviles (Android/iOS) y el archivo nunca llega al composer del chat.
+// (handleFileUpload de un solo archivo fue reemplazado por handleFilesSelected para
+// soportar selección múltiple; el invariante que este check protege es el mismo.)
 for (const [label, ref] of [['Foto', 'cameraInputRef'], ['Video', 'cameraVideoInputRef'], ['Galería', 'galleryInputRef'], ['Adjuntar', 'fileInputRef']]) {
   const inputBlockStart = source.indexOf(`ref={${ref}}`);
   const inputBlockEnd = source.indexOf('/>', inputBlockStart);
   const block = source.slice(inputBlockStart, inputBlockEnd);
-  const awaitIdx = block.indexOf('await handleFileUpload');
+  const awaitIdx = block.indexOf('await handleFilesSelected');
   const resetIdx = block.indexOf("e.target.value = ''");
   check(
-    `Input "${label}": el reset de e.target.value ocurre después de "await handleFileUpload"`,
+    `Input "${label}": el reset de e.target.value ocurre después de "await handleFilesSelected"`,
     awaitIdx > -1 && resetIdx > -1 && awaitIdx < resetIdx
   );
 }
@@ -81,7 +83,7 @@ for (const tag of [
   check(`Log de instrumentación presente: ${tag}`, source.includes(`'${tag}'`));
 }
 check(
-  'handleFileUpload registra FILE_RECEIVED y ATTACHMENT_CREATED/UPLOAD_ERROR por origen (PHOTO/VIDEO/GALLERY/ATTACH)',
+  'addPendingMedia registra FILE_RECEIVED y ATTACHMENT_CREATED/UPLOAD_ERROR por origen (PHOTO/VIDEO/GALLERY/ATTACH)',
   /debugAttach\(`\$\{source\}_FILE_RECEIVED`/.test(source) &&
   /debugAttach\(`\$\{source\}_ATTACHMENT_CREATED`/.test(source)
 );
