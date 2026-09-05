@@ -628,6 +628,13 @@ export const CRMPageView = () => {
                         <span className="truncate">{agents.find(a => a.id === lead.advisorId)?.name || 'Sin asesor'}</span>
                         <span className="shrink-0">{formatLeadActivity(lead.lastActivity)}</span>
                       </div>
+                      {/* Shortcut de descubrimiento: mismo sheet/estado de "Mover a...", solo salta directo al modo move */}
+                      <button
+                        onClick={e => { e.stopPropagation(); setActionSheetLead(lead); setSheetMode('move'); }}
+                        className="mt-1 flex items-center gap-1 text-[11px] font-bold text-[#1877F2] dark:text-primary-400"
+                      >
+                        Mover <ArrowRight className="w-3 h-3" />
+                      </button>
                     </div>
                   );
                 })
