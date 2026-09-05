@@ -30,6 +30,7 @@ import { WhatsappConnectionModal } from './WhatsappConnectionModal';
 import { CatalogService } from '@/services/firebase/CatalogService';
 import { VideoRecorderModal } from './components/VideoRecorderModal';
 import { getSupportedVideoMimeType } from './components/videoMime';
+import { AudioMessagePlayer } from './components/AudioMessagePlayer';
 
 // Hoy: solo hora (como antes). Otro día: día + mes + hora, para no confundir
 // mensajes de distintos días cuando solo se mostraba la hora.
@@ -695,16 +696,7 @@ export const ConversationsPageView = () => {
                     {msg.type === 'audio' ? (
                       msg.mediaUrl ? (
                         <div className="mb-1 w-full">
-                          <audio controls preload="metadata" className="w-full rounded-xl" style={{ height: '42px' }}>
-                            <source src={msg.mediaUrl} type="audio/ogg; codecs=opus" />
-                            <source src={msg.mediaUrl} type="audio/mp4" />
-                            <source src={msg.mediaUrl} type="audio/mpeg" />
-                            <source src={msg.mediaUrl} />
-                          </audio>
-                          <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1 mt-1 text-[10px] text-slate-400 hover:text-[#1877F2] transition-colors">
-                            <Download className="w-3 h-3" /> Descargar audio
-                          </a>
+                          <AudioMessagePlayer src={msg.mediaUrl} />
                         </div>
                       ) : (
                         <div className="mb-1 flex items-center gap-2 bg-slate-100 dark:bg-slate-700 rounded-xl px-3 py-2 min-w-[160px]">
