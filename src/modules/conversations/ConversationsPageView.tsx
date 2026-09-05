@@ -28,6 +28,8 @@ import { useUIStore } from '@/stores/uiStore';
 import { TenantService } from '@/services/firebase/TenantService';
 import { WhatsappConnectionModal } from './WhatsappConnectionModal';
 import { CatalogService } from '@/services/firebase/CatalogService';
+import { VideoRecorderModal } from './components/VideoRecorderModal';
+import { getSupportedVideoMimeType } from './components/videoMime';
 
 // Hoy: solo hora (como antes). Otro día: día + mes + hora, para no confundir
 // mensajes de distintos días cuando solo se mostraba la hora.
@@ -49,6 +51,7 @@ export const ConversationsPageView = () => {
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
   const [showToolsPanel, setShowToolsPanel] = useState(false);
   const [showCameraChoice, setShowCameraChoice] = useState(false);
+  const [showVideoRecorder, setShowVideoRecorder] = useState(false);
   const { addToast } = useUIStore();
 
   const [inputText, setInputText]   = useState('');
@@ -257,6 +260,27 @@ export const ConversationsPageView = () => {
     }
     const kind = classifyFile(file);
     const limit = MEDIA_SIZE_LIMITS[kind];
+    // Instrumentación TEMPORAL solo-video: el reporte es que un video corto (10-20s) sigue
+    // disparando el mensaje de límite. classifyFile() ya cubre video/mp4|quicktime|3gpp|webm
+    // (vía startsWith('video/'), cualquier subtipo cae ahí) y usa extensión como respaldo, así
+    // que si esto dispara con kind !== 'video' para un archivo que el usuario grabó como video,
+    // el bug está en la clasificación (MIME vacío/genérico + nombre sin extensión reconocida).
+    // Si kind === 'video' pero size > limit, el archivo real excede el límite (confirmar con
+    // sizeMB de acá) — no asumir, mirar el dato real que reporta el dispositivo.
+    if (kind === 'video' || source === 'VIDEO') {
+      const extMatch = file.name.match(/\.[^./\\]+$/);
+      debugAttach('VIDEO_FILE_META', {
+        name: file.name,
+        type: file.type || '(vacío)',
+        size: file.size,
+        sizeMB: +(file.size / 1048576).toFixed(2),
+        extension: extMatch ? extMatch[0].toLowerCase() : '(sin extensión)',
+        classifyFileResult: kind,
+        selectedLimitMB: limit / 1048576,
+        source,
+        origin: source === 'VIDEO' ? 'camera' : source === 'GALLERY' ? 'gallery' : source,
+      });
+    }
     if (file.size > limit) {
       debugAttach(`${source}_REJECTED_TOO_LARGE`, { size: file.size, kind });
       addToast(`El archivo pesa ${(file.size / 1048576).toFixed(1)}MB. WhatsApp acepta máximo ${(limit / 1048576).toFixed(0)}MB para ${MEDIA_KIND_LABEL[kind]}.`, 'error');
@@ -950,8 +974,11 @@ export const ConversationsPageView = () => {
                       capture="environment"
                       className="hidden"
                       onChange={async e => {
-                        debugAttach('VIDEO_CHANGE', { filesLength: e.target.files?.length ?? 0 });
                         const files = e.target.files;
+                        debugAttach('VIDEO_CHANGE', {
+                          filesLength: files?.length ?? 0,
+                          files: files ? Array.from(files).map(f => ({ name: f.name, type: f.type, size: f.size })) : [],
+                        });
                         if (files?.length) await handleFilesSelected(files, 'VIDEO');
                         e.target.value = '';
                       }}
@@ -1006,8 +1033,16 @@ export const ConversationsPageView = () => {
                               onClick={() => {
                                 debugAttach('VIDEO_CLICK');
                                 setShowCameraChoice(false);
-                                cameraVideoInputRef.current?.click();
-                                debugAttach('VIDEO_INPUT_TRIGGERED');
+                                // Grabador propio (MP4/H.264, tamaño controlado) solo si el
+                                // dispositivo realmente puede producir ese formato — si no,
+                                // el flujo nativo de siempre (sin cambios).
+                                if (getSupportedVideoMimeType()) {
+                                  setShowVideoRecorder(true);
+                                } else {
+                                  debugAttach('VIDEO_RECORDER_FALLBACK_NATIVE', { reason: 'no_supported_mime_at_click' });
+                                  cameraVideoInputRef.current?.click();
+                                  debugAttach('VIDEO_INPUT_TRIGGERED');
+                                }
                               }}
                               className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 border-t border-slate-100 dark:border-slate-700">
                               <Play className="w-3.5 h-3.5" /> Video
@@ -1126,6 +1161,21 @@ export const ConversationsPageView = () => {
         <WhatsappConnectionModal
           onClose={() => setShowConnectionModal(false)}
           tenantId={activeMembership.tenantId}
+        />
+      )}
+      {showVideoRecorder && (
+        <VideoRecorderModal
+          onClose={() => setShowVideoRecorder(false)}
+          onVideoReady={(file) => {
+            setShowVideoRecorder(false);
+            // Mismo pipeline que Foto/Galería/Adjuntar: valida tamaño real,
+            // crea el preview local y sube — sin duplicar nada de eso acá.
+            addPendingMedia(file, 'VIDEO');
+          }}
+          onFallbackNative={() => {
+            setShowVideoRecorder(false);
+            cameraVideoInputRef.current?.click();
+          }}
         />
       )}
 
