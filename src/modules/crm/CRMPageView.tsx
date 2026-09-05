@@ -7,7 +7,7 @@ import {
   MessageCircle, Calendar, Edit2, Trash2, Filter, Search,
   MessageSquare, GitMerge, X, Save, Sparkles, ArrowRight, MoreVertical, ChevronLeft, ChevronRight, Circle, CheckCircle2
 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -62,7 +62,116 @@ export const CRMPageView = () => {
 
   // Etapas dinámicas desde los settings del tenant, ordenadas por orden
   const stages = (pipeline?.stages ?? []).slice().sort((a, b) => a.order - b.order);
-  
+
+  // Drag táctil mobile: agarrar una tarjeta y arrastrarla lateralmente hacia el selector
+  // de etapas. Gesto local con Pointer Events (mismo mecanismo que ya usa el mic de
+  // ConversationsPageView), sin librería nueva — @hello-pangea/dnd (el DnD del Kanban
+  // desktop) exige que todos los Droppable estén montados y visibles a la vez para su
+  // detección de colisión; acá solo una etapa está montada por vez (por diseño, para no
+  // volver al Kanban), así que no aplica sin forzar montar columnas ocultas. Al soltar,
+  // llama exactamente a handleChangeLeadStage — cero lógica de pipeline nueva.
+  const [dragLead, setDragLead] = useState<Lead | null>(null);
+  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
+  const [dragTargetStageId, setDragTargetStageId] = useState<string | null>(null);
+  const dragLeadRef = useRef<Lead | null>(null);
+  const dragStartXRef = useRef(0);
+  const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chipRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // Referencia exacta de los listeners realmente adjuntos en window — para poder limpiarlos
+  // por identidad (no por closure de render) tanto al soltar normalmente como si el
+  // componente se desmonta a mitad de un drag.
+  const activeDragListenersRef = useRef<{ move: (e: PointerEvent) => void; end: (e: PointerEvent) => void } | null>(null);
+  const LONG_PRESS_MS = 220;      // hold quieto antes de "agarrar" la tarjeta
+  const MOVE_CANCEL_PX = 10;      // si se mueve más que esto antes de armar, es scroll — se cancela el long-press
+  const MIN_COMMIT_PX = 20;       // si al soltar el desplazamiento horizontal total es menor, se considera "soltar fuera" y cancela
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+  };
+
+  const getNearestStage = (clientX: number) => {
+    let nearest: PipelineStage | null = null;
+    let nearestDist = Infinity;
+    for (const s of stages) {
+      const el = chipRefs.current[s.id];
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      const dist = Math.abs((rect.left + rect.width / 2) - clientX);
+      if (dist < nearestDist) { nearestDist = dist; nearest = s; }
+    }
+    return nearest;
+  };
+
+  const onCardDragMove = (e: PointerEvent) => {
+    if (!dragLeadRef.current) return;
+    e.preventDefault();
+    setDragPos({ x: e.clientX, y: e.clientY });
+    setDragTargetStageId(getNearestStage(e.clientX)?.id ?? null);
+  };
+
+  const onCardDragEnd = (e: PointerEvent) => {
+    const lead = dragLeadRef.current;
+    window.removeEventListener('pointermove', onCardDragMove);
+    window.removeEventListener('pointerup', onCardDragEnd);
+    window.removeEventListener('pointercancel', onCardDragEnd);
+    activeDragListenersRef.current = null;
+    dragLeadRef.current = null;
+    setDragLead(null);
+    const target = getNearestStage(e.clientX);
+    const movedEnough = Math.abs(e.clientX - dragStartXRef.current) >= MIN_COMMIT_PX;
+    setDragTargetStageId(null);
+    if (lead && target && movedEnough && target.label !== lead.stage) {
+      handleChangeLeadStage(lead, target.label);
+    }
+  };
+
+  const armDrag = (lead: Lead, startX: number, startY: number) => {
+    dragLeadRef.current = lead;
+    dragStartXRef.current = startX;
+    setDragLead(lead);
+    setDragPos({ x: startX, y: startY });
+    setDragTargetStageId(stages.find(s => s.label === lead.stage)?.id ?? null);
+    activeDragListenersRef.current = { move: onCardDragMove, end: onCardDragEnd };
+    window.addEventListener('pointermove', onCardDragMove, { passive: false });
+    window.addEventListener('pointerup', onCardDragEnd);
+    window.addEventListener('pointercancel', onCardDragEnd);
+  };
+
+  const onCardPointerDown = (e: React.PointerEvent, lead: Lead) => {
+    if ((e.target as HTMLElement).closest('[data-no-drag]')) return; // no interferir con "Mover →" ni otros botones puntuales
+    pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+    clearLongPressTimer();
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      if (pointerDownPosRef.current) armDrag(lead, pointerDownPosRef.current.x, pointerDownPosRef.current.y);
+    }, LONG_PRESS_MS);
+  };
+
+  const onCardPointerMove = (e: React.PointerEvent) => {
+    if (!longPressTimerRef.current || !pointerDownPosRef.current) return; // ya armado (lo maneja el listener global) o no hay long-press pendiente
+    const dx = Math.abs(e.clientX - pointerDownPosRef.current.x);
+    const dy = Math.abs(e.clientY - pointerDownPosRef.current.y);
+    if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) clearLongPressTimer(); // el usuario está haciendo scroll, no un hold quieto
+  };
+
+  const onCardPointerUp = () => { clearLongPressTimer(); pointerDownPosRef.current = null; };
+  const onCardPointerCancel = () => { clearLongPressTimer(); pointerDownPosRef.current = null; };
+
+  // Liberar listeners globales si el componente se desmonta a mitad de un drag — usa la
+  // referencia guardada en activeDragListenersRef (no el closure de este render), así
+  // siempre limpia exactamente lo que quedó adjunto, sin importar cuántos renders pasaron
+  // desde que se armó el drag.
+  useEffect(() => () => {
+    clearLongPressTimer();
+    const active = activeDragListenersRef.current;
+    if (active) {
+      window.removeEventListener('pointermove', active.move);
+      window.removeEventListener('pointerup', active.end);
+      window.removeEventListener('pointercancel', active.end);
+    }
+  }, []);
+
   // Solución para compatibilidad de hydration con hello-pangea/dnd si se usa StrictMode
   const [enabled, setEnabled] = useState(false);
   useEffect(() => {
@@ -544,7 +653,11 @@ export const CRMPageView = () => {
       </div>
 
       {/* ═══ MOBILE (< md) — una sola etapa a la vez, sin drag & drop ═══ */}
-      <div className="md:hidden flex-1 flex flex-col min-h-0">
+      {/* overflow-x-hidden: el selector de etapas usa -mx-4 px-4 (bleed a los bordes) + su propio
+          overflow-x-auto interno; sin este límite en el contenedor, ese bleed se filtraba 16px
+          más allá del viewport y volvía scrollable la página entera. El scroll horizontal del
+          selector en sí es independiente (su propio overflow-x-auto) y sigue funcionando igual. */}
+      <div className="md:hidden flex-1 flex flex-col min-h-0 overflow-x-hidden">
         {isLoading && (
           <div className="flex flex-col items-center justify-center py-16">
             <Loader2 className="w-8 h-8 text-[#1877F2] animate-spin mb-3" />
@@ -574,16 +687,19 @@ export const CRMPageView = () => {
               {stages.map(stageObj => {
                 const count = getStageLeads(stageObj.label).length;
                 const isActive = activeMobileStage === stageObj.label;
+                const isDropTarget = dragLead !== null && dragTargetStageId === stageObj.id;
                 return (
                   <button
                     key={stageObj.id}
+                    ref={el => { chipRefs.current[stageObj.id] = el; }}
                     onClick={() => setMobileStage(stageObj.label)}
                     className={`shrink-0 snap-start px-3.5 py-2 rounded-full text-xs font-bold border transition-all ${
+                      isDropTarget ? 'scale-110 text-white border-transparent shadow-lg' :
                       isActive
                         ? 'text-white border-transparent shadow-sm'
                         : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
                     }`}
-                    style={isActive ? { backgroundColor: stageObj.color } : undefined}
+                    style={(isActive || isDropTarget) ? { backgroundColor: stageObj.color } : undefined}
                   >
                     {stageObj.label} <span className="opacity-80">· {count}</span>
                   </button>
@@ -607,7 +723,14 @@ export const CRMPageView = () => {
                       tabIndex={0}
                       onClick={() => setActionSheetLead(lead)}
                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setActionSheetLead(lead); }}
-                      className="w-full text-left bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 active:bg-slate-50 dark:active:bg-slate-700/40 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
+                      onPointerDown={e => onCardPointerDown(e, lead)}
+                      onPointerMove={onCardPointerMove}
+                      onPointerUp={onCardPointerUp}
+                      onPointerCancel={onCardPointerCancel}
+                      style={{ touchAction: dragLead?.id === lead.id ? 'none' : 'pan-y' }}
+                      className={`w-full text-left bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 active:bg-slate-50 dark:active:bg-slate-700/40 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40 ${
+                        dragLead?.id === lead.id ? 'opacity-30' : ''
+                      }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5 min-w-0">
@@ -628,8 +751,10 @@ export const CRMPageView = () => {
                         <span className="truncate">{agents.find(a => a.id === lead.advisorId)?.name || 'Sin asesor'}</span>
                         <span className="shrink-0">{formatLeadActivity(lead.lastActivity)}</span>
                       </div>
-                      {/* Shortcut de descubrimiento: mismo sheet/estado de "Mover a...", solo salta directo al modo move */}
+                      {/* Shortcut de descubrimiento: mismo sheet/estado de "Mover a...", solo salta directo al modo move.
+                          data-no-drag: el pointerdown del drag táctil lo ignora, para no pelear con este botón. */}
                       <button
+                        data-no-drag
                         onClick={e => { e.stopPropagation(); setActionSheetLead(lead); setSheetMode('move'); }}
                         className="mt-1 flex items-center gap-1 text-[11px] font-bold text-[#1877F2] dark:text-primary-400"
                       >
@@ -643,6 +768,30 @@ export const CRMPageView = () => {
           </>
         )}
       </div>
+
+      {/* Ghost del drag táctil — sigue al dedo; la tarjeta original solo se atenúa (opacity-30),
+          nunca se mueve del listado, así que "soltar fuera" no necesita animación de revertir. */}
+      {dragLead && (() => {
+        const targetStage = stages.find(s => s.id === dragTargetStageId);
+        return (
+          <div
+            className="md:hidden fixed z-[120] pointer-events-none flex flex-col items-center gap-1"
+            style={{ left: dragPos.x, top: dragPos.y, transform: 'translate(-50%, -120%)', width: 180 }}
+          >
+            {targetStage && (
+              <span
+                className="text-[10px] font-black text-white px-2.5 py-1 rounded-full shadow-lg whitespace-nowrap"
+                style={{ backgroundColor: targetStage.color }}
+              >
+                Mover a {targetStage.label}
+              </span>
+            )}
+            <div className="w-full bg-white dark:bg-slate-800 border-2 border-[#1877F2] rounded-lg px-3 py-2 shadow-2xl scale-105 opacity-95">
+              <p className="font-semibold text-sm text-slate-900 dark:text-white truncate">{dragLead.name}</p>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Action sheet mobile — reutiliza los mismos handlers del desktop (handleChangeLeadStage, handleOpenAgenda, handleEditLead, handleDeleteLead) */}
       {actionSheetLead && (
