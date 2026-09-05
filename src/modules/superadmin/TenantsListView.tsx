@@ -4,7 +4,7 @@ import {
   Plus, Users, FileText, Package, Calendar, Blocks,
   CheckCircle2, AlertCircle, Clock, MoreVertical, Building2, Loader2,
   Activity, Zap, Bot, Headset, ShieldCheck, CreditCard, LayoutList,
-  Search, Filter, Trash2, Phone, RefreshCw
+  Search, Filter, Trash2, Phone, RefreshCw, X, Circle
 } from 'lucide-react';
 import { TenantRecord, TenantFeatures } from '@/types';
 import { SuperAdminService, WhatsappNumberInfo } from '@/services/firebase/SuperAdminService';
@@ -54,6 +54,9 @@ export const TenantsListView = () => {
   const [planFilter, setPlanFilter] = useState<'all' | 'starter' | 'pro' | 'enterprise'>('all');
   const [toolsFilter, setToolsFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'name' | 'plan' | 'date'>('name');
+  // Estado mobile-only (presentación, sin lógica de negocio nueva): sheet de filtros y sheet de herramientas por tarjeta
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [toolsSheetTenant, setToolsSheetTenant] = useState<TenantRecord | null>(null);
 
   const navigate = useNavigate();
 
@@ -151,21 +154,21 @@ export const TenantsListView = () => {
     });
 
   return (
-    <div className="space-y-6 bg-white dark:bg-slate-950 p-6 rounded-[2.5rem] min-h-[calc(100vh-10rem)] shadow-xl shadow-blue-500/5">
-      {/* Header Compacto */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
+    <div className="space-y-4 md:space-y-6 bg-white dark:bg-slate-950 p-3 md:p-6 rounded-2xl md:rounded-[2.5rem] min-h-[calc(100vh-10rem)] shadow-xl shadow-blue-500/5">
+      {/* ═══ Header + Filtros DESKTOP (md+) — sin cambios ═══ */}
+      <div className="hidden md:flex md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
         <div>
           <h1 className="text-2xl font-black text-[#1877F2] tracking-tight">Gestión de Negocios</h1>
           <p className="text-slate-400 font-bold text-xs uppercase tracking-widest mt-1">
             {filteredTenants.length} Negocios en Red · {activeTenantsCount} Activos
           </p>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <div className="relative group">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#1877F2] transition-colors" />
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder="Buscar negocio..."
               className="pl-12 pr-6 py-3 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-[#1877F2]/20 transition-all w-64"
               value={searchTerm}
@@ -182,14 +185,13 @@ export const TenantsListView = () => {
         </div>
       </div>
 
-      {/* Barra de Filtros Inteligentes */}
-      <div className="flex flex-wrap items-center gap-4 bg-slate-50 dark:bg-slate-900/50 p-3 rounded-[1.5rem] border border-slate-100 dark:border-slate-800">
+      <div className="hidden md:flex flex-wrap items-center gap-4 bg-slate-50 dark:bg-slate-900/50 p-3 rounded-[1.5rem] border border-slate-100 dark:border-slate-800">
         <div className="flex items-center gap-2 px-3 border-r border-slate-200 dark:border-slate-700">
           <Filter className="w-3.5 h-3.5 text-slate-400" />
           <span className="text-[10px] font-black text-slate-500 uppercase">Filtros:</span>
         </div>
-        
-        <select 
+
+        <select
           className="bg-transparent text-[11px] font-bold text-slate-600 dark:text-slate-300 outline-none cursor-pointer"
           value={planFilter}
           onChange={(e) => setPlanFilter(e.target.value as any)}
@@ -200,7 +202,7 @@ export const TenantsListView = () => {
           <option value="enterprise">Plan Enterprise</option>
         </select>
 
-        <select 
+        <select
           className="bg-transparent text-[11px] font-bold text-slate-600 dark:text-slate-300 outline-none cursor-pointer"
           value={toolsFilter}
           onChange={(e) => setToolsFilter(e.target.value)}
@@ -215,13 +217,13 @@ export const TenantsListView = () => {
 
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-black text-slate-400 uppercase">Ordenar por:</span>
-          <button 
+          <button
             onClick={() => setSortBy('name')}
             className={`text-[10px] font-black px-3 py-1.5 rounded-lg transition-all ${sortBy === 'name' ? 'bg-white dark:bg-slate-800 text-[#1877F2] shadow-sm shadow-blue-500/10' : 'text-slate-400'}`}
           >
             Nombre
           </button>
-          <button 
+          <button
             onClick={() => setSortBy('plan')}
             className={`text-[10px] font-black px-3 py-1.5 rounded-lg transition-all ${sortBy === 'plan' ? 'bg-white dark:bg-slate-800 text-[#1877F2] shadow-sm shadow-blue-500/10' : 'text-slate-400'}`}
           >
@@ -230,8 +232,41 @@ export const TenantsListView = () => {
         </div>
       </div>
 
-      {/* Lista de Negocios (Row Layout) */}
-      <div className="overflow-visible">
+      {/* ═══ Header MOBILE (< md) — compacto ═══ */}
+      <div className="md:hidden pb-3 border-b border-slate-100 dark:border-slate-800">
+        <h1 className="text-xl font-black text-[#1877F2] tracking-tight">Gestión de Negocios</h1>
+        <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest mt-0.5 mb-3">
+          {filteredTenants.length} negocios · {activeTenantsCount} activos
+        </p>
+        <div className="relative mb-2">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Buscar negocio..."
+            className="pl-10 pr-4 py-2.5 w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#1877F2]/20"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowMobileFilters(true)}
+            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300"
+          >
+            <Filter className="w-3.5 h-3.5" /> Filtros
+            {(planFilter !== 'all' || toolsFilter !== 'all') && <span className="w-1.5 h-1.5 rounded-full bg-[#1877F2]" />}
+          </button>
+          <button
+            onClick={() => setShowModal(true)}
+            className="shrink-0 flex items-center gap-1.5 bg-[#1877F2] text-white px-3.5 py-2 rounded-xl text-xs font-black"
+          >
+            <Plus className="w-3.5 h-3.5" /> Nuevo
+          </button>
+        </div>
+      </div>
+
+      {/* ═══ Tabla DESKTOP (md+) — sin cambios ═══ */}
+      <div className="hidden md:block overflow-visible">
         {isLoading ? (
           <div className="flex items-center justify-center py-32">
             <Loader2 className="w-10 h-10 text-[#1877F2] animate-spin" />
@@ -404,6 +439,233 @@ export const TenantsListView = () => {
           </div>
         )}
       </div>
+
+      {/* ═══ MOBILE BUSINESS MANAGEMENT VIEW (< md) — tarjetas verticales, mismo dataset/handlers ═══ */}
+      <div className="md:hidden">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-24">
+            <Loader2 className="w-8 h-8 text-[#1877F2] animate-spin" />
+          </div>
+        ) : filteredTenants.length === 0 ? (
+          <div className="text-center py-20 bg-slate-50 dark:bg-slate-900/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+            <p className="text-slate-400 font-bold text-sm">No se encontraron negocios con estos filtros.</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {filteredTenants.map(tenant => {
+              const status = STATUS_CONFIG[tenant.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.pending;
+              const activeTools = (Object.entries(tenant.features || {}) as [keyof TenantFeatures, boolean][])
+                .filter(([, v]) => v);
+              const wa = waNumbers[tenant.id];
+              const apiLabel = wa?.displayPhoneNumber || (wa?.phoneNumberId ? `ID: ${wa.phoneNumberId}` : '—');
+
+              return (
+                <div key={tenant.id} className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-3.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-black text-slate-900 dark:text-white uppercase truncate">{tenant.name}</p>
+                      <p className="text-[10px] font-bold text-slate-400 truncate uppercase tracking-tighter">{tenant.industry}</p>
+                    </div>
+                    <span className={`shrink-0 inline-flex items-center gap-1 text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg border ${status.bg} ${status.color}`}>
+                      <div className={`w-1 h-1 rounded-full ${status.color.replace('text-', 'bg-')}`} />
+                      {status.label}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-wider border ${PLAN_COLOR[tenant.plan as keyof typeof PLAN_COLOR] || PLAN_COLOR.starter}`}>
+                      {tenant.plan}
+                    </span>
+                    <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 min-w-0 truncate">
+                      <Phone className="w-3 h-3 shrink-0 text-[#25D366]" />
+                      {apiLabel}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => setToolsSheetTenant(tenant)}
+                    className="mt-2 text-xs font-bold text-[#1877F2] dark:text-primary-400"
+                  >
+                    {activeTools.length} herramienta{activeTools.length !== 1 ? 's' : ''}
+                  </button>
+
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      onClick={() => window.open(`/enter-tenant/${tenant.id}`, '_blank')}
+                      className="flex-1 h-10 bg-[#1877F2] text-white rounded-xl text-xs font-black uppercase tracking-widest active:scale-95 transition-all"
+                    >
+                      Entrar
+                    </button>
+                    <button
+                      onClick={() => setActionMenuId(tenant.id)}
+                      className="shrink-0 w-10 h-10 flex items-center justify-center text-slate-400 bg-slate-50 dark:bg-slate-800 rounded-xl"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Sheet de Herramientas (mobile) — lista de solo lectura, reutiliza FEATURE_ICONS existente */}
+      {toolsSheetTenant && (
+        <div className="md:hidden fixed inset-0 z-[110] flex items-end" onClick={() => setToolsSheetTenant(null)}>
+          <div className="absolute inset-0 bg-slate-900/50" />
+          <div
+            className="relative w-full max-h-[70vh] overflow-y-auto bg-white dark:bg-slate-800 rounded-t-3xl p-4 shadow-2xl animate-in slide-in-from-bottom duration-200"
+            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="w-10 h-1 bg-slate-300 dark:bg-slate-600 rounded-full mx-auto mb-4" />
+            <div className="flex items-center justify-between mb-3 px-1">
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Herramientas activas</p>
+                <p className="font-bold text-sm text-slate-900 dark:text-white">{toolsSheetTenant.name}</p>
+              </div>
+              <button onClick={() => setToolsSheetTenant(null)} className="p-1.5 text-slate-400"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="space-y-0.5">
+              {(Object.entries(toolsSheetTenant.features || {}) as [keyof TenantFeatures, boolean][])
+                .filter(([, v]) => v)
+                .map(([key]) => {
+                  const t = FEATURE_ICONS[key];
+                  if (!t) return null;
+                  return (
+                    <div key={key} className="flex items-center gap-3 px-2 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: t.color }} />
+                      <t.icon className="w-4 h-4 shrink-0" style={{ color: t.color }} />
+                      {t.label}
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sheet de acciones ⋮ (mobile) — mismos handlers que el menú desktop, sin lógica nueva */}
+      {actionMenuId && (() => {
+        const tenant = filteredTenants.find(t => t.id === actionMenuId);
+        if (!tenant) return null;
+        return (
+          <div className="md:hidden fixed inset-0 z-[110] flex items-end" onClick={() => setActionMenuId(null)}>
+            <div className="absolute inset-0 bg-slate-900/50" />
+            <div
+              className="relative w-full bg-white dark:bg-slate-800 rounded-t-3xl p-4 shadow-2xl animate-in slide-in-from-bottom duration-200"
+              style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="w-10 h-1 bg-slate-300 dark:bg-slate-600 rounded-full mx-auto mb-4" />
+              <p className="font-bold text-sm text-slate-900 dark:text-white mb-3 px-1">{tenant.name}</p>
+
+              <button
+                onClick={() => { setEditingTenant(tenant); setActionMenuId(null); }}
+                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 text-sm font-semibold text-slate-700 dark:text-slate-200"
+              >
+                <Package className="w-4 h-4 text-[#1877F2]" /> Editar negocio
+              </button>
+              <button
+                onClick={() => handleSync(tenant.id)}
+                disabled={syncingId === tenant.id}
+                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 text-sm font-semibold text-slate-700 dark:text-slate-200"
+              >
+                <Zap className="w-4 h-4 text-slate-500" /> Sincronizar
+              </button>
+              <button
+                onClick={() => handleToggleStatus(tenant.id, tenant.status)}
+                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-900/20 text-sm font-semibold text-rose-500"
+              >
+                <Activity className="w-4 h-4" /> {tenant.status === 'active' ? 'Suspender' : 'Activar'}
+              </button>
+              <button
+                onClick={() => handleDelete(tenant)}
+                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-semibold text-red-600"
+              >
+                <Trash2 className="w-4 h-4" /> Eliminar
+              </button>
+
+              <button onClick={() => setActionMenuId(null)} className="w-full mt-2 py-3 text-sm font-bold text-slate-400">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Sheet de Filtros (mobile) — mismos setters que los <select> de desktop */}
+      {showMobileFilters && (
+        <div className="md:hidden fixed inset-0 z-[110] flex items-end" onClick={() => setShowMobileFilters(false)}>
+          <div className="absolute inset-0 bg-slate-900/50" />
+          <div
+            className="relative w-full max-h-[75vh] overflow-y-auto bg-white dark:bg-slate-800 rounded-t-3xl p-4 shadow-2xl animate-in slide-in-from-bottom duration-200"
+            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="w-10 h-1 bg-slate-300 dark:bg-slate-600 rounded-full mx-auto mb-4" />
+
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Plan</p>
+            <div className="space-y-0.5 mb-3">
+              {([
+                ['all', 'Todos'], ['starter', 'Starter'], ['pro', 'Pro'], ['enterprise', 'Enterprise'],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => setPlanFilter(value)}
+                  className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-slate-700 dark:text-slate-200"
+                >
+                  {planFilter === value ? <CheckCircle2 className="w-4 h-4 text-[#1877F2]" /> : <Circle className="w-4 h-4 text-slate-300" />}
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Herramienta</p>
+            <div className="space-y-0.5 mb-3">
+              <button
+                onClick={() => setToolsFilter('all')}
+                className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-slate-700 dark:text-slate-200"
+              >
+                {toolsFilter === 'all' ? <CheckCircle2 className="w-4 h-4 text-[#1877F2]" /> : <Circle className="w-4 h-4 text-slate-300" />}
+                Todas
+              </button>
+              {Object.entries(FEATURE_ICONS).map(([key, t]) => (
+                <button
+                  key={key}
+                  onClick={() => setToolsFilter(key)}
+                  className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-slate-700 dark:text-slate-200"
+                >
+                  {toolsFilter === key ? <CheckCircle2 className="w-4 h-4 text-[#1877F2]" /> : <Circle className="w-4 h-4 text-slate-300" />}
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Ordenar</p>
+            <div className="space-y-0.5 mb-4">
+              {([['name', 'Nombre'], ['plan', 'Plan']] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => setSortBy(value)}
+                  className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl text-sm font-semibold text-slate-700 dark:text-slate-200"
+                >
+                  {sortBy === value ? <CheckCircle2 className="w-4 h-4 text-[#1877F2]" /> : <Circle className="w-4 h-4 text-slate-300" />}
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setShowMobileFilters(false)}
+              className="w-full py-3 bg-[#1877F2] text-white rounded-xl text-sm font-black uppercase tracking-widest"
+            >
+              Listo
+            </button>
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <CreateTenantModal
