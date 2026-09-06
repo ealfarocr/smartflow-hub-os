@@ -26,6 +26,8 @@ interface UserState {
   inviteUser: (tenantId: string, email: string, name: string, role: Role, invitedBy: string) => Promise<void>;
   createDraftMember: (tenantId: string, email: string, name: string, role: Role, createdBy: string) => Promise<void>;
   sendInvitation: (membershipId: string) => Promise<void>;
+  createPreparedMember: (tenantId: string, name: string, role: Role, createdBy: string) => Promise<void>;
+  convertPreparedToDraft: (membershipId: string, tenantId: string, email: string) => Promise<void>;
   updateMemberRole: (membershipId: string, role: Role) => Promise<void>;
   updateMemberStatus: (membershipId: string, isActive: boolean) => Promise<void>;
 }
@@ -51,7 +53,7 @@ export const useUserStore = create<UserState>((set) => ({
           role: m.role,
           status: m.status, // active, pending, suspended
           name: profile?.name || m.name || 'Pendiente de acceso',
-          email: profile?.email || m.email,
+          email: profile?.email || m.email || '', // 'prepared' aún no tiene correo
           isActive: m.status !== 'suspended'
         } as TeamMember;
       });
@@ -85,6 +87,14 @@ export const useUserStore = create<UserState>((set) => ({
 
   sendInvitation: async (membershipId) => {
     await UserService.sendInvitation(membershipId);
+  },
+
+  createPreparedMember: async (tenantId, name, role, createdBy) => {
+    await UserService.createPreparedMember(tenantId, name, role, createdBy);
+  },
+
+  convertPreparedToDraft: async (membershipId, tenantId, email) => {
+    await UserService.convertPreparedToDraft(membershipId, tenantId, email);
   },
 
   updateMemberRole: async (membershipId, role) => {

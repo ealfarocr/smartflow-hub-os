@@ -107,16 +107,20 @@ export interface User {
 export interface Membership {
   id: string; // Document ID
   userId: string | null; // Null if pending invite
-  email: string; // Used for inviting
+  // null solo en status 'prepared' — nombre/rol cargados sin correo todavía
+  // (ver createPreparedMember). Todos los demás estados requieren email real.
+  email: string | null; // Used for inviting
   name?: string; // Nombre del asesor
   tenantId: string;
   tenantName?: string; // Cache del nombre para la UI
   role: Role;
   invitedBy?: string;
   invitedAt?: any;
+  // 'prepared': solo nombre/rol, sin correo — no puede registrarse ni
+  //   recibir invitación hasta que se le agregue un email (prepared → draft).
   // 'draft': preparado por un admin (nombre/email/rol) pero sin invitación
-  // enviada — no debe habilitar registro ni acceso por ningún método de login.
-  status: 'draft' | 'pending' | 'active' | 'suspended';
+  //   enviada — no debe habilitar registro ni acceso por ningún método de login.
+  status: 'prepared' | 'draft' | 'pending' | 'active' | 'suspended';
 }
 
 export type CRMStage = string;

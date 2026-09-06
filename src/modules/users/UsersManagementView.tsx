@@ -3,10 +3,10 @@ import { useUserStore } from '@/stores/userStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { User, Role } from '@/types';
-import { Plus, Edit2, Shield, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIcon, Send } from 'lucide-react';
+import { Plus, Edit2, Shield, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIcon, Send, Mail } from 'lucide-react';
 
 export const UsersManagementView = () => {
-  const { teamMembers, presenceMap, updateMemberRole, updateMemberStatus, createDraftMember, sendInvitation, subscribe, isLoading } = useUserStore();
+  const { teamMembers, presenceMap, updateMemberRole, updateMemberStatus, createDraftMember, sendInvitation, createPreparedMember, convertPreparedToDraft, subscribe, isLoading } = useUserStore();
   const { activeMembership } = useAuthStore();
   const { addToast } = useUIStore();
 
@@ -67,6 +67,24 @@ export const UsersManagementView = () => {
       addToast('Error al enviar la invitación', 'error');
     } finally {
       setSendingInviteId(null);
+    }
+  };
+
+  // Convierte un 'prepared' (solo nombre/rol, sin correo) en 'draft' cuando
+  // el admin por fin tiene el email — UserService valida formato y duplicados.
+  const [convertingId, setConvertingId] = useState<string | null>(null);
+  const handleAddEmail = async (id: string, name: string) => {
+    const email = window.prompt(`Correo de ${name}:`);
+    if (!email) return; // cancelado
+    if (!activeMembership?.tenantId) return;
+    setConvertingId(id);
+    try {
+      await convertPreparedToDraft(id, activeMembership.tenantId, email);
+      addToast('Correo agregado — listo para enviar la invitación', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Error al agregar el correo', 'error');
+    } finally {
+      setConvertingId(null);
     }
   };
 
@@ -154,7 +172,9 @@ export const UsersManagementView = () => {
                     <td className="px-6 py-4">
                       <div className="flex items-center">
                         <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold mr-3 border ${
-                          u.status === 'draft'
+                          u.status === 'prepared'
+                            ? 'bg-violet-50 border-violet-200 text-violet-500 dark:bg-violet-900/20 dark:border-violet-800'
+                            : u.status === 'draft'
                             ? 'bg-slate-100 border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700'
                             : u.status === 'pending'
                             ? 'bg-amber-50 border-amber-200 text-amber-600 dark:bg-amber-900/20 dark:border-amber-800'
@@ -165,10 +185,11 @@ export const UsersManagementView = () => {
                         <div>
                           <div className="font-semibold text-slate-900 dark:text-white flex items-center">
                             {u.name}
+                            {u.status === 'prepared' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 rounded-full font-bold uppercase tracking-tighter">Preparado</span>}
                             {u.status === 'draft' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 rounded-full font-bold uppercase tracking-tighter">Borrador</span>}
                             {u.status === 'pending' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-bold uppercase tracking-tighter">Invitado</span>}
                           </div>
-                          <div className="text-slate-500 text-xs">{u.email}</div>
+                          <div className="text-slate-500 text-xs">{u.email || 'Sin correo aún'}</div>
                         </div>
                       </div>
                     </td>
@@ -211,9 +232,11 @@ export const UsersManagementView = () => {
                             ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
                             : u.status === 'draft'
                             ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                            : u.status === 'prepared'
+                            ? 'bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400'
                             : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
                         }`}>
-                          {u.status === 'active' ? 'Acceso Activo' : u.status === 'pending' ? 'Pendiente' : u.status === 'draft' ? 'Borrador' : 'Suspendido'}
+                          {u.status === 'active' ? 'Acceso Activo' : u.status === 'pending' ? 'Pendiente' : u.status === 'draft' ? 'Borrador' : u.status === 'prepared' ? 'Preparado' : 'Suspendido'}
                         </span>
                         {presenceMap[u.userId] && (
                           <span className="text-[10px] text-slate-400 font-medium ml-1">
@@ -244,7 +267,16 @@ export const UsersManagementView = () => {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-1">
-                        {u.status === 'draft' ? (
+                        {u.status === 'prepared' ? (
+                          <button
+                            onClick={() => handleAddEmail(u.id, u.name)}
+                            disabled={convertingId === u.id}
+                            className="text-slate-400 hover:text-violet-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
+                            title="Agregar email"
+                          >
+                            {convertingId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                          </button>
+                        ) : u.status === 'draft' ? (
                           <button
                             onClick={() => handleSendInvitation(u.id, u.email)}
                             disabled={sendingInviteId === u.id}
@@ -265,7 +297,7 @@ export const UsersManagementView = () => {
                             <LinkIcon className="w-4 h-4" />
                           </button>
                         )}
-                        {u.status !== 'draft' && (
+                        {u.status !== 'draft' && u.status !== 'prepared' && (
                           <button onClick={() => toggleStatus(u.id, u.isActive, u.name)} className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title={u.isActive ? 'Desactivar / Suspender' : 'Reactivar'}>
                             {u.isActive ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
                           </button>
@@ -300,21 +332,31 @@ export const UsersManagementView = () => {
                   if (!activeMembership || !creator) return;
 
                   if (editingId) {
-                    // Un 'draft' no tiene concepto de activo/suspendido todavía — tocar
-                    // updateMemberStatus acá lo sacaría de 'draft' sin querer (por ejemplo,
-                    // al editar solo el nombre antes de enviar la invitación).
+                    // Un 'draft'/'prepared' no tiene concepto de activo/suspendido todavía —
+                    // tocar updateMemberStatus acá lo sacaría de ese estado sin querer (por
+                    // ejemplo, al editar solo el nombre antes de tener el correo o de enviar
+                    // la invitación).
                     const editingMember = teamMembers.find(m => m.id === editingId);
                     const tasks = [updateMemberRole(editingId, formData.role as Role)];
-                    if (editingMember?.status !== 'draft') {
+                    if (editingMember?.status !== 'draft' && editingMember?.status !== 'prepared') {
                       tasks.push(updateMemberStatus(editingId, !!formData.isActive));
                     }
                     await Promise.all(tasks);
                     addToast('Miembro actualizado', 'success');
                   } else {
-                    // Guarda como borrador: NO envía invitación, NO muestra enlace,
-                    // NO habilita registro (ver AuthService.register / acceptTenantInvite).
-                    await createDraftMember(activeMembership.tenantId, formData.email!, formData.name || 'Nuevo Asesor', formData.role as Role, creator.id);
-                    addToast('Usuario guardado como borrador', 'success');
+                    const trimmedEmail = (formData.email || '').trim();
+                    if (trimmedEmail) {
+                      // Guarda como borrador: NO envía invitación, NO muestra enlace,
+                      // NO habilita registro (ver AuthService.register / acceptTenantInvite).
+                      await createDraftMember(activeMembership.tenantId, trimmedEmail, formData.name || 'Nuevo Asesor', formData.role as Role, creator.id);
+                      addToast('Usuario guardado como borrador', 'success');
+                    } else {
+                      // Sin correo todavía: solo nombre y rol, status 'prepared'. No
+                      // habilita registro ni login por ningún método hasta que se le
+                      // agregue el correo (ver "Agregar email" / convertPreparedToDraft).
+                      await createPreparedMember(activeMembership.tenantId, formData.name || 'Nuevo Asesor', formData.role as Role, creator.id);
+                      addToast('Usuario guardado como preparado', 'success');
+                    }
                   }
                   setIsModalOpen(false);
                 } catch (error: any) {
@@ -324,19 +366,24 @@ export const UsersManagementView = () => {
                 }
               }} className="space-y-5">
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase text-[10px] tracking-wider">Correo Electrónico (Vínculo corporativo) *</label>
-                  <input 
-                    required={!editingId}
-                    disabled={!!editingId} 
-                    type="email" 
-                    value={formData.email} 
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase text-[10px] tracking-wider">Correo Electrónico (Vínculo corporativo){editingId ? ' *' : ' (opcional)'}</label>
+                  <input
+                    disabled={!!editingId}
+                    type="email"
+                    value={formData.email}
                     onChange={e => setFormData({...formData, email: e.target.value})}
                     placeholder="email@corporativo.com"
                     className={`w-full border rounded-xl px-4 py-3 text-sm focus:ring-4 focus:ring-primary-500/10 transition-all ${
                       editingId ? 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500' : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white'
                     }`}
                   />
-                  {!editingId && <p className="mt-1.5 text-[10px] text-slate-500 italic">El usuario debe crear su cuenta usando este mismo correo para activar el acceso.</p>}
+                  {!editingId && (
+                    <p className="mt-1.5 text-[10px] text-slate-500 italic">
+                      {formData.email
+                        ? 'El usuario debe crear su cuenta usando este mismo correo para activar el acceso.'
+                        : 'Si todavía no tenés el correo, guardalo igual como preparado y agregalo después.'}
+                    </p>
+                  )}
                 </div>
                 
                 {!editingId ? (
@@ -370,7 +417,7 @@ export const UsersManagementView = () => {
                   </select>
                 </div>
 
-                {editingId && teamMembers.find(m => m.id === editingId)?.status !== 'draft' && (
+                {editingId && !['draft', 'prepared'].includes(teamMembers.find(m => m.id === editingId)?.status || '') && (
                   <div className="flex items-center p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
                     <input id="isActiveUser" type="checkbox" checked={formData.isActive} onChange={e => setFormData({...formData, isActive: e.target.checked})} className="w-5 h-5 text-[#1877F2] bg-white border-slate-300 rounded focus:ring-primary-500" />
                     <label htmlFor="isActiveUser" className="ml-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Usuario Activo</label>
@@ -382,7 +429,7 @@ export const UsersManagementView = () => {
               <button disabled={isSaving} onClick={() => setIsModalOpen(false)} className="px-5 py-2.5 text-sm font-bold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors uppercase tracking-widest text-[10px]">Cancelar</button>
               <button disabled={isSaving} type="submit" form="user-form" className="px-6 py-2.5 text-sm font-bold text-white bg-[#1877F2] hover:bg-[#166fe5] rounded-xl transition-all shadow-lg shadow-[#1877F2]/30 flex items-center disabled:opacity-50 disabled:cursor-not-allowed">
                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                 {editingId ? 'Guardar Cambios' : 'Guardar como borrador'}
+                 {editingId ? 'Guardar Cambios' : (formData.email || '').trim() ? 'Guardar como borrador' : 'Guardar como preparado'}
               </button>
             </div>
           </div>

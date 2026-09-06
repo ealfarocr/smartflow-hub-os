@@ -109,6 +109,56 @@ export const UserService = {
   },
 
   /**
+   * Carga un usuario del que todavía no se tiene el correo — solo nombre y
+   * rol, status 'prepared', email:null. No hay nada que verificar por
+   * duplicado acá (sin email no hay forma de chocar con otro registro) y
+   * NO se escribe invitedAt: no es una invitación, es un registro preliminar
+   * que no habilita ni registro ni login (AuthService.register y
+   * acceptTenantInvite lo excluyen explícitamente).
+   */
+  createPreparedMember: async (tenantId: string, name: string, role: string, createdBy: string) => {
+    await addDoc(collection(db, 'memberships'), {
+      tenantId,
+      name,
+      role,
+      status: 'prepared',
+      email: null,
+      userId: null,
+      invitedBy: createdBy,
+    });
+  },
+
+  /**
+   * Convierte un 'prepared' en 'draft' cuando el admin por fin tiene el
+   * correo real — valida formato y duplicados (mismo tenant) antes de
+   * escribirlo. A partir de acá sigue el flujo normal draft → pending
+   * (sendInvitation) → active (acceptTenantInvite).
+   */
+  convertPreparedToDraft: async (membershipId: string, tenantId: string, email: string) => {
+    const trimmedEmail = email.trim();
+    const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      throw new Error('El correo no tiene un formato válido.');
+    }
+
+    const q = query(
+      collection(db, 'memberships'),
+      where('tenantId', '==', tenantId),
+      where('email', '==', trimmedEmail)
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      throw new Error('Este correo ya tiene una invitación o acceso en este tenant.');
+    }
+
+    const docRef = doc(db, 'memberships', membershipId);
+    await updateDoc(docRef, {
+      email: trimmedEmail,
+      status: 'draft',
+    });
+  },
+
+  /**
    * Actualiza el rol de una membresía.
    */
   updateMembershipRole: async (membershipId: string, role: string) => {
