@@ -1897,6 +1897,13 @@ export const acceptTenantInvite = onCall({ maxInstances: 10 }, async (request) =
     const tenantId = data.tenantId;
 
     if (!tenantId) continue;
+    // 'draft': usuario preparado por un admin (nombre/email/rol) pero SIN
+    // invitación enviada todavía — nunca debe activarse solo, sin importar
+    // el método de login (email/password, Google, etc.) que haya disparado
+    // este vínculo. Se mantiene el mismo query por email (sin agregar un
+    // where('status', 'in', [...]) que exigiría un índice compuesto nuevo) y
+    // simplemente se lo salta acá.
+    if (data.status === 'draft') continue;
 
     const targetId = `${uid}_${tenantId}`;
     const targetRef = db.collection('memberships').doc(targetId);

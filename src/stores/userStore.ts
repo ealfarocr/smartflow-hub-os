@@ -24,6 +24,8 @@ interface UserState {
   reset: () => void;
   subscribe: (tenantId: string) => () => void;
   inviteUser: (tenantId: string, email: string, name: string, role: Role, invitedBy: string) => Promise<void>;
+  createDraftMember: (tenantId: string, email: string, name: string, role: Role, createdBy: string) => Promise<void>;
+  sendInvitation: (membershipId: string) => Promise<void>;
   updateMemberRole: (membershipId: string, role: Role) => Promise<void>;
   updateMemberStatus: (membershipId: string, isActive: boolean) => Promise<void>;
 }
@@ -75,6 +77,14 @@ export const useUserStore = create<UserState>((set) => ({
 
   inviteUser: async (tenantId, email, name, role, invitedBy) => {
     await UserService.inviteUser(tenantId, email, name, role, invitedBy);
+  },
+
+  createDraftMember: async (tenantId, email, name, role, createdBy) => {
+    await UserService.createDraftMember(tenantId, email, name, role, createdBy);
+  },
+
+  sendInvitation: async (membershipId) => {
+    await UserService.sendInvitation(membershipId);
   },
 
   updateMemberRole: async (membershipId, role) => {

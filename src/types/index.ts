@@ -114,7 +114,9 @@ export interface Membership {
   role: Role;
   invitedBy?: string;
   invitedAt?: any;
-  status: 'pending' | 'active' | 'suspended';
+  // 'draft': preparado por un admin (nombre/email/rol) pero sin invitación
+  // enviada — no debe habilitar registro ni acceso por ningún método de login.
+  status: 'draft' | 'pending' | 'active' | 'suspended';
 }
 
 export type CRMStage = string;

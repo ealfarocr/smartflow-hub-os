@@ -25,9 +25,12 @@ export const AuthService = {
   },
 
   async register(email: string, pass: string, name: string) {
-    // Verificar si el email está invitado
+    // Verificar si el email está invitado — 'draft' NO cuenta: es un usuario
+    // preparado por un admin pero sin invitación enviada todavía, no debe
+    // poder registrarse hasta que alguien lo pase a 'pending' (sendInvitation).
     const memberships = await this.getMembershipsByEmail(email);
-    if (memberships.length === 0) {
+    const eligibleMemberships = memberships.filter(m => m.status !== 'draft');
+    if (eligibleMemberships.length === 0) {
       throw new Error('Este correo no tiene acceso asignado. Solicita invitación al administrador.');
     }
 

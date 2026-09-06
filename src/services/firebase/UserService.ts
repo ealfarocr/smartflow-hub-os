@@ -69,6 +69,46 @@ export const UserService = {
   },
 
   /**
+   * Prepara un usuario (nombre/email/rol) SIN invitarlo todavía — status
+   * 'draft', sin invitedAt. No habilita registro ni acceso (ver
+   * AuthService.register y acceptTenantInvite, que excluyen 'draft').
+   */
+  createDraftMember: async (tenantId: string, email: string, name: string, role: string, createdBy: string) => {
+    const q = query(
+      collection(db, 'memberships'),
+      where('tenantId', '==', tenantId),
+      where('email', '==', email)
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      throw new Error('Este usuario ya tiene una invitación o acceso en este tenant.');
+    }
+
+    await addDoc(collection(db, 'memberships'), {
+      tenantId,
+      email,
+      name,
+      role,
+      status: 'draft',
+      userId: null,
+      invitedBy: createdBy,
+    });
+  },
+
+  /**
+   * Convierte un 'draft' preparado en una invitación real: pasa a 'pending'
+   * y recién ahí escribe invitedAt — a partir de este momento el email
+   * puede registrarse (ver AuthService.register).
+   */
+  sendInvitation: async (membershipId: string) => {
+    const docRef = doc(db, 'memberships', membershipId);
+    await updateDoc(docRef, {
+      status: 'pending',
+      invitedAt: serverTimestamp(),
+    });
+  },
+
+  /**
    * Actualiza el rol de una membresía.
    */
   updateMembershipRole: async (membershipId: string, role: string) => {

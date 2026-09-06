@@ -3,10 +3,10 @@ import { useUserStore } from '@/stores/userStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { User, Role } from '@/types';
-import { Plus, Edit2, Shield, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIcon } from 'lucide-react';
+import { Plus, Edit2, Shield, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIcon, Send } from 'lucide-react';
 
 export const UsersManagementView = () => {
-  const { teamMembers, presenceMap, updateMemberRole, updateMemberStatus, subscribe, isLoading } = useUserStore();
+  const { teamMembers, presenceMap, updateMemberRole, updateMemberStatus, createDraftMember, sendInvitation, subscribe, isLoading } = useUserStore();
   const { activeMembership } = useAuthStore();
   const { addToast } = useUIStore();
 
@@ -51,6 +51,22 @@ export const UsersManagementView = () => {
       } catch (error) {
         addToast('Error al cambiar el estado del usuario', 'error');
       }
+    }
+  };
+
+  // Convierte un 'draft' preparado en invitación real (pending + invitedAt) —
+  // recién acá el email queda habilitado para registrarse.
+  const [sendingInviteId, setSendingInviteId] = useState<string | null>(null);
+  const handleSendInvitation = async (id: string, email: string) => {
+    setSendingInviteId(id);
+    try {
+      await sendInvitation(id);
+      alert(`¡Invitación enviada!\n\nComparte este enlace con el usuario:\nhttps://hub.smartflow-suite.com\n\nDebe ingresar con el correo: ${email}`);
+      addToast('Invitación enviada', 'success');
+    } catch {
+      addToast('Error al enviar la invitación', 'error');
+    } finally {
+      setSendingInviteId(null);
     }
   };
 
@@ -138,8 +154,10 @@ export const UsersManagementView = () => {
                     <td className="px-6 py-4">
                       <div className="flex items-center">
                         <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold mr-3 border ${
-                          u.status === 'pending' 
-                            ? 'bg-amber-50 border-amber-200 text-amber-600 dark:bg-amber-900/20 dark:border-amber-800' 
+                          u.status === 'draft'
+                            ? 'bg-slate-100 border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700'
+                            : u.status === 'pending'
+                            ? 'bg-amber-50 border-amber-200 text-amber-600 dark:bg-amber-900/20 dark:border-amber-800'
                             : 'bg-primary-50 border-primary-200 text-primary-700 dark:bg-primary-900/50 dark:border-primary-800 dark:text-primary-400'
                         }`}>
                           {u.name.charAt(0).toUpperCase()}
@@ -147,6 +165,7 @@ export const UsersManagementView = () => {
                         <div>
                           <div className="font-semibold text-slate-900 dark:text-white flex items-center">
                             {u.name}
+                            {u.status === 'draft' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 rounded-full font-bold uppercase tracking-tighter">Borrador</span>}
                             {u.status === 'pending' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-bold uppercase tracking-tighter">Invitado</span>}
                           </div>
                           <div className="text-slate-500 text-xs">{u.email}</div>
@@ -186,13 +205,15 @@ export const UsersManagementView = () => {
                     <td className="px-6 py-4">
                       <div className="flex flex-col gap-1">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-tight w-max ${
-                          u.status === 'active' 
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400' 
+                          u.status === 'active'
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400'
                             : u.status === 'pending'
                             ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
+                            : u.status === 'draft'
+                            ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
                             : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
                         }`}>
-                          {u.status === 'active' ? 'Acceso Activo' : u.status === 'pending' ? 'Pendiente' : 'Suspendido'}
+                          {u.status === 'active' ? 'Acceso Activo' : u.status === 'pending' ? 'Pendiente' : u.status === 'draft' ? 'Borrador' : 'Suspendido'}
                         </span>
                         {presenceMap[u.userId] && (
                           <span className="text-[10px] text-slate-400 font-medium ml-1">
@@ -223,19 +244,32 @@ export const UsersManagementView = () => {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-1">
-                        <button 
-                          onClick={() => {
-                            navigator.clipboard.writeText('https://hub.smartflow-suite.com');
-                            addToast('Enlace de invitación copiado', 'success');
-                          }}
-                          className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" 
-                          title="Copiar enlace de invitación"
-                        >
-                          <LinkIcon className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => toggleStatus(u.id, u.isActive, u.name)} className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title={u.isActive ? 'Desactivar / Suspender' : 'Reactivar'}>
-                          {u.isActive ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
-                        </button>
+                        {u.status === 'draft' ? (
+                          <button
+                            onClick={() => handleSendInvitation(u.id, u.email)}
+                            disabled={sendingInviteId === u.id}
+                            className="text-slate-400 hover:text-emerald-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
+                            title="Enviar invitación"
+                          >
+                            {sendingInviteId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText('https://hub.smartflow-suite.com');
+                              addToast('Enlace de invitación copiado', 'success');
+                            }}
+                            className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"
+                            title="Copiar enlace de invitación"
+                          >
+                            <LinkIcon className="w-4 h-4" />
+                          </button>
+                        )}
+                        {u.status !== 'draft' && (
+                          <button onClick={() => toggleStatus(u.id, u.isActive, u.name)} className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title={u.isActive ? 'Desactivar / Suspender' : 'Reactivar'}>
+                            {u.isActive ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                          </button>
+                        )}
                         <button onClick={() => handleOpenModal(u)} className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title="Editar">
                           <Edit2 className="w-4 h-4" />
                         </button>
@@ -254,7 +288,7 @@ export const UsersManagementView = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-800">
             <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-900">
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white">{editingId ? 'Editar Miembro' : 'Invitar al Equipo'}</h3>
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">{editingId ? 'Editar Miembro' : 'Nuevo Usuario'}</h3>
               <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-xl">&times;</button>
             </div>
             <div className="p-6 bg-white dark:bg-slate-900">
@@ -266,17 +300,21 @@ export const UsersManagementView = () => {
                   if (!activeMembership || !creator) return;
 
                   if (editingId) {
-                    await Promise.all([
-                      updateMemberRole(editingId, formData.role as Role),
-                      updateMemberStatus(editingId, !!formData.isActive)
-                    ]);
+                    // Un 'draft' no tiene concepto de activo/suspendido todavía — tocar
+                    // updateMemberStatus acá lo sacaría de 'draft' sin querer (por ejemplo,
+                    // al editar solo el nombre antes de enviar la invitación).
+                    const editingMember = teamMembers.find(m => m.id === editingId);
+                    const tasks = [updateMemberRole(editingId, formData.role as Role)];
+                    if (editingMember?.status !== 'draft') {
+                      tasks.push(updateMemberStatus(editingId, !!formData.isActive));
+                    }
+                    await Promise.all(tasks);
                     addToast('Miembro actualizado', 'success');
                   } else {
-                    const { inviteUser } = useUserStore.getState();
-                    await inviteUser(activeMembership.tenantId, formData.email!, formData.name || 'Nuevo Asesor', formData.role as Role, creator.id);
-                    // Mostrar mensaje con enlace
-                    alert(`¡Invitación enviada!\n\nComparte este enlace con el usuario:\nhttps://hub.smartflow-suite.com\n\nDebe ingresar con el correo: ${formData.email}`);
-                    addToast('Invitación creada exitosamente', 'success');
+                    // Guarda como borrador: NO envía invitación, NO muestra enlace,
+                    // NO habilita registro (ver AuthService.register / acceptTenantInvite).
+                    await createDraftMember(activeMembership.tenantId, formData.email!, formData.name || 'Nuevo Asesor', formData.role as Role, creator.id);
+                    addToast('Usuario guardado como borrador', 'success');
                   }
                   setIsModalOpen(false);
                 } catch (error: any) {
@@ -332,7 +370,7 @@ export const UsersManagementView = () => {
                   </select>
                 </div>
 
-                {editingId && (
+                {editingId && teamMembers.find(m => m.id === editingId)?.status !== 'draft' && (
                   <div className="flex items-center p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
                     <input id="isActiveUser" type="checkbox" checked={formData.isActive} onChange={e => setFormData({...formData, isActive: e.target.checked})} className="w-5 h-5 text-[#1877F2] bg-white border-slate-300 rounded focus:ring-primary-500" />
                     <label htmlFor="isActiveUser" className="ml-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Usuario Activo</label>
@@ -344,7 +382,7 @@ export const UsersManagementView = () => {
               <button disabled={isSaving} onClick={() => setIsModalOpen(false)} className="px-5 py-2.5 text-sm font-bold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors uppercase tracking-widest text-[10px]">Cancelar</button>
               <button disabled={isSaving} type="submit" form="user-form" className="px-6 py-2.5 text-sm font-bold text-white bg-[#1877F2] hover:bg-[#166fe5] rounded-xl transition-all shadow-lg shadow-[#1877F2]/30 flex items-center disabled:opacity-50 disabled:cursor-not-allowed">
                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                 {editingId ? 'Guardar Cambios' : 'Enviar Invitación'}
+                 {editingId ? 'Guardar Cambios' : 'Guardar como borrador'}
               </button>
             </div>
           </div>
