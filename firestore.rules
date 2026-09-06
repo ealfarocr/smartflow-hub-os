@@ -11,27 +11,37 @@ service cloud.firestore {
     function getMembership(tenantId) {
       return get(/databases/$(database)/documents/memberships/$(request.auth.uid + '_' + tenantId)).data;
     }
-    
+
+    // P0 SEGURIDAD: antes solo verificaba exists() — una membership 'suspended'
+    // (o cualquier otro status que no sea 'active') seguía contando como
+    // miembro pleno del tenant. Ahora exige status=='active' explícitamente.
+    // Si el doc no existe, getMembership() falla al leer .data y la regla
+    // deniega (comportamiento estándar de Firestore Rules), así que no hace
+    // falta un exists() aparte.
     function isTenantMember(tenantId) {
-      return isAuthenticated() && exists(/databases/$(database)/documents/memberships/$(request.auth.uid + '_' + tenantId));
+      return isAuthenticated() && getMembership(tenantId).status == 'active';
     }
-    
+
     function getRole(tenantId) {
       return getMembership(tenantId).role;
     }
 
     function isAtLeast(tenantId, requiredRole) {
       let role = getRole(tenantId);
-      
+
       // Mapeo manual de jerarquía simple
       let rIdx = role == 'Owner' ? 4 : (role == 'Admin' ? 3 : (role == 'Asesor Comercial' ? 2 : (role == 'Técnico' ? 1 : 0)));
       let qIdx = requiredRole == 'Owner' ? 4 : (requiredRole == 'Admin' ? 3 : (requiredRole == 'Asesor Comercial' ? 2 : (requiredRole == 'Técnico' ? 1 : 0)));
-      
+
       return rIdx >= qIdx;
     }
 
+    // P0 SEGURIDAD: ahora pasa por isTenantMember() primero, así que hereda
+    // automáticamente la exigencia de status=='active' — un Admin/Owner
+    // suspendido deja de contar como isTenantAdmin en todas partes sin tener
+    // que tocar cada colección una por una.
     function isTenantAdmin(tenantId) {
-      return isAuthenticated() && isAtLeast(tenantId, 'Admin');
+      return isTenantMember(tenantId) && isAtLeast(tenantId, 'Admin');
     }
 
     // Super Admin: tiene isSuperAdmin == true en su documento /users/{uid}
@@ -51,20 +61,66 @@ service cloud.firestore {
         isTenantAdmin(resource.data.tenantId) ||
         isSuperAdmin()
       );
-      // Un usuario autenticado puede crear su propia membresía como Owner (auto-registro)
+      // Un usuario autenticado puede crear su propia membresía como Owner
+      // SOLO como bootstrap de un tenant que ÉL MISMO acaba de crear
+      // (OnboardingService.registerNewBusiness crea tenants/{tenantId} con
+      // createdBy=uid en el paso anterior, y recién ahí se autoasigna Owner).
+      // P0 SEGURIDAD: antes esta rama no verificaba nada sobre el tenant —
+      // cualquier autenticado podía autoasignarse Owner en CUALQUIER tenant
+      // EXISTENTE (memberships/{miUid}_{tenantIdAjeno} nunca existía antes,
+      // así que caía en 'create', no en 'update', y pasaba igual). Ahora se
+      // exige que el tenant ya exista y que su createdBy sea este mismo uid
+      // — imposible de falsificar, porque createdBy solo lo pone el propio
+      // flujo de creación de tenants y nunca se puede reescribir después
+      // (tenants update ya exige isTenantAdmin).
       allow create: if isAuthenticated() && (
-        (request.resource.data.userId == request.auth.uid && request.resource.data.role == 'Owner') ||
+        (
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.role == 'Owner' &&
+          request.resource.data.status == 'active' &&
+          membershipId == request.auth.uid + '_' + request.resource.data.tenantId &&
+          get(/databases/$(database)/documents/tenants/$(request.resource.data.tenantId)).data.createdBy == request.auth.uid
+        ) ||
         isTenantAdmin(request.resource.data.tenantId) ||
         isSuperAdmin()
       );
-      allow update, delete: if isTenantAdmin(request.resource.data.tenantId || resource.data.tenantId) || isSuperAdmin();
+      // P0 SEGURIDAD: la versión anterior evaluaba
+      // isTenantAdmin(request.resource.data.tenantId || resource.data.tenantId)
+      // — como request.resource.data.tenantId (el valor ENVIADO por quien
+      // escribe) siempre es verdadero cuando está presente, un Admin del
+      // tenant A podía actualizar una membership que en realidad pertenece
+      // al tenant B con solo mandar tenantId:'A' en el payload: la regla
+      // comprobaba su autoridad sobre A (donde sí es Admin), nunca sobre B
+      // (el tenant real del documento). Ahora la autoridad se valida SIEMPRE
+      // contra resource.data.tenantId (el valor ya guardado, no falsificable
+      // por quien escribe) y además se exige que tenantId no cambie en el
+      // update — así un documento nunca puede "migrar" de tenant.
+      allow update: if (
+        isTenantAdmin(resource.data.tenantId) &&
+        request.resource.data.tenantId == resource.data.tenantId
+      ) || isSuperAdmin();
+      allow delete: if isTenantAdmin(resource.data.tenantId) || isSuperAdmin();
     }
 
     match /users/{userId} {
       // Endurecido: un usuario solo puede leer su propio perfil; SuperAdmin puede leer cualquiera.
       // Antes: cualquier usuario autenticado podía leer todos los perfiles (PII expuesta).
       allow read: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
-      allow write: if (isAuthenticated() && request.auth.uid == userId) || isSuperAdmin();
+
+      // P0 SEGURIDAD: la regla anterior (`allow write: if uid==userId ||
+      // isSuperAdmin()`) dejaba que cualquier usuario escribiera CUALQUIER
+      // campo de su propio documento, incluido isSuperAdmin — un
+      // setDoc(doc(db,'users',miUid), {isSuperAdmin:true}, {merge:true})
+      // alcanzaba para volverse SuperAdmin de toda la plataforma. Ahora se
+      // exige explícitamente que isSuperAdmin nunca cambie por esta vía
+      // (ni aparecer en true al crear el perfil, ni modificarse al
+      // actualizarlo) — .get(key, default) evita error si el campo no existe
+      // todavía en el documento.
+      allow create: if isAuthenticated() && request.auth.uid == userId &&
+        request.resource.data.get('isSuperAdmin', false) == false;
+      allow update: if isAuthenticated() && request.auth.uid == userId &&
+        request.resource.data.get('isSuperAdmin', false) == resource.data.get('isSuperAdmin', false);
+      allow write: if isSuperAdmin();
     }
 
     match /tenants/{tenantId} {
@@ -161,9 +217,22 @@ service cloud.firestore {
       allow read, write: if isTenantAdmin(tenantId) || isSuperAdmin();
     }
 
+    // P0 SEGURIDAD: antes read/write eran "if isAuthenticated()" sin ningún
+    // scope de tenant — cualquier autenticado podía leer collection('user_presence')
+    // completa y obtener el tenantId + email + rol de TODOS los usuarios de
+    // TODOS los tenants (la lista exacta de objetivos para un ataque de toma
+    // de tenant). Doc ID real es `{tenantId}_{uid}` (ver PresenceService.ts)
+    // y siempre se escribe con esos dos campos, así que se puede exigir que
+    // coincidan.
     match /user_presence/{presenceId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read: if isTenantMember(resource.data.tenantId);
+      allow create: if isAuthenticated() &&
+        request.auth.uid == request.resource.data.uid &&
+        isTenantMember(request.resource.data.tenantId);
+      allow update: if isAuthenticated() &&
+        request.auth.uid == resource.data.uid &&
+        request.resource.data.tenantId == resource.data.tenantId &&
+        isTenantMember(resource.data.tenantId);
     }
 
     match /tasks/{taskId} {
@@ -180,9 +249,24 @@ service cloud.firestore {
       allow delete: if isTenantAdmin(resource.data.tenantId) || isSuperAdmin();
     }
 
+    // P0 SEGURIDAD: "allow create: if isAuthenticated()" permitía a
+    // cualquier autenticado escribir folder:'sent' + attachmentUrl arbitraria
+    // — processOutboundEmail (Cloud Function, Admin SDK) toma cualquier doc
+    // con folder=='sent' y lo manda de verdad por SendGrid desde el dominio
+    // de SmartFlow, y además hace un fetch de attachmentUrl (SSRF con el
+    // contenido devuelto al remitente). El único flujo legítimo del lado del
+    // cliente es el widget de soporte in-app (SupportAgent.tsx), que SIEMPRE
+    // escribe folder:'inbox' + type:'support_request' — nunca dispara un
+    // envío real. Cualquier otra forma de crear un admin_email (incluido
+    // folder:'sent') queda restringida a SuperAdmin; los flujos backend
+    // legítimos (Cloud Functions) usan Admin SDK y no pasan por esta regla.
     match /admin_emails/{emailId} {
       allow read, update, delete: if isSuperAdmin();
-      allow create: if isAuthenticated();
+      allow create: if isSuperAdmin() || (
+        isAuthenticated() &&
+        request.resource.data.folder == 'inbox' &&
+        request.resource.data.type == 'support_request'
+      );
     }
 
     match /landing_blog_posts/{postId} {
