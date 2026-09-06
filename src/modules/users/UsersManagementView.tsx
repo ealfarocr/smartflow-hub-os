@@ -3,7 +3,7 @@ import { useUserStore } from '@/stores/userStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { User, Role } from '@/types';
-import { Plus, Edit2, Shield, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIcon, Send, Mail } from 'lucide-react';
+import { Plus, Edit2, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIcon, Send, Mail, Crown, ShieldCheck, Wrench, Eye, type LucideIcon } from 'lucide-react';
 import { ALL_TOOL_KEYS, TOOL_LABELS, ADMIN_ONLY_TOOLS, TOOL_PRESETS, getEffectiveTools, getDefaultToolsForRole, ToolKey } from '@/utils/permissions';
 
 export const UsersManagementView = () => {
@@ -119,13 +119,203 @@ export const UsersManagementView = () => {
     return matchesRole && matchesSearch;
   });
 
-  const roleColors: Record<Role, string> = {
-    Owner: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
-    Admin: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
-    'Asesor Comercial': 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-    Técnico: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
-    'Solo lectura': 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  // Identidad visual por nivel jerárquico — puramente presentacional, no
+  // implica ningún permiso: RoleGuard/ToolGuard siguen siendo el enforcement
+  // real, independiente de estos colores/íconos.
+  const ROLE_META: Record<Role, { badge: string; icon: LucideIcon; chipClass: string; borderClass: string; ringClass?: string }> = {
+    Owner: {
+      badge: 'OWNER / SOCIO PRINCIPAL',
+      icon: Crown,
+      chipClass: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+      borderClass: 'border-l-green-500',
+      ringClass: 'ring-2 ring-green-400/50 ring-offset-2 ring-offset-white dark:ring-offset-slate-900',
+    },
+    Admin: {
+      badge: 'ADMIN',
+      icon: ShieldCheck,
+      chipClass: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+      borderClass: 'border-l-orange-500',
+    },
+    'Asesor Comercial': {
+      badge: 'ASESOR COMERCIAL',
+      icon: UserCheck,
+      chipClass: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+      borderClass: 'border-l-purple-500',
+    },
+    Técnico: {
+      badge: 'TÉCNICO',
+      icon: Wrench,
+      chipClass: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+      borderClass: 'border-l-blue-400',
+    },
+    'Solo lectura': {
+      badge: 'SOLO LECTURA',
+      icon: Eye,
+      chipClass: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+      borderClass: 'border-l-slate-400',
+    },
   };
+
+  // Orden de bloques fijo (Socios > Administración > Comercial > Otros);
+  // "Otros" solo aparece si hay Técnico/Solo lectura en el tenant.
+  const ROLE_GROUPS: { key: string; title: string; roles: Role[] }[] = [
+    { key: 'owners', title: 'Socios / Owners', roles: ['Owner'] },
+    { key: 'admin', title: 'Administración', roles: ['Admin'] },
+    { key: 'comercial', title: 'Equipo Comercial', roles: ['Asesor Comercial'] },
+    { key: 'otros', title: 'Otros', roles: ['Técnico', 'Solo lectura'] },
+  ];
+
+  type Row = typeof filteredUsers[number];
+
+  // Agrupa por jerarquía y ordena alfabéticamente dentro de cada grupo —
+  // solo afecta el orden de despliegue, no los datos ni quién entra en
+  // filteredUsers (búsqueda/filtro de rol siguen aplicando antes de esto).
+  const groupedSections = ROLE_GROUPS
+    .map(group => ({
+      ...group,
+      members: filteredUsers.filter(m => group.roles.includes(m.role)).slice().sort((a, b) => a.name.localeCompare(b.name, 'es')),
+    }))
+    .filter(group => group.members.length > 0);
+
+  const avatarStatusClasses = (status: string) =>
+    status === 'prepared'
+      ? 'bg-violet-50 border-violet-200 text-violet-500 dark:bg-violet-900/20 dark:border-violet-800'
+      : status === 'draft'
+      ? 'bg-slate-100 border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700'
+      : status === 'pending'
+      ? 'bg-amber-50 border-amber-200 text-amber-600 dark:bg-amber-900/20 dark:border-amber-800'
+      : 'bg-primary-50 border-primary-200 text-primary-700 dark:bg-primary-900/50 dark:border-primary-800 dark:text-primary-400';
+
+  const renderLifecycleBadge = (u: Row) => (
+    <>
+      {u.status === 'prepared' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 rounded-full font-bold uppercase tracking-tighter">Preparado</span>}
+      {u.status === 'draft' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 rounded-full font-bold uppercase tracking-tighter">Borrador</span>}
+      {u.status === 'pending' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-bold uppercase tracking-tighter">Invitado</span>}
+    </>
+  );
+
+  const renderPresence = (u: Row) => {
+    const p = presenceMap[u.userId];
+    const isOnline = p?.status === 'online';
+    const isIdle = p?.status === 'idle';
+    return (
+      <>
+        <div className="relative">
+          <div className={`h-3 w-3 rounded-full border-2 border-white dark:border-slate-800 ${
+            isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
+            isIdle ? 'bg-amber-500' : 'bg-slate-400'
+          }`} />
+          {isOnline && <div className="absolute inset-0 h-3 w-3 rounded-full bg-emerald-500 animate-ping opacity-40" />}
+        </div>
+        <span className="text-[10px] mt-1 font-bold uppercase tracking-tighter text-slate-500">
+          {isOnline ? 'En línea' : isIdle ? 'Ausente' : 'Offline'}
+        </span>
+      </>
+    );
+  };
+
+  const renderRoleChip = (role: Role) => {
+    const meta = ROLE_META[role];
+    const Icon = meta.icon;
+    return (
+      <span className={`px-2.5 py-1 text-[11px] font-bold rounded-lg inline-flex items-center gap-1 w-max uppercase tracking-tight ${meta.chipClass}`}>
+        <Icon className="w-3 h-3" />
+        {meta.badge}
+      </span>
+    );
+  };
+
+  const renderStatusBadge = (u: Row) => (
+    <div className="flex flex-col gap-1">
+      <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-tight w-max ${
+        u.status === 'active'
+          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400'
+          : u.status === 'pending'
+          ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
+          : u.status === 'draft'
+          ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+          : u.status === 'prepared'
+          ? 'bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400'
+          : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
+      }`}>
+        {u.status === 'active' ? 'Acceso Activo' : u.status === 'pending' ? 'Pendiente' : u.status === 'draft' ? 'Borrador' : u.status === 'prepared' ? 'Preparado' : 'Suspendido'}
+      </span>
+      {presenceMap[u.userId] && (
+        <span className="text-[10px] text-slate-400 font-medium ml-1">
+          Vía: {presenceMap[u.userId].authProvider === 'google.com' ? 'Google SSO' : 'Email/Password'}
+        </span>
+      )}
+    </div>
+  );
+
+  const renderLastActivity = (u: Row) => {
+    const p = presenceMap[u.userId];
+    if (!p || u.status === 'pending') {
+      return <span className="text-slate-400 text-xs italic">Sin actividad registrada</span>;
+    }
+    const lastActive = new Date(p.lastActiveAt);
+    return (
+      <div className="flex flex-col">
+        <span className="text-slate-700 dark:text-slate-200 text-xs font-semibold">
+          {formatLastSeen(lastActive)}
+        </span>
+        <span className="text-[10px] text-[#1877F2] dark:text-primary-400 font-bold truncate max-w-[150px]">
+          📍 {p.currentRoute}
+        </span>
+      </div>
+    );
+  };
+
+  const renderActions = (u: Row) => (
+    <div className="flex justify-end gap-1">
+      {u.status === 'prepared' ? (
+        <button
+          onClick={() => handleAddEmail(u.id, u.name)}
+          disabled={convertingId === u.id}
+          className="text-slate-400 hover:text-violet-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
+          title="Agregar email"
+        >
+          {convertingId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+        </button>
+      ) : u.status === 'draft' ? (
+        <button
+          onClick={() => handleSendInvitation(u.id, u.email)}
+          disabled={sendingInviteId === u.id}
+          className="text-slate-400 hover:text-emerald-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
+          title="Enviar invitación"
+        >
+          {sendingInviteId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+        </button>
+      ) : (
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText('https://hub.smartflow-suite.com');
+            addToast('Enlace de invitación copiado', 'success');
+          }}
+          className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"
+          title="Copiar enlace de invitación"
+        >
+          <LinkIcon className="w-4 h-4" />
+        </button>
+      )}
+      {u.status !== 'draft' && u.status !== 'prepared' && (
+        <button onClick={() => toggleStatus(u.id, u.isActive, u.name)} className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title={u.isActive ? 'Desactivar / Suspender' : 'Reactivar'}>
+          {u.isActive ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+        </button>
+      )}
+      <button onClick={() => handleOpenModal(u)} className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title="Editar">
+        <Edit2 className="w-4 h-4" />
+      </button>
+    </div>
+  );
+
+  const renderGroupHeaderLabel = (group: { title: string; members: Row[] }) => (
+    <div className="flex items-center gap-2">
+      <span className="text-[11px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{group.title}</span>
+      <span className="text-[11px] font-bold text-slate-400">· {group.members.length}</span>
+      <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -166,11 +356,12 @@ export const UsersManagementView = () => {
            </div>
         </div>
 
-        {/* User Table */}
-        <div className="overflow-x-auto selection:bg-primary-100 dark:selection:bg-primary-900/30">
+        {/* Desktop: tabla agrupada por jerarquía */}
+        <div className="hidden md:block overflow-x-auto selection:bg-primary-100 dark:selection:bg-primary-900/30">
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-slate-100 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 uppercase text-[10px] font-black tracking-widest text-slate-600 dark:text-slate-400">
               <tr>
+                <th className="px-6 py-4 font-bold">Usuario</th>
                 <th className="px-6 py-4 font-bold text-center">Presencia</th>
                 <th className="px-6 py-4 font-bold">Rol de Acceso</th>
                 <th className="px-6 py-4 font-bold">Seguridad / Acceso</th>
@@ -181,7 +372,7 @@ export const UsersManagementView = () => {
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center">
+                  <td colSpan={6} className="px-6 py-12 text-center">
                     <div className="flex flex-col items-center justify-center text-slate-500">
                       <Loader2 className="w-8 h-8 animate-spin text-[#1877F2] mb-2" />
                       <p className="animate-pulse font-medium">Sincronizando equipo...</p>
@@ -190,154 +381,105 @@ export const UsersManagementView = () => {
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-slate-500 italic">No se encontraron usuarios en este tenant.</td>
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500 italic">No se encontraron usuarios en este tenant.</td>
                 </tr>
               ) : (
-                filteredUsers.map((u) => (
-                  <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center">
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold mr-3 border ${
-                          u.status === 'prepared'
-                            ? 'bg-violet-50 border-violet-200 text-violet-500 dark:bg-violet-900/20 dark:border-violet-800'
-                            : u.status === 'draft'
-                            ? 'bg-slate-100 border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700'
-                            : u.status === 'pending'
-                            ? 'bg-amber-50 border-amber-200 text-amber-600 dark:bg-amber-900/20 dark:border-amber-800'
-                            : 'bg-primary-50 border-primary-200 text-primary-700 dark:bg-primary-900/50 dark:border-primary-800 dark:text-primary-400'
-                        }`}>
-                          {u.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="font-semibold text-slate-900 dark:text-white flex items-center">
-                            {u.name}
-                            {u.status === 'prepared' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 rounded-full font-bold uppercase tracking-tighter">Preparado</span>}
-                            {u.status === 'draft' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 rounded-full font-bold uppercase tracking-tighter">Borrador</span>}
-                            {u.status === 'pending' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-bold uppercase tracking-tighter">Invitado</span>}
-                          </div>
-                          <div className="text-slate-500 text-xs">{u.email || 'Sin correo aún'}</div>
-                        </div>
-                      </div>
+                groupedSections.flatMap((group, gi) => [
+                  <tr key={`head-${group.key}`} className={`bg-slate-50/80 dark:bg-slate-900/40 ${gi > 0 ? 'border-t-4 border-transparent' : ''}`}>
+                    <td colSpan={6} className="px-6 pt-5 pb-2">
+                      {renderGroupHeaderLabel(group)}
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col items-center">
-                        {(() => {
-                          const p = presenceMap[u.userId];
-                          const isOnline = p?.status === 'online';
-                          const isIdle = p?.status === 'idle';
-                          
-                          return (
-                            <>
-                              <div className="relative">
-                                <div className={`h-3 w-3 rounded-full border-2 border-white dark:border-slate-800 ${
-                                  isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 
-                                  isIdle ? 'bg-amber-500' : 'bg-slate-400'
-                                }`} />
-                                {isOnline && <div className="absolute inset-0 h-3 w-3 rounded-full bg-emerald-500 animate-ping opacity-40" />}
+                  </tr>,
+                  ...group.members.map((u) => {
+                    const meta = ROLE_META[u.role];
+                    return (
+                      <tr key={u.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border-l-[3px] ${meta.borderClass}`}>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center">
+                            <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold mr-3 border ${avatarStatusClasses(u.status)} ${meta.ringClass || ''}`}>
+                              {u.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-slate-900 dark:text-white flex items-center">
+                                {u.name}
+                                {renderLifecycleBadge(u)}
                               </div>
-                              <span className="text-[10px] mt-1 font-bold uppercase tracking-tighter text-slate-500">
-                                {isOnline ? 'En línea' : isIdle ? 'Ausente' : 'Offline'}
-                              </span>
-                            </>
-                          );
-                        })()}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2.5 py-1 text-[11px] font-bold rounded-lg flex items-center w-max uppercase tracking-tight ${roleColors[u.role]}`}>
-                         {u.role === 'Admin' || u.role === 'Owner' ? <Shield className="w-3 h-3 mr-1" /> : null}
-                         {u.role}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col gap-1">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-tight w-max ${
-                          u.status === 'active'
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400'
-                            : u.status === 'pending'
-                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
-                            : u.status === 'draft'
-                            ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-                            : u.status === 'prepared'
-                            ? 'bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400'
-                            : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
-                        }`}>
-                          {u.status === 'active' ? 'Acceso Activo' : u.status === 'pending' ? 'Pendiente' : u.status === 'draft' ? 'Borrador' : u.status === 'prepared' ? 'Preparado' : 'Suspendido'}
-                        </span>
-                        {presenceMap[u.userId] && (
-                          <span className="text-[10px] text-slate-400 font-medium ml-1">
-                            Vía: {presenceMap[u.userId].authProvider === 'google.com' ? 'Google SSO' : 'Email/Password'}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      {(() => {
-                        const p = presenceMap[u.userId];
-                        if (!p || u.status === 'pending') {
-                          return <span className="text-slate-400 text-xs italic">Sin actividad registrada</span>;
-                        }
-                        
-                        const lastActive = new Date(p.lastActiveAt);
-                        return (
-                          <div className="flex flex-col">
-                            <span className="text-slate-700 dark:text-slate-200 text-xs font-semibold">
-                              {formatLastSeen(lastActive)}
-                            </span>
-                            <span className="text-[10px] text-[#1877F2] dark:text-primary-400 font-bold truncate max-w-[150px]">
-                              📍 {p.currentRoute}
-                            </span>
+                              <div className="text-slate-500 text-xs">{u.email || 'Sin correo aún'}</div>
+                            </div>
                           </div>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end gap-1">
-                        {u.status === 'prepared' ? (
-                          <button
-                            onClick={() => handleAddEmail(u.id, u.name)}
-                            disabled={convertingId === u.id}
-                            className="text-slate-400 hover:text-violet-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
-                            title="Agregar email"
-                          >
-                            {convertingId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
-                          </button>
-                        ) : u.status === 'draft' ? (
-                          <button
-                            onClick={() => handleSendInvitation(u.id, u.email)}
-                            disabled={sendingInviteId === u.id}
-                            className="text-slate-400 hover:text-emerald-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
-                            title="Enviar invitación"
-                          >
-                            {sendingInviteId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText('https://hub.smartflow-suite.com');
-                              addToast('Enlace de invitación copiado', 'success');
-                            }}
-                            className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"
-                            title="Copiar enlace de invitación"
-                          >
-                            <LinkIcon className="w-4 h-4" />
-                          </button>
-                        )}
-                        {u.status !== 'draft' && u.status !== 'prepared' && (
-                          <button onClick={() => toggleStatus(u.id, u.isActive, u.name)} className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title={u.isActive ? 'Desactivar / Suspender' : 'Reactivar'}>
-                            {u.isActive ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
-                          </button>
-                        )}
-                        <button onClick={() => handleOpenModal(u)} className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title="Editar">
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col items-center">
+                            {renderPresence(u)}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">{renderRoleChip(u.role)}</td>
+                        <td className="px-6 py-4">{renderStatusBadge(u)}</td>
+                        <td className="px-6 py-4">{renderLastActivity(u)}</td>
+                        <td className="px-6 py-4 text-right">{renderActions(u)}</td>
+                      </tr>
+                    );
+                  }),
+                ])
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: tarjetas apiladas por grupo, sin scroll horizontal */}
+        <div className="md:hidden">
+          {isLoading ? (
+            <div className="px-6 py-12 text-center">
+              <div className="flex flex-col items-center justify-center text-slate-500">
+                <Loader2 className="w-8 h-8 animate-spin text-[#1877F2] mb-2" />
+                <p className="animate-pulse font-medium">Sincronizando equipo...</p>
+              </div>
+            </div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="px-6 py-12 text-center text-slate-500 italic">No se encontraron usuarios en este tenant.</div>
+          ) : (
+            <div className="divide-y divide-slate-200 dark:divide-slate-700">
+              {groupedSections.map(group => (
+                <div key={group.key} className="py-4 bg-slate-50/40 dark:bg-slate-900/20">
+                  <div className="px-4 pb-3">{renderGroupHeaderLabel(group)}</div>
+                  <div className="px-4 space-y-3">
+                    {group.members.map(u => {
+                      const meta = ROLE_META[u.role];
+                      return (
+                        <div key={u.id} className={`rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 space-y-3 border-l-[3px] ${meta.borderClass}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`h-10 w-10 shrink-0 rounded-full flex items-center justify-center font-bold border ${avatarStatusClasses(u.status)} ${meta.ringClass || ''}`}>
+                                {u.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-semibold text-slate-900 dark:text-white flex items-center flex-wrap gap-1">
+                                  <span className="truncate">{u.name}</span>
+                                  {renderLifecycleBadge(u)}
+                                </div>
+                                <div className="text-slate-500 text-xs truncate">{u.email || 'Sin correo aún'}</div>
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-center shrink-0">
+                              {renderPresence(u)}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {renderRoleChip(u.role)}
+                            {renderStatusBadge(u)}
+                          </div>
+                          <div>{renderLastActivity(u)}</div>
+                          <div className="flex justify-end gap-1 pt-2 border-t border-slate-100 dark:border-slate-800">
+                            {renderActions(u)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
