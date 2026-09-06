@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Headset, Save, Users as UsersIcon, Shuffle, Plus, X, Mail, UserPlus, Loader2, Zap, GitBranch } from 'lucide-react';
+import { Headset, Save, Users as UsersIcon, Shuffle, Plus, X, Mail, UserPlus, Loader2, Zap, GitBranch, UserMinus } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -26,10 +26,12 @@ export const MultiAgentView = () => {
 
   useEffect(() => {
     if (multiAgentConfig) {
-      setConfig({
+      const loaded = {
         isAutoDistributionEnabled: multiAgentConfig.isAutoDistributionEnabled || false,
         includedUserIds: multiAgentConfig.includedUserIds || [],
-      });
+      };
+      console.log('MULTI_AGENT_CONFIG_LOADED', loaded);
+      setConfig(loaded);
     }
   }, [multiAgentConfig]);
 
@@ -43,10 +45,13 @@ export const MultiAgentView = () => {
   const handleSave = async () => {
     if (!activeMembership?.tenantId) return;
     setIsSaving(true);
+    console.log('MULTI_AGENT_SAVE_REQUEST', { tenantId: activeMembership.tenantId, config });
     try {
       await updateSettings(activeMembership.tenantId, { multiAgentConfig: config }, activeMembership.userId || undefined);
+      console.log('MULTI_AGENT_SAVE_SUCCESS', { config });
       addToast('Configuración guardada correctamente.', 'success');
-    } catch {
+    } catch (error) {
+      console.error('MULTI_AGENT_SAVE_ERROR', error);
       addToast('Error al guardar configuración.', 'error');
     } finally {
       setIsSaving(false);
@@ -72,6 +77,8 @@ export const MultiAgentView = () => {
       }
     } else {
       if (!selectedMemberId) { addToast('Selecciona un miembro del equipo', 'warning'); return; }
+      const selectedMember = teamMembers.find(m => (m.userId || m.id) === selectedMemberId);
+      console.log('MULTI_AGENT_ADVISOR_SELECTED', { selectedMemberId, name: selectedMember?.name, status: selectedMember?.status });
       if (!config.includedUserIds.includes(selectedMemberId)) {
         await updateConfig({ ...config, includedUserIds: [...config.includedUserIds, selectedMemberId] });
         addToast('Miembro agregado al equipo', 'success');
@@ -85,10 +92,14 @@ export const MultiAgentView = () => {
 
   const updateConfig = async (newConfig: MultiAgentConfig) => {
     if (!activeMembership?.tenantId) return;
+    console.log('MULTI_AGENT_LOCAL_STATE', newConfig);
     setConfig(newConfig);
+    console.log('MULTI_AGENT_SAVE_REQUEST', { tenantId: activeMembership.tenantId, config: newConfig });
     try {
       await updateSettings(activeMembership.tenantId, { multiAgentConfig: newConfig }, activeMembership.userId || undefined);
-    } catch {
+      console.log('MULTI_AGENT_SAVE_SUCCESS', { config: newConfig });
+    } catch (error) {
+      console.error('MULTI_AGENT_SAVE_ERROR', error);
       addToast('Error al sincronizar configuración', 'error');
     }
   };
@@ -103,8 +114,26 @@ export const MultiAgentView = () => {
     });
   };
 
-  const activeMembers = memberships.filter(m => !m.id.startsWith('impersonated_') && m.status === 'active');
-  const activeCount = activeMembers.filter(m => config.includedUserIds.includes(m.userId || m.id)).length;
+  // "Equipo Asignado" muestra el equipo CONFIGURADO (includedUserIds), sin
+  // importar su status — no solo los ya 'active'. El identificador guardado
+  // es userId cuando existe (miembro activo) o membership.id cuando no
+  // (prepared/draft/pending, donde userId es null) — así ya lo persiste el
+  // código existente y así aparece hoy en producción, confirmado leyendo
+  // directo el documento real de settings del tenant.
+  // "Configurado en el equipo" ≠ "activo para recibir leads": un prepared
+  // puede estar en el equipo (para dejar todo listo antes del lanzamiento)
+  // pero solo un membership.status === 'active' cuenta como elegible.
+  const teamMembers = memberships.filter(m => !m.id.startsWith('impersonated_'));
+  const configuredTeam = teamMembers.filter(m => config.includedUserIds.includes(m.userId || m.id));
+  const activeCount = configuredTeam.filter(m => m.status === 'active').length;
+
+  const STATUS_META: Record<string, { label: string; className: string }> = {
+    prepared: { label: 'Preparado', className: 'bg-violet-50 text-violet-600 dark:bg-violet-900/20 dark:text-violet-400' },
+    draft: { label: 'Borrador', className: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400' },
+    pending: { label: 'Invitado', className: 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400' },
+    active: { label: 'Activo', className: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' },
+    suspended: { label: 'Suspendido', className: 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400' },
+  };
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-16">
@@ -250,38 +279,40 @@ export const MultiAgentView = () => {
 
             {/* Column headers */}
             <div className="grid grid-cols-12 px-5 py-2.5 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700">
-              <div className="col-span-6 text-[9px] font-black text-slate-400 uppercase tracking-widest">Asesor</div>
-              <div className="col-span-3 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Rol</div>
+              <div className="col-span-5 text-[9px] font-black text-slate-400 uppercase tracking-widest">Asesor</div>
+              <div className="col-span-2 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Rol</div>
+              <div className="col-span-2 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Estado</div>
               <div className="col-span-3 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Recibe leads</div>
             </div>
 
             <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
-              {activeMembers.length === 0 && (
+              {configuredTeam.length === 0 && (
                 <div className="py-12 text-center">
                   <UsersIcon className="w-8 h-8 text-slate-200 mx-auto mb-2" />
                   <p className="text-sm font-bold text-slate-400">Sin miembros aún</p>
                   <p className="text-xs text-slate-300 mt-1">Agregá asesores para comenzar</p>
                 </div>
               )}
-              {activeMembers.map((m) => {
+              {configuredTeam.map((m) => {
                 const identifier = m.userId || m.id;
-                const isIncluded = config.includedUserIds.includes(identifier);
+                const isActiveStatus = m.status === 'active';
+                const statusMeta = STATUS_META[m.status] || STATUS_META.active;
                 const initials = m.name ? m.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : (m.email?.charAt(0).toUpperCase() || 'U');
 
                 return (
-                  <div key={m.id} className={`grid grid-cols-12 items-center px-5 py-4 transition-colors ${isIncluded ? 'bg-emerald-50/30 dark:bg-emerald-900/5' : 'hover:bg-slate-50 dark:hover:bg-slate-900/30'}`}>
-                    <div className="col-span-6 flex items-center gap-3">
+                  <div key={m.id} className={`grid grid-cols-12 items-center px-5 py-4 transition-colors ${isActiveStatus ? 'bg-emerald-50/30 dark:bg-emerald-900/5' : 'hover:bg-slate-50 dark:hover:bg-slate-900/30'}`}>
+                    <div className="col-span-5 flex items-center gap-3">
                       <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${
-                        isIncluded ? 'bg-[#1877F2] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
+                        isActiveStatus ? 'bg-[#1877F2] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
                       }`}>
                         {initials}
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-black text-slate-900 dark:text-white truncate">{m.name || 'Sin nombre'}</p>
-                        <p className="text-[10px] text-slate-400 truncate">{m.email}</p>
+                        <p className="text-[10px] text-slate-400 truncate">{m.email || 'Sin correo aún'}</p>
                       </div>
                     </div>
-                    <div className="col-span-3 flex justify-center">
+                    <div className="col-span-2 flex justify-center">
                       <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${
                         m.role === 'Admin' || m.role === 'Owner'
                           ? 'bg-purple-50 text-purple-600 dark:bg-purple-900/20'
@@ -290,14 +321,29 @@ export const MultiAgentView = () => {
                         {m.role}
                       </span>
                     </div>
-                    <div className="col-span-3 flex justify-end items-center gap-2">
-                      <span className={`text-[9px] font-black uppercase ${isIncluded ? 'text-emerald-500' : 'text-slate-300'}`}>
-                        {isIncluded ? 'Activo' : 'Inactivo'}
+                    <div className="col-span-2 flex justify-center">
+                      <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${statusMeta.className}`}>
+                        {statusMeta.label}
                       </span>
-                      <button onClick={() => toggleUserInclusion(identifier)}
-                        className={`w-10 h-5 rounded-full relative transition-all duration-300 ${isIncluded ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}>
-                        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 ${isIncluded ? 'left-5' : 'left-0.5'}`} />
-                      </button>
+                    </div>
+                    <div className="col-span-3 flex justify-end items-center gap-2">
+                      {isActiveStatus ? (
+                        <>
+                          <span className="text-[9px] font-black uppercase text-emerald-500">Activo</span>
+                          <button onClick={() => toggleUserInclusion(identifier)} title="Quitar del equipo"
+                            className="w-10 h-5 rounded-full relative transition-all duration-300 bg-emerald-500">
+                            <div className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 left-5" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-[9px] font-black uppercase text-slate-300" title="Solo los miembros con acceso activo pueden recibir leads">No elegible</span>
+                          <button onClick={() => toggleUserInclusion(identifier)} title="Quitar del equipo"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                            <UserMinus className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -361,10 +407,10 @@ export const MultiAgentView = () => {
                   <select required value={selectedMemberId} onChange={e => setSelectedMemberId(e.target.value)}
                     className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-[#1877F2]/30 rounded-xl outline-none text-sm font-medium transition-colors appearance-none">
                     <option value="">Seleccioná un integrante...</option>
-                    {memberships
+                    {teamMembers
                       .filter(m => !config.includedUserIds.includes(m.userId || m.id))
                       .map(m => (
-                        <option key={m.id} value={m.userId || m.id}>{m.name || m.email} ({m.role})</option>
+                        <option key={m.id} value={m.userId || m.id}>{m.name || m.email || 'Sin nombre'} ({m.role}{m.status !== 'active' ? ` · ${STATUS_META[m.status]?.label || m.status}` : ''})</option>
                       ))}
                   </select>
                   <p className="text-[10px] text-slate-400">Solo aparecen miembros que aún no están en el equipo.</p>

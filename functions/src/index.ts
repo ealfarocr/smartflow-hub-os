@@ -1922,6 +1922,30 @@ export const acceptTenantInvite = onCall({ maxInstances: 10 }, async (request) =
 
       // Eliminar el documento de invitación original (ID aleatorio)
       batch.delete(doc.ref);
+
+      // Multi-Agente guarda membership.id en multiAgentConfig.includedUserIds
+      // mientras la persona es prepared/draft/pending (userId todavía null —
+      // ver src/modules/multi-agent/MultiAgentView.tsx). Como este flujo borra
+      // ese doc.id y lo reemplaza por targetId, sin este paso la persona
+      // desaparecería en silencio del equipo configurado justo al activar su
+      // cuenta. Se lee settings/{tenantId} ANTES del commit (los batches de
+      // Firestore no permiten lecturas) y el reemplazo se agrega al MISMO
+      // batch que migra la membership, para que ambos escriban atómicamente.
+      const settingsRef = db.collection('settings').doc(tenantId);
+      const settingsSnap = await settingsRef.get();
+      if (settingsSnap.exists) {
+        const includedUserIds = settingsSnap.data()?.multiAgentConfig?.includedUserIds;
+        if (Array.isArray(includedUserIds) && includedUserIds.includes(doc.id)) {
+          const migratedIds = Array.from(new Set(
+            includedUserIds.map((id: string) => (id === doc.id ? uid : id))
+          ));
+          batch.update(settingsRef, {
+            'multiAgentConfig.includedUserIds': migratedIds,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          console.log(`[Invites] Multi-Agente: migrado ID ${doc.id} -> ${uid} en tenant ${tenantId}`);
+        }
+      }
     } else {
       // Si el ID ya es el correcto (re-re-login), solo aseguramos activación si era pending
       batch.update(targetRef, {
