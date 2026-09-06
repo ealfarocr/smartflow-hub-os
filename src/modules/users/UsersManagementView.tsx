@@ -4,9 +4,10 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { User, Role } from '@/types';
 import { Plus, Edit2, Shield, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIcon, Send, Mail } from 'lucide-react';
+import { ALL_TOOL_KEYS, TOOL_LABELS, ADMIN_ONLY_TOOLS, TOOL_PRESETS, getEffectiveTools, getDefaultToolsForRole, ToolKey } from '@/utils/permissions';
 
 export const UsersManagementView = () => {
-  const { teamMembers, presenceMap, updateMemberRole, updateMemberStatus, createDraftMember, sendInvitation, createPreparedMember, convertPreparedToDraft, subscribe, isLoading } = useUserStore();
+  const { teamMembers, presenceMap, updateMemberRole, updateMemberStatus, createDraftMember, sendInvitation, createPreparedMember, convertPreparedToDraft, updateAllowedTools, subscribe, isLoading } = useUserStore();
   const { activeMembership } = useAuthStore();
   const { addToast } = useUIStore();
 
@@ -16,12 +17,24 @@ export const UsersManagementView = () => {
       return () => unsubscribe();
     }
   }, [activeMembership?.tenantId, subscribe]);
-  
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filterRole, setFilterRole] = useState<Role | 'All'>('All');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Control de herramientas: customizeTools=false → usar el fallback por rol
+  // (allowedTools:null); true → lista explícita en selectedTools. Se
+  // inicializa en handleOpenModal con lo que ESE miembro ya tiene
+  // efectivamente, para que el admin vea el estado real antes de tocar nada.
+  const [customizeTools, setCustomizeTools] = useState(false);
+  const [selectedTools, setSelectedTools] = useState<ToolKey[]>([]);
+  const editingMember = editingId ? teamMembers.find(m => m.id === editingId) : null;
+  // Un usuario no puede habilitarse herramientas a sí mismo (además de que la
+  // regla de Firestore de memberships ya exige isTenantAdmin para escribir,
+  // esto evita que un Admin se auto-edite desde esta misma pantalla).
+  const isEditingSelf = !!editingMember && !!activeMembership && editingMember.id === activeMembership.id;
 
   const [formData, setFormData] = useState<Partial<User>>({
     name: '',
@@ -39,7 +52,18 @@ export const UsersManagementView = () => {
       role: member.role,
       isActive: member.isActive,
     });
+    setCustomizeTools(member.allowedTools != null);
+    setSelectedTools(getEffectiveTools({ role: member.role, allowedTools: member.allowedTools }));
     setIsModalOpen(true);
+  };
+
+  const applyPreset = (preset: keyof typeof TOOL_PRESETS) => {
+    setCustomizeTools(true);
+    setSelectedTools([...TOOL_PRESETS[preset]]);
+  };
+
+  const toggleTool = (tool: ToolKey) => {
+    setSelectedTools(prev => prev.includes(tool) ? prev.filter(t => t !== tool) : [...prev, tool]);
   };
 
   const toggleStatus = async (id: string, currentStatus: boolean, userName: string) => {
@@ -111,6 +135,8 @@ export const UsersManagementView = () => {
           onClick={() => {
             setEditingId(null);
             setFormData({ name: '', email: '', role: 'Asesor Comercial', isActive: true });
+            setCustomizeTools(false);
+            setSelectedTools([]);
             setIsModalOpen(true);
           }}
           className="bg-[#1877F2] hover:bg-[#166fe5] text-white px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center shadow-lg shadow-[#1877F2]/20"
@@ -336,10 +362,15 @@ export const UsersManagementView = () => {
                     // tocar updateMemberStatus acá lo sacaría de ese estado sin querer (por
                     // ejemplo, al editar solo el nombre antes de tener el correo o de enviar
                     // la invitación).
-                    const editingMember = teamMembers.find(m => m.id === editingId);
                     const tasks = [updateMemberRole(editingId, formData.role as Role)];
                     if (editingMember?.status !== 'draft' && editingMember?.status !== 'prepared') {
                       tasks.push(updateMemberStatus(editingId, !!formData.isActive));
+                    }
+                    // Un usuario no puede habilitarse herramientas a sí mismo — la sección
+                    // ni siquiera se muestra en ese caso, pero se guarda igual como última
+                    // barrera antes de escribir.
+                    if (!isEditingSelf) {
+                      tasks.push(updateAllowedTools(editingId, customizeTools ? selectedTools : null));
                     }
                     await Promise.all(tasks);
                     addToast('Miembro actualizado', 'success');
@@ -417,11 +448,62 @@ export const UsersManagementView = () => {
                   </select>
                 </div>
 
-                {editingId && !['draft', 'prepared'].includes(teamMembers.find(m => m.id === editingId)?.status || '') && (
+                {editingId && !['draft', 'prepared'].includes(editingMember?.status || '') && (
                   <div className="flex items-center p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
                     <input id="isActiveUser" type="checkbox" checked={formData.isActive} onChange={e => setFormData({...formData, isActive: e.target.checked})} className="w-5 h-5 text-[#1877F2] bg-white border-slate-300 rounded focus:ring-primary-500" />
                     <label htmlFor="isActiveUser" className="ml-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Usuario Activo</label>
                   </div>
+                )}
+
+                {editingId && (
+                  isEditingSelf ? (
+                    <p className="text-[10px] text-slate-400 italic px-1">No podés editar tus propias herramientas asignadas.</p>
+                  ) : formData.role === 'Owner' ? (
+                    <p className="text-[10px] text-slate-400 italic px-1">Owner siempre tiene acceso a todas las herramientas.</p>
+                  ) : (
+                    <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px] tracking-wider">Herramientas asignadas</label>
+                        <label className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                          <input type="checkbox" checked={customizeTools}
+                            onChange={e => { setCustomizeTools(e.target.checked); if (!e.target.checked) setSelectedTools(getDefaultToolsForRole(formData.role as Role)); }}
+                            className="w-4 h-4 text-[#1877F2] rounded focus:ring-primary-500" />
+                          Personalizar
+                        </label>
+                      </div>
+                      {!customizeTools ? (
+                        <p className="text-[10px] text-slate-500 italic">Usando el conjunto por defecto de su rol. Activá "Personalizar" para elegir manualmente.</p>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(Object.keys(TOOL_PRESETS) as (keyof typeof TOOL_PRESETS)[]).map(preset => (
+                              <button key={preset} type="button" onClick={() => applyPreset(preset)}
+                                className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+                                {preset}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {ALL_TOOL_KEYS.map(tool => {
+                              const requiresAdmin = ADMIN_ONLY_TOOLS.includes(tool);
+                              const targetIsAdminOrOwner = formData.role === 'Admin' || formData.role === 'Owner';
+                              const disabled = requiresAdmin && !targetIsAdminOrOwner;
+                              return (
+                                <label key={tool}
+                                  title={disabled ? 'Requiere rol Admin u Owner (RoleGuard ya lo exige independientemente de este toggle)' : undefined}
+                                  className={`flex items-center gap-2 text-xs px-2.5 py-2 rounded-lg border ${disabled ? 'opacity-40 cursor-not-allowed border-slate-100 dark:border-slate-800' : 'border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                                  <input type="checkbox" disabled={disabled} checked={selectedTools.includes(tool)}
+                                    onChange={() => toggleTool(tool)}
+                                    className="w-4 h-4 text-[#1877F2] rounded focus:ring-primary-500 disabled:opacity-50" />
+                                  <span className="font-semibold text-slate-700 dark:text-slate-300">{TOOL_LABELS[tool]}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )
                 )}
               </form>
             </div>

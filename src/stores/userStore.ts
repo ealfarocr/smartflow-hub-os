@@ -13,6 +13,9 @@ export interface TeamMember {
   name: string;
   email: string;
   isActive: boolean;
+  // undefined/null = sin configurar, cae al fallback por rol (ver
+  // src/utils/permissions.ts getEffectiveTools).
+  allowedTools?: string[] | null;
 }
 
 interface UserState {
@@ -30,6 +33,7 @@ interface UserState {
   convertPreparedToDraft: (membershipId: string, tenantId: string, email: string) => Promise<void>;
   updateMemberRole: (membershipId: string, role: Role) => Promise<void>;
   updateMemberStatus: (membershipId: string, isActive: boolean) => Promise<void>;
+  updateAllowedTools: (membershipId: string, tools: string[] | null) => Promise<void>;
 }
 
 export const useUserStore = create<UserState>((set) => ({
@@ -54,7 +58,8 @@ export const useUserStore = create<UserState>((set) => ({
           status: m.status, // active, pending, suspended
           name: profile?.name || m.name || 'Pendiente de acceso',
           email: profile?.email || m.email || '', // 'prepared' aún no tiene correo
-          isActive: m.status !== 'suspended'
+          isActive: m.status !== 'suspended',
+          allowedTools: m.allowedTools,
         } as TeamMember;
       });
 
@@ -103,5 +108,9 @@ export const useUserStore = create<UserState>((set) => ({
 
   updateMemberStatus: async (membershipId, isActive) => {
     await UserService.updateMembershipStatus(membershipId, isActive);
+  },
+
+  updateAllowedTools: async (membershipId, tools) => {
+    await UserService.updateAllowedTools(membershipId, tools);
   }
 }));

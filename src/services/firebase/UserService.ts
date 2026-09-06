@@ -167,6 +167,18 @@ export const UserService = {
   },
 
   /**
+   * Control de herramientas por usuario — ver src/utils/permissions.ts. `tools`
+   * puede ser [] (ninguna) o null (volver al fallback por rol). La escritura
+   * ya está protegida por la misma regla de Firestore que rige `memberships`
+   * (isTenantAdmin), así que un usuario sin rol Admin/Owner no puede llegar a
+   * llamar esto con éxito ni sobre sí mismo ni sobre nadie más.
+   */
+  updateAllowedTools: async (membershipId: string, tools: string[] | null) => {
+    const docRef = doc(db, 'memberships', membershipId);
+    await updateDoc(docRef, { allowedTools: tools });
+  },
+
+  /**
    * Actualiza el estado de una membresía (Activo / Suspendido).
    */
   updateMembershipStatus: async (membershipId: string, isActive: boolean) => {

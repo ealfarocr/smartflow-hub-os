@@ -121,6 +121,12 @@ export interface Membership {
   // 'draft': preparado por un admin (nombre/email/rol) pero sin invitación
   //   enviada — no debe habilitar registro ni acceso por ningún método de login.
   status: 'prepared' | 'draft' | 'pending' | 'active' | 'suspended';
+  // Control de herramientas por usuario, además del rol. undefined/null =
+  // sin configurar todavía → cae al fallback por rol (ver
+  // src/utils/permissions.ts getEffectiveTools), que reproduce el
+  // comportamiento actual — así ninguna membership existente pierde acceso
+  // el día que se despliega esto. [] explícito = "ninguna herramienta".
+  allowedTools?: string[] | null;
 }
 
 export type CRMStage = string;

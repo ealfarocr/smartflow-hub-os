@@ -14,31 +14,34 @@ import { CreateTenantModal } from '@/modules/superadmin/CreateTenantModal'
 import SupportAgent from '../support/SupportAgent'
 import { OnboardingBanner } from '../onboarding/OnboardingBanner'
 import { NotificationBell } from './NotificationBell'
+import { getEffectiveTools, ToolKey } from '@/utils/permissions'
 
 const allNavItems = [
   // --- CORE SECTION ---
+  // Dashboard/Mis Tareas sin toolKey a propósito: son el aterrizaje post-login,
+  // nunca se restringen por herramienta (ver src/utils/permissions.ts).
   { name: 'Dashboard',       href: '/dashboard',      icon: LayoutDashboard,    feature: null },
   { name: 'Mis Tareas',      href: '/tareas',          icon: LayoutList,         feature: null },
   { name: 'Inbox Admin',     href: '/admin-mail',      icon: Mail,               feature: null, superAdminOnly: true },
-  { name: 'CRM',             href: '/crm',             icon: Users,              feature: null },
+  { name: 'CRM',             href: '/crm',             icon: Users,              feature: null, toolKey: 'crm' as ToolKey },
   { name: 'Paquetes',        href: '/paquetes',        icon: FolderOpen,         feature: null },
   { name: 'Tienda Hub',      href: '/tienda',          icon: ShoppingBag,        feature: null },
   { name: 'Mi Suscripción', href: '/suscripcion',     icon: BadgeCheck,         feature: null },
-  { name: 'Usuarios',        href: '/usuarios',        icon: Users,              feature: null },
-  { name: 'Configuración',   href: '/configuracion',   icon: Settings,           feature: null },
+  { name: 'Usuarios',        href: '/usuarios',        icon: Users,              feature: null, toolKey: 'usuarios' as ToolKey },
+  { name: 'Configuración',   href: '/configuracion',   icon: Settings,           feature: null, toolKey: 'configuracion' as ToolKey },
   { name: 'Academia',        href: '/academia',        icon: GraduationCap,      feature: null, superAdminOnly: true },
   { name: 'Partners',        href: '/partners',        icon: Handshake,          feature: null, superAdminOnly: true },
 
   // --- TOOLS SECTION ---
-  { name: 'WhatsApp',        href: '/conversaciones',  icon: MessageSquareText,  feature: 'hasMultiAgent' as keyof TenantFeatures },
-  { name: 'Multi-Agente',    href: '/multi-agent',     icon: Headset,            feature: 'hasMultiAgentPanel' as keyof TenantFeatures },
-  { name: 'Agente IA',       href: '/ai-agent',        icon: Bot,                feature: 'hasAiAgent' as keyof TenantFeatures },
-  { name: 'Auditor IA',      href: '/auditoria',       icon: ShieldCheck,        feature: 'hasQualityAuditor' as keyof TenantFeatures },
-  { name: 'Links de Pago',   href: '/pagos',           icon: CreditCard,         feature: 'hasPaymentLinks' as keyof TenantFeatures },
-  { name: 'Cotizaciones',    href: '/cotizaciones',    icon: FileText,           feature: 'hasQuotes' as keyof TenantFeatures },
-  { name: 'Catálogo',        href: '/catalogo',        icon: Package,            feature: 'hasCatalog' as keyof TenantFeatures },
-  { name: 'Agenda',          href: '/agenda',          icon: Calendar,           feature: 'hasAgenda' as keyof TenantFeatures },
-  { name: 'Integraciones',   href: '/integraciones',   icon: Blocks,             feature: 'hasIntegrations' as keyof TenantFeatures },
+  { name: 'WhatsApp',        href: '/conversaciones',  icon: MessageSquareText,  feature: 'hasMultiAgent' as keyof TenantFeatures, toolKey: 'conversaciones' as ToolKey },
+  { name: 'Multi-Agente',    href: '/multi-agent',     icon: Headset,            feature: 'hasMultiAgentPanel' as keyof TenantFeatures, toolKey: 'multi-agent' as ToolKey },
+  { name: 'Agente IA',       href: '/ai-agent',        icon: Bot,                feature: 'hasAiAgent' as keyof TenantFeatures, toolKey: 'ai-agent' as ToolKey },
+  { name: 'Auditor IA',      href: '/auditoria',       icon: ShieldCheck,        feature: 'hasQualityAuditor' as keyof TenantFeatures, toolKey: 'auditoria' as ToolKey },
+  { name: 'Links de Pago',   href: '/pagos',           icon: CreditCard,         feature: 'hasPaymentLinks' as keyof TenantFeatures, toolKey: 'pagos' as ToolKey },
+  { name: 'Cotizaciones',    href: '/cotizaciones',    icon: FileText,           feature: 'hasQuotes' as keyof TenantFeatures, toolKey: 'cotizaciones' as ToolKey },
+  { name: 'Catálogo',        href: '/catalogo',        icon: Package,            feature: 'hasCatalog' as keyof TenantFeatures, toolKey: 'catalogo' as ToolKey },
+  { name: 'Agenda',          href: '/agenda',          icon: Calendar,           feature: 'hasAgenda' as keyof TenantFeatures, toolKey: 'agenda' as ToolKey },
+  { name: 'Integraciones',   href: '/integraciones',   icon: Blocks,             feature: 'hasIntegrations' as keyof TenantFeatures, toolKey: 'integraciones' as ToolKey },
 ]
 
 
@@ -58,16 +61,20 @@ export const MainLayout = () => {
   }, [activeMembership?.tenantId]);
   
   const isSuperAdmin = !!user?.isSuperAdmin;
+  const effectiveTools = getEffectiveTools(activeMembership);
 
-  // Filtrar nav según feature flags y rol
+  // Filtrar nav según feature flags, herramientas por usuario y rol
   const navigation = allNavItems.filter(item => {
     // Inbox Admin solo visible en el Hub Master (SuperAdmin sin impersonación)
     if ((item as any).superAdminOnly) {
       return isSuperAdmin && !impersonatedName;
     }
-    if (!item.feature) return true;
-    // Si es SuperAdmin y NO está suplantando, ve todo (Hub Maestro)
+    // Si es SuperAdmin y NO está suplantando, ve todo (Hub Maestro) — el
+    // sidebar nunca fue la capa de seguridad real, pero igual se mantiene
+    // consistente con lo que las rutas (ToolGuard/FeatureGuard) ya permiten.
     if (isSuperAdmin && !impersonatedName) return true;
+    if ('toolKey' in item && item.toolKey && !effectiveTools.includes(item.toolKey)) return false;
+    if (!item.feature) return true;
     return !!features?.[item.feature];
   });
 

@@ -34,6 +34,7 @@ import { ProtectedRoute } from '@/components/guards/ProtectedRoute'
 import { TenantResolvedGuard } from '@/components/guards/TenantResolvedGuard'
 import { RoleGuard } from '@/components/guards/RoleGuard'
 import { FeatureGuard } from '@/components/guards/FeatureGuard'
+import { ToolGuard } from '@/components/guards/ToolGuard'
 
 import { useAuthStore } from '@/stores/authStore'
 import { SuperAdminGuard } from '@/components/guards/SuperAdminGuard'
@@ -76,7 +77,11 @@ export const AppRouter = () => {
           >
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPageView />} />
-            <Route path="conversaciones" element={<ConversationsPageView />} />
+            {/* WhatsApp: antes sin ningún guard — es el techo, ToolGuard es
+                puramente aditivo (fallback = todos, ver getDefaultToolsForRole). */}
+            <Route element={<ToolGuard tool="conversaciones" />}>
+              <Route path="conversaciones" element={<ConversationsPageView />} />
+            </Route>
 
             {/* Super Admin Routes Integrated in MainLayout */}
             <Route element={<SuperAdminGuard children={<Outlet />} />}>
@@ -86,47 +91,70 @@ export const AppRouter = () => {
               <Route path="super-admin/marketing" element={<MarketingView />} />
             </Route>
 
-            {/* Rutas protegidas por Feature Flag */}
+            {/* Rutas protegidas por Feature Flag (tenant) + ToolGuard (usuario) */}
             <Route element={<FeatureGuard feature="hasCrm" />}>
-              <Route path="crm" element={<CRMPageView />} />
+              <Route element={<ToolGuard tool="crm" />}>
+                <Route path="crm" element={<CRMPageView />} />
+              </Route>
             </Route>
             <Route element={<FeatureGuard feature="hasQuotes" />}>
-              <Route path="cotizaciones" element={<QuotesListView />} />
+              <Route element={<ToolGuard tool="cotizaciones" />}>
+                <Route path="cotizaciones" element={<QuotesListView />} />
+              </Route>
             </Route>
             <Route element={<FeatureGuard feature="hasCatalog" />}>
-              <Route path="catalogo" element={<CatalogPageView />} />
+              <Route element={<ToolGuard tool="catalogo" />}>
+                <Route path="catalogo" element={<CatalogPageView />} />
+              </Route>
             </Route>
             <Route path="paquetes" element={<PackagesListView />} />
             <Route element={<FeatureGuard feature="hasAgenda" />}>
-              <Route path="agenda" element={<AgendaPageView />} />
+              <Route element={<ToolGuard tool="agenda" />}>
+                <Route path="agenda" element={<AgendaPageView />} />
+              </Route>
             </Route>
             <Route element={<FeatureGuard feature="hasAiAgent" />}>
-              <Route path="ai-agent" element={<AIAgentView />} />
+              <Route element={<ToolGuard tool="ai-agent" />}>
+                <Route path="ai-agent" element={<AIAgentView />} />
+              </Route>
             </Route>
             <Route element={<FeatureGuard feature="hasMultiAgentPanel" />}>
-              <Route path="multi-agent" element={<MultiAgentView />} />
+              <Route element={<ToolGuard tool="multi-agent" />}>
+                <Route path="multi-agent" element={<MultiAgentView />} />
+              </Route>
             </Route>
             <Route element={<FeatureGuard feature="hasQualityAuditor" />}>
-              <Route path="auditoria" element={<QualityAuditorView />} />
+              <Route element={<ToolGuard tool="auditoria" />}>
+                <Route path="auditoria" element={<QualityAuditorView />} />
+              </Route>
             </Route>
             <Route element={<FeatureGuard feature="hasPaymentLinks" />}>
-              <Route path="pagos" element={<PaymentsView />} />
+              <Route element={<ToolGuard tool="pagos" />}>
+                <Route path="pagos" element={<PaymentsView />} />
+              </Route>
             </Route>
             <Route path="tareas" element={<TasksView />} />
             <Route path="tienda" element={<MarketplaceView />} />
             <Route path="suscripcion" element={<SubscriptionView />} />
             <Route path="academia" element={<AcademiaView />} />
             <Route path="partners" element={<PartnersView />} />
-            
-            {/* Rutas Privilegiadas (Role Guard) */}
+
+            {/* Rutas Privilegiadas (Role Guard = techo real; ToolGuard solo puede
+                estrechar DENTRO de lo que el rol ya permite, nunca ampliarlo) */}
             <Route element={<RoleGuard allowedRoles={['Admin', 'Owner']} />}>
               <Route path="admin-mail" element={<AdminMailView />} />
             </Route>
             <Route element={<RoleGuard allowedRoles={['Admin', 'Owner']} />}>
-              <Route path="usuarios" element={<UsersManagementView />} />
-              <Route path="configuracion" element={<SettingsView />} />
+              <Route element={<ToolGuard tool="usuarios" />}>
+                <Route path="usuarios" element={<UsersManagementView />} />
+              </Route>
+              <Route element={<ToolGuard tool="configuracion" />}>
+                <Route path="configuracion" element={<SettingsView />} />
+              </Route>
               <Route element={<FeatureGuard feature="hasIntegrations" />}>
-                <Route path="integraciones" element={<IntegrationsPlaceholderView />} />
+                <Route element={<ToolGuard tool="integraciones" />}>
+                  <Route path="integraciones" element={<IntegrationsPlaceholderView />} />
+                </Route>
               </Route>
             </Route>
           </Route>
