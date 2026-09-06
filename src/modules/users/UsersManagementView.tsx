@@ -487,14 +487,30 @@ export const UsersManagementView = () => {
                             {ALL_TOOL_KEYS.map(tool => {
                               const requiresAdmin = ADMIN_ONLY_TOOLS.includes(tool);
                               const targetIsAdminOrOwner = formData.role === 'Admin' || formData.role === 'Owner';
-                              const disabled = requiresAdmin && !targetIsAdminOrOwner;
+                              const irrelevant = requiresAdmin && !targetIsAdminOrOwner;
+                              // Para un rol que no es Admin/Owner, Usuarios/Configuración/
+                              // Integraciones son irrelevantes: RoleGuard ya las bloquea de
+                              // forma independiente sin importar qué haya en allowedTools.
+                              // Se muestra una nota en vez de un checkbox marcado-pero-inerte
+                              // (un checkbox nativo checked+disabled con color personalizado
+                              // puede pintarse "vacío" en algunos navegadores y confundir,
+                              // aunque el estado real y el enforcement sean correctos).
+                              if (irrelevant) {
+                                return (
+                                  <div key={tool}
+                                    title="Requiere rol Admin u Owner — RoleGuard ya lo exige de forma independiente, sin importar este selector"
+                                    className="flex items-center gap-2 text-xs px-2.5 py-2 rounded-lg border border-dashed border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-600">
+                                    <span className="flex-1">{TOOL_LABELS[tool]}</span>
+                                    <span className="text-[9px] font-bold uppercase tracking-tight">No aplica</span>
+                                  </div>
+                                );
+                              }
                               return (
                                 <label key={tool}
-                                  title={disabled ? 'Requiere rol Admin u Owner (RoleGuard ya lo exige independientemente de este toggle)' : undefined}
-                                  className={`flex items-center gap-2 text-xs px-2.5 py-2 rounded-lg border ${disabled ? 'opacity-40 cursor-not-allowed border-slate-100 dark:border-slate-800' : 'border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-                                  <input type="checkbox" disabled={disabled} checked={selectedTools.includes(tool)}
+                                  className="flex items-center gap-2 text-xs px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
+                                  <input type="checkbox" checked={selectedTools.includes(tool)}
                                     onChange={() => toggleTool(tool)}
-                                    className="w-4 h-4 text-[#1877F2] rounded focus:ring-primary-500 disabled:opacity-50" />
+                                    className="w-4 h-4 text-[#1877F2] rounded focus:ring-primary-500" />
                                   <span className="font-semibold text-slate-700 dark:text-slate-300">{TOOL_LABELS[tool]}</span>
                                 </label>
                               );

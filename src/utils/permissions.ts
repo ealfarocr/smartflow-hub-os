@@ -70,9 +70,13 @@ export function getDefaultToolsForRole(role: Role): ToolKey[] {
 }
 
 // Presets opcionales para la UI de edición — puntos de partida, no reglas
-// forzadas; el admin puede seguir marcando/desmarcando libremente.
+// forzadas; el admin puede seguir marcando/desmarcando libremente. Desactivar
+// una herramienta acá SOLO oculta el panel/bloquea la ruta para esa persona
+// — no apaga Multi-Agente/Agente IA en background, ni excluye al asesor del
+// Auditor IA (que sigue analizando todas las conversaciones del tenant
+// independientemente de quién puede ver su panel).
 export const TOOL_PRESETS: Record<string, ToolKey[]> = {
-  Vendedor: ['crm', 'conversaciones', 'cotizaciones', 'catalogo', 'agenda'],
+  Vendedor: ['crm', 'conversaciones', 'cotizaciones', 'catalogo'],
   Supervisor: ['crm', 'conversaciones', 'multi-agent', 'cotizaciones', 'catalogo', 'agenda', 'auditoria'],
   Admin: [...ALL_TOOL_KEYS],
 };
