@@ -8,6 +8,7 @@ import { ALL_TOOL_KEYS, TOOL_LABELS, ADMIN_ONLY_TOOLS, TOOL_PRESETS, getEffectiv
 import { httpsCallable, getFunctions } from 'firebase/functions';
 import { DeviceManagerModal } from './DeviceManagerModal';
 import { VendorAccessModal, VendorAccessData } from './VendorAccessModal';
+import { formatLastSeen } from '@/utils/formatLastSeen';
 
 export const UsersManagementView = () => {
   const { teamMembers, presenceMap, workSessionMap, updateMemberRole, updateMemberStatus, createDraftMember, sendInvitation, createPreparedMember, convertPreparedToDraft, updateAllowedTools, subscribe, isLoading } = useUserStore();
@@ -324,11 +325,10 @@ export const UsersManagementView = () => {
     if (!p || u.status === 'pending') {
       return <span className="text-slate-400 text-xs italic">Sin actividad registrada</span>;
     }
-    const lastActive = new Date(p.lastActiveAt);
     return (
       <div className="flex flex-col">
         <span className="text-slate-700 dark:text-slate-200 text-xs font-semibold">
-          {formatLastSeen(lastActive)}
+          {formatLastSeen(p.lastActiveAt)}
         </span>
         <span className="text-[10px] text-[#1877F2] dark:text-primary-400 font-bold truncate max-w-[150px]">
           📍 {p.currentRoute}
@@ -784,18 +784,3 @@ export const UsersManagementView = () => {
     </div>
   );
 };
-
-/** Helper to format last seen time */
-function formatLastSeen(date: Date): string {
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  
-  if (diffMin < 2) return 'Activo ahora';
-  if (diffMin < 60) return `Visto hace ${diffMin} min`;
-  
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `Visto hace ${diffH}h`;
-  
-  return `Visto el ${date.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`;
-}

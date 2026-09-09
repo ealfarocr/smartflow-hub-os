@@ -4,7 +4,9 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
 import { useAuthStore } from '@/stores/authStore';
+import { useUIStore } from '@/stores/uiStore';
 import { PresenceService } from '@/services/firebase/PresenceService';
+import { usePresenceTracker } from '@/hooks/usePresenceTracker';
 import { forgetDeviceAndIdentity } from '@/utils/deviceTrust';
 import { OperationalStatus, UserPresence, WorkSession } from '@/types';
 import { Loader2, LayoutGrid, UserCog } from 'lucide-react';
@@ -24,15 +26,39 @@ const STATUS_BUTTONS: { status: OperationalStatus; label: string; emoji: string;
 export const MyShiftView = () => {
   const navigate = useNavigate();
   const { user, activeMembership } = useAuthStore();
+  const { addToast } = useUIStore();
+  // BUG real encontrado: esta ruta (/mi-turno) nunca pasa por MainLayout —
+  // es la única que llama usePresenceTracker() ahora mismo (ver
+  // MainLayout.tsx). Un vendedor que entra por PIN aterriza directo acá, así
+  // que sin esto su user_presence nunca recibía status/lastSeenAt/
+  // lastActiveAt (solo operationalStatus, escrito por setOperationalStatus)
+  // ni el heartbeat de tickPresence — se veía OFFLINE con "Visto el Invalid
+  // Date" aunque el turno sí cambiara bien en Firestore.
+  usePresenceTracker();
   const [presence, setPresence] = useState<UserPresence | null>(null);
   const [session, setSession] = useState<WorkSession | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  // Optimista: refleja el estado tocado AL INSTANTE, sin esperar el
+  // round-trip de setOperationalStatus + el onSnapshot de abajo. Se
+  // reconcilia solo (useEffect más abajo) apenas Firestore confirma el
+  // mismo valor, y se revierte a null (deja mandar a `presence` real) si el
+  // backend rechaza el cambio.
+  const [optimisticStatus, setOptimisticStatus] = useState<OperationalStatus | null>(null);
 
   useEffect(() => {
     if (!user?.id || !activeMembership?.tenantId) return;
     const presenceId = `${activeMembership.tenantId}_${user.id}`;
     const unsub = onSnapshot(doc(db, 'user_presence', presenceId), (snap) => {
-      setPresence(snap.exists() ? (snap.data() as UserPresence) : null);
+      const data = snap.exists() ? (snap.data() as UserPresence) : null;
+      setPresence(data);
+      // Reconciliación acá mismo (no en un efecto derivado aparte): apenas
+      // Firestore confirma el mismo valor que ya se mostraba de forma
+      // optimista, se suelta — currentStatus vuelve a reflejar directamente
+      // `presence`, incluido si otro dispositivo/sesión cambia el estado
+      // mientras tanto. Forma funcional para no depender de un
+      // optimisticStatus capturado en un closure viejo de este callback.
+      const next = data?.operationalStatus ?? 'off_shift';
+      setOptimisticStatus((prev) => (prev === next ? null : prev));
     });
     return () => unsub();
   }, [user?.id, activeMembership?.tenantId]);
@@ -49,13 +75,17 @@ export const MyShiftView = () => {
     return () => unsub();
   }, [presence?.activeWorkSessionId]);
 
-  const currentStatus: OperationalStatus = presence?.operationalStatus || 'off_shift';
+  const currentStatus: OperationalStatus = optimisticStatus ?? presence?.operationalStatus ?? 'off_shift';
 
   const handleSelect = async (status: OperationalStatus) => {
     if (!user?.id || !activeMembership?.tenantId || status === currentStatus || isSaving) return;
+    setOptimisticStatus(status);
     setIsSaving(true);
     try {
       await PresenceService.setOperationalStatus(activeMembership.tenantId, status);
+    } catch {
+      setOptimisticStatus(null); // rollback — currentStatus vuelve a reflejar presence real
+      addToast('No se pudo cambiar el estado — intentá de nuevo', 'error');
     } finally {
       setIsSaving(false);
     }

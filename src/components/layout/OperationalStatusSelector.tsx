@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuthStore } from '@/stores/authStore';
+import { useUIStore } from '@/stores/uiStore';
 import { PresenceService } from '@/services/firebase/PresenceService';
 import { OperationalStatus, UserPresence } from '@/types';
 import { ChevronDown } from 'lucide-react';
@@ -26,7 +27,14 @@ const STATUS_ORDER: OperationalStatus[] = ['working', 'coffee', 'lunch', 'errand
 // reutiliza la misma PresenceService.setOperationalStatus.
 export const OperationalStatusSelector = () => {
   const { user, activeMembership } = useAuthStore();
-  const [status, setStatus] = useState<OperationalStatus>('off_shift');
+  const { addToast } = useUIStore();
+  const [firestoreStatus, setFirestoreStatus] = useState<OperationalStatus>('off_shift');
+  // Optimista: refleja el estado tocado al instante, sin esperar el
+  // round-trip de setOperationalStatus + este mismo onSnapshot. Se
+  // reconcilia solo apenas Firestore confirma el mismo valor, y se revierte
+  // a null (deja mandar a firestoreStatus real) si el backend rechaza el
+  // cambio.
+  const [optimisticStatus, setOptimisticStatus] = useState<OperationalStatus | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -37,10 +45,20 @@ export const OperationalStatusSelector = () => {
     const unsub = onSnapshot(doc(db, 'user_presence', presenceId), (snap) => {
       const data = snap.data() as UserPresence | undefined;
       // Sin operationalStatus todavía = off_shift (Fase 21) — nunca 'working' por defecto.
-      setStatus(data?.operationalStatus || 'off_shift');
+      const next = data?.operationalStatus || 'off_shift';
+      setFirestoreStatus(next);
+      // Reconciliación acá mismo (no en un efecto derivado aparte): apenas
+      // Firestore confirma el mismo valor que ya se mostraba de forma
+      // optimista, se suelta — status vuelve a reflejar directamente lo
+      // real, incluido si otro dispositivo/sesión cambia el estado mientras
+      // tanto. Forma funcional para no depender de un optimisticStatus
+      // capturado en un closure viejo de este mismo callback.
+      setOptimisticStatus((prev) => (prev === next ? null : prev));
     });
     return () => unsub();
   }, [user?.id, activeMembership?.tenantId]);
+
+  const status = optimisticStatus ?? firestoreStatus;
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -55,10 +73,14 @@ export const OperationalStatusSelector = () => {
       setIsOpen(false);
       return;
     }
+    setOptimisticStatus(next);
     setIsSaving(true);
     setIsOpen(false);
     try {
       await PresenceService.setOperationalStatus(activeMembership.tenantId, next);
+    } catch {
+      setOptimisticStatus(null); // rollback — status vuelve a reflejar firestoreStatus real
+      addToast('No se pudo cambiar el estado — intentá de nuevo', 'error');
     } finally {
       setIsSaving(false);
     }
