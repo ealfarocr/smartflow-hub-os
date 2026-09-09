@@ -7,6 +7,7 @@ import { Plus, Edit2, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIco
 import { ALL_TOOL_KEYS, TOOL_LABELS, ADMIN_ONLY_TOOLS, TOOL_PRESETS, getEffectiveTools, getDefaultToolsForRole, ToolKey } from '@/utils/permissions';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 import { DeviceManagerModal } from './DeviceManagerModal';
+import { VendorAccessModal, VendorAccessData } from './VendorAccessModal';
 
 export const UsersManagementView = () => {
   const { teamMembers, presenceMap, workSessionMap, updateMemberRole, updateMemberStatus, createDraftMember, sendInvitation, createPreparedMember, convertPreparedToDraft, updateAllowedTools, subscribe, isLoading } = useUserStore();
@@ -104,6 +105,7 @@ export const UsersManagementView = () => {
   // acceso por PIN — mismo destino final ('active') que el flujo por correo,
   // solo cambia cómo llega ahí.
   const [generatingPinId, setGeneratingPinId] = useState<string | null>(null);
+  const [vendorAccess, setVendorAccess] = useState<VendorAccessData | null>(null);
   const handleGeneratePin = async (id: string, name: string, tenantId: string) => {
     if (!window.confirm(`¿Generar PIN de acceso para ${name}?\n\nSi ya tiene uno, se reemplaza por uno nuevo.`)) return;
     setGeneratingPinId(id);
@@ -115,13 +117,10 @@ export const UsersManagementView = () => {
       const result = await setVendorPin({ membershipId: id });
       const { pin, loginHandle } = result.data;
       const link = `https://hub.smartflow-suite.com/acceso?h=${encodeURIComponent(loginHandle)}&t=${tenantId}&n=${encodeURIComponent(name)}`;
-      alert(
-        `Acceso generado para ${name}\n\n` +
-        `Usuario: ${loginHandle}\n` +
-        `PIN: ${pin}\n\n` +
-        `Compartí este link (abrilo UNA vez en su teléfono) + el PIN:\n${link}\n\n` +
-        `Después de esa primera vez, el teléfono queda reconocido y solo va a pedir el PIN.`
-      );
+      // FIX UX URGENTE: antes esto era un alert() — texto no seleccionable
+      // de forma práctica, sin botones de copiar. VendorAccessModal deja
+      // copiar enlace/PIN/mensaje completo para mandarlo por WhatsApp.
+      setVendorAccess({ name, loginHandle, pin, link });
       addToast('PIN generado', 'success');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al generar el PIN';
@@ -774,6 +773,12 @@ export const UsersManagementView = () => {
           userId={deviceModalUser.userId}
           userName={deviceModalUser.name}
           onClose={() => setDeviceModalUser(null)}
+        />
+      )}
+      {vendorAccess && (
+        <VendorAccessModal
+          data={vendorAccess}
+          onClose={() => setVendorAccess(null)}
         />
       )}
     </div>
