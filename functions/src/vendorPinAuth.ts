@@ -47,3 +47,29 @@ export function checkVendorPinAuth(input: VendorPinAuthInput): VendorPinAuthResu
 
   return { allowed: false, reason: 'no-active-admin' };
 }
+
+export interface PinLoginAllowedInput {
+  membershipExists: boolean;
+  membershipStatus: string | undefined;
+}
+
+export interface PinLoginAllowedResult {
+  allowed: boolean;
+  reason?: 'no-membership' | 'not-active';
+}
+
+/**
+ * LOOP — reutilización de teléfonos corporativos: loginWithPin nunca
+ * chequeaba el estado real de la membership, solo que el hash del PIN
+ * coincidiera contra vendor_credentials. Un vendedor desactivado
+ * (status:'suspended') podía seguir sacando un customToken válido mientras
+ * su PIN siguiera siendo el mismo — la desactivación bloqueaba acciones
+ * puntuales después (sendWhatsappMessage, claimConversation, etc. ya exigen
+ * status==='active'), pero nunca el login en sí. Esta es la única pieza que
+ * realmente le corta el acceso desde la puerta.
+ */
+export function checkPinLoginAllowed(input: PinLoginAllowedInput): PinLoginAllowedResult {
+  if (!input.membershipExists) return { allowed: false, reason: 'no-membership' };
+  if (input.membershipStatus !== 'active') return { allowed: false, reason: 'not-active' };
+  return { allowed: true };
+}

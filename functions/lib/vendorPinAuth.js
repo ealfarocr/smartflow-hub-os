@@ -10,6 +10,7 @@
 // SuperAdmin cierra ese círculo, y SOLO ese.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkVendorPinAuth = checkVendorPinAuth;
+exports.checkPinLoginAllowed = checkPinLoginAllowed;
 /**
  * Camino normal: el caller tiene una membership activa de Owner/Admin EN
  * ESTE MISMO tenant — la consulta que resuelve `callerMembership` ya está
@@ -32,5 +33,22 @@ function checkVendorPinAuth(input) {
         return { allowed: true };
     }
     return { allowed: false, reason: 'no-active-admin' };
+}
+/**
+ * LOOP — reutilización de teléfonos corporativos: loginWithPin nunca
+ * chequeaba el estado real de la membership, solo que el hash del PIN
+ * coincidiera contra vendor_credentials. Un vendedor desactivado
+ * (status:'suspended') podía seguir sacando un customToken válido mientras
+ * su PIN siguiera siendo el mismo — la desactivación bloqueaba acciones
+ * puntuales después (sendWhatsappMessage, claimConversation, etc. ya exigen
+ * status==='active'), pero nunca el login en sí. Esta es la única pieza que
+ * realmente le corta el acceso desde la puerta.
+ */
+function checkPinLoginAllowed(input) {
+    if (!input.membershipExists)
+        return { allowed: false, reason: 'no-membership' };
+    if (input.membershipStatus !== 'active')
+        return { allowed: false, reason: 'not-active' };
+    return { allowed: true };
 }
 //# sourceMappingURL=vendorPinAuth.js.map

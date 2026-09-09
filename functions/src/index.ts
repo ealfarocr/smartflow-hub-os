@@ -12,8 +12,9 @@ import {
   PIN_LOGIN_GENERIC_ERROR, DUMMY_PIN_SALT, DUMMY_PIN_HASH,
 } from './pinAuth';
 import { checkMembershipAuth, checkConversationTenantMatch } from './sendMessageAuth';
-import { checkVendorPinAuth } from './vendorPinAuth';
+import { checkVendorPinAuth, checkPinLoginAllowed } from './vendorPinAuth';
 import { shouldApplyStatusUpdate } from './messageStatusUpdate';
+import { checkTenantAdminAuth } from './tenantAdminAuth';
 
 admin.initializeApp();
 
@@ -2799,7 +2800,10 @@ export const loginWithPin = onCall({ maxInstances: 10 }, async (request) => {
   const credRef = db.collection('vendor_credentials').doc(membershipId);
 
   const result = await db.runTransaction(async (tx) => {
-    const credSnap = await tx.get(credRef);
+    const [credSnap, membershipSnap] = await Promise.all([
+      tx.get(credRef),
+      tx.get(db.collection('memberships').doc(membershipId)),
+    ]);
     if (!credSnap.exists) throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
     const cred = credSnap.data()!;
 
@@ -2818,6 +2822,21 @@ export const loginWithPin = onCall({ maxInstances: 10 }, async (request) => {
         console.warn('VENDOR_PIN_LOCKED', { membershipId, tenantId: cred.tenantId });
       }
       tx.update(credRef, update);
+      throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
+    }
+
+    // LOOP — reutilización de teléfonos corporativos: el PIN sigue siendo
+    // válido después de que Owner/Admin desactive a alguien (setVendorPin
+    // no se vuelve a llamar solo porque cambió el status, y desactivar no
+    // borra vendor_credentials — ver setMembershipActive). Sin este chequeo,
+    // un vendedor desactivado se podía loguear igual. Mismo error genérico
+    // que un PIN incorrecto, a propósito: nunca hay que dejarle a alguien
+    // distinguir "cuenta desactivada" de "PIN incorrecto" por la respuesta.
+    const pinLoginAuth = checkPinLoginAllowed({
+      membershipExists: membershipSnap.exists,
+      membershipStatus: membershipSnap.data()?.status,
+    });
+    if (!pinLoginAuth.allowed) {
       throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
     }
 
@@ -2926,6 +2945,85 @@ export const revokeDevice = onCall({ maxInstances: 10 }, async (request) => {
 
   console.log('DEVICE_REVOKED', { deviceId, tenantId: device.tenantId, revokedBy: request.auth.uid });
   return { deviceId };
+});
+
+/**
+ * Activa/desactiva el acceso de una membresía — LOOP: reutilización de
+ * teléfonos corporativos. Reemplaza el updateDoc directo del cliente que
+ * hacía esto antes (las Rules ya lo autorizaban bien: Owner/Admin del mismo
+ * tenant o SuperAdmin, pero sin guardar quién ni cuándo). No borra nada:
+ * conversaciones, leads, CRM, métricas y auditoría existentes siguen
+ * atribuidos a esta membership igual que antes — solo cambia `status` (y
+ * ahora, además, corta el acceso de verdad):
+ * - Al desactivar: revoca los refresh tokens de Firebase Auth del usuario
+ *   (si ya tiene cuenta técnica) — su sesión actual deja de poder renovarse
+ *   la próxima vez que el SDK intente refrescar el ID token. loginWithPin
+ *   (ver checkPinLoginAllowed) ya bloquea logins nuevos con status
+ *   distinto de 'active'; esto además corta una sesión YA ABIERTA.
+ * - Nunca se toca vendor_credentials/trusted_devices acá — "Revocar
+ *   dispositivo" (revokeDevice) sigue siendo una acción separada y
+ *   explícita, tal como se pidió.
+ */
+export const setMembershipActive = onCall({ maxInstances: 10 }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Usuario no autenticado');
+  const { membershipId, isActive } = request.data as { membershipId?: string; isActive?: boolean };
+  if (!membershipId || typeof isActive !== 'boolean') {
+    throw new HttpsError('invalid-argument', 'Falta membershipId o isActive');
+  }
+
+  const membershipRef = db.collection('memberships').doc(membershipId);
+  const membershipSnap = await membershipRef.get();
+  if (!membershipSnap.exists) throw new HttpsError('not-found', 'La membresía no existe');
+  const membership = membershipSnap.data()!;
+  const tenantId = membership.tenantId;
+
+  const callerUid = request.auth.uid;
+  const [callerUserSnap, callerMembershipSnap] = await Promise.all([
+    db.collection('users').doc(callerUid).get(),
+    db.collection('memberships').doc(`${callerUid}_${tenantId}`).get(),
+  ]);
+  const isSuperAdminCaller = callerUserSnap.exists && callerUserSnap.data()?.isSuperAdmin === true;
+  const callerMembershipData = callerMembershipSnap.data();
+
+  const auth = checkTenantAdminAuth({
+    isSuperAdmin: isSuperAdminCaller,
+    callerMembership: callerMembershipSnap.exists && callerMembershipData
+      ? { status: callerMembershipData.status, role: callerMembershipData.role }
+      : null,
+  });
+  if (!auth.allowed) {
+    throw new HttpsError('permission-denied', 'Solo un Owner/Admin activo de este negocio puede hacer esto.');
+  }
+
+  // Evita quedarse sin forma de revertirlo: nadie puede desactivar su
+  // propio acceso (si es el único Owner/Admin activo, esto lo dejaría
+  // fuera del mismo círculo cerrado que resolvió el bootstrap del primer
+  // Owner).
+  if (membershipId === `${callerUid}_${tenantId}` && !isActive) {
+    throw new HttpsError('failed-precondition', 'No podés desactivar tu propio acceso.');
+  }
+
+  await membershipRef.update({
+    status: isActive ? 'active' : 'suspended',
+    ...(isActive
+      ? { reactivatedAt: admin.firestore.FieldValue.serverTimestamp(), reactivatedBy: callerUid }
+      : { deactivatedAt: admin.firestore.FieldValue.serverTimestamp(), deactivatedBy: callerUid }),
+  });
+
+  if (!isActive && membership.userId) {
+    try {
+      await admin.auth().revokeRefreshTokens(membership.userId);
+    } catch (err) {
+      // No bloquea la desactivación en sí (el status ya cambió y
+      // loginWithPin/checkMembershipAuth ya lo van a rechazar) — solo
+      // significa que una sesión YA abierta puede tardar hasta que el SDK
+      // intente refrescar su token, en vez de cortarse al instante.
+      console.warn('MEMBERSHIP_DEACTIVATE_REVOKE_TOKENS_FAILED', { membershipId, error: (err as Error).message });
+    }
+  }
+
+  console.log(isActive ? 'MEMBERSHIP_REACTIVATED' : 'MEMBERSHIP_DEACTIVATED', { membershipId, tenantId, by: callerUid });
+  return { membershipId, status: isActive ? 'active' : 'suspended' };
 });
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -1,15 +1,16 @@
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  doc, 
+import {
+  collection,
+  query,
+  where,
+  onSnapshot,
+  doc,
   updateDoc,
   getDoc,
   getDocs,
   addDoc,
-  serverTimestamp 
+  serverTimestamp
 } from 'firebase/firestore';
+import { httpsCallable, getFunctions } from 'firebase/functions';
 import { db } from '@/lib/firebase';
 import { Membership, User } from '@/types';
 
@@ -179,12 +180,15 @@ export const UserService = {
   },
 
   /**
-   * Actualiza el estado de una membresía (Activo / Suspendido).
+   * Activa/desactiva una membresía. LOOP — reutilización de teléfonos
+   * corporativos: antes era un updateDoc directo (las Rules ya lo
+   * autorizaban bien, pero sin registrar quién/cuándo, y sin cortar acceso
+   * real — solo cambiaba el campo). Ahora pasa por setMembershipActive:
+   * registra auditoría (deactivatedAt/By o reactivatedAt/By) y, al
+   * desactivar, revoca los refresh tokens de Firebase Auth del usuario.
    */
   updateMembershipStatus: async (membershipId: string, isActive: boolean) => {
-    const docRef = doc(db, 'memberships', membershipId);
-    await updateDoc(docRef, { 
-       status: isActive ? 'active' : 'suspended' 
-    });
+    const setMembershipActive = httpsCallable<{ membershipId: string; isActive: boolean }, { membershipId: string; status: string }>(getFunctions(), 'setMembershipActive');
+    await setMembershipActive({ membershipId, isActive });
   }
 };

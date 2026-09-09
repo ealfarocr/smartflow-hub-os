@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkVendorPinAuth } from './vendorPinAuth';
+import { checkVendorPinAuth, checkPinLoginAllowed } from './vendorPinAuth';
 
 describe('checkVendorPinAuth — bootstrap del primer Owner (LOOP DE EMERGENCIA)', () => {
   it('1. 0 Owners activos + SuperAdmin bootstrapeando un Owner -> ALLOW', () => {
@@ -88,5 +88,32 @@ describe('checkVendorPinAuth — bootstrap del primer Owner (LOOP DE EMERGENCIA)
       tenantHasActiveOwner: false,
     });
     expect(result.allowed).toBe(false);
+  });
+});
+
+describe('checkPinLoginAllowed — reutilización de teléfonos corporativos (loginWithPin)', () => {
+  it('membership activa -> ALLOW', () => {
+    const result = checkPinLoginAllowed({ membershipExists: true, membershipStatus: 'active' });
+    expect(result.allowed).toBe(true);
+  });
+
+  it('membership desactivada (suspended) -> DENY — el caso real: Michelle no debe poder loguearse tras ser desactivada', () => {
+    const result = checkPinLoginAllowed({ membershipExists: true, membershipStatus: 'suspended' });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('not-active');
+  });
+
+  it('membership en cualquier otro estado no-activo (prepared/draft/pending) -> DENY', () => {
+    for (const status of ['prepared', 'draft', 'pending']) {
+      const result = checkPinLoginAllowed({ membershipExists: true, membershipStatus: status });
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toBe('not-active');
+    }
+  });
+
+  it('membership inexistente -> DENY con motivo distinto (no-membership, no not-active)', () => {
+    const result = checkPinLoginAllowed({ membershipExists: false, membershipStatus: undefined });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('no-membership');
   });
 });
