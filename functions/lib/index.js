@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.loginWithPin = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
+exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.loginWithPin = exports.getVendorAccessInfo = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const crypto = __importStar(require("crypto"));
@@ -2583,6 +2583,52 @@ exports.setVendorPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
     }, { merge: true });
     console.log('VENDOR_PIN_SET', { tenantId, membershipId, setBy: request.auth.uid, regenerated: credSnap.exists });
     return { pin, tenantId, loginHandle };
+});
+/**
+ * FIX URGENTE — el ícono 🔗 de "acceso" copiaba un link genérico
+ * (https://hub.smartflow-suite.com, que resuelve a /login) para CUALQUIER
+ * usuario que no fuera 'prepared'/'draft' — nunca su enlace real de acceso
+ * por PIN (/acceso?h=<loginHandle>&t=<tenantId>&n=<nombre>). Esta función
+ * devuelve ÚNICAMENTE el loginHandle (el dato público, no sensible, que
+ * completa ese link) — vendor_credentials tiene "allow read, write: if
+ * false" en las Rules, así que el cliente no puede leerlo directo. Nunca
+ * devuelve pinHash/pinSalt, y nunca "recupera" ni inventa el PIN en texto
+ * plano — si hace falta un PIN nuevo, ese es el trabajo de setVendorPin,
+ * una acción separada y explícita ("Generar nuevo PIN").
+ */
+exports.getVendorAccessInfo = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    const { membershipId } = request.data;
+    if (!membershipId)
+        throw new https_1.HttpsError('invalid-argument', 'Falta membershipId');
+    const membershipRef = db.collection('memberships').doc(membershipId);
+    const membershipSnap = await membershipRef.get();
+    if (!membershipSnap.exists)
+        throw new https_1.HttpsError('not-found', 'La membresía no existe');
+    const membership = membershipSnap.data();
+    const tenantId = membership.tenantId;
+    const callerUid = request.auth.uid;
+    const [callerUserSnap, callerMembershipSnap] = await Promise.all([
+        db.collection('users').doc(callerUid).get(),
+        db.collection('memberships').doc(`${callerUid}_${tenantId}`).get(),
+    ]);
+    const isSuperAdminCaller = callerUserSnap.exists && callerUserSnap.data()?.isSuperAdmin === true;
+    const callerMembershipData = callerMembershipSnap.data();
+    const auth = (0, tenantAdminAuth_1.checkTenantAdminAuth)({
+        isSuperAdmin: isSuperAdminCaller,
+        callerMembership: callerMembershipSnap.exists && callerMembershipData
+            ? { status: callerMembershipData.status, role: callerMembershipData.role }
+            : null,
+    });
+    if (!auth.allowed) {
+        throw new https_1.HttpsError('permission-denied', 'Solo un Owner/Admin activo de este negocio puede hacer esto.');
+    }
+    const credSnap = await db.collection('vendor_credentials').doc(membershipId).get();
+    if (!credSnap.exists) {
+        return { hasPinAccess: false };
+    }
+    return { hasPinAccess: true, loginHandle: credSnap.data().loginHandle };
 });
 /**
  * Acceso por PIN — el vendedor SOLO ve su nombre/usuario + PIN, nunca un

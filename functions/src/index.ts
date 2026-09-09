@@ -2764,6 +2764,54 @@ export const setVendorPin = onCall({ maxInstances: 10 }, async (request) => {
 });
 
 /**
+ * FIX URGENTE — el ícono 🔗 de "acceso" copiaba un link genérico
+ * (https://hub.smartflow-suite.com, que resuelve a /login) para CUALQUIER
+ * usuario que no fuera 'prepared'/'draft' — nunca su enlace real de acceso
+ * por PIN (/acceso?h=<loginHandle>&t=<tenantId>&n=<nombre>). Esta función
+ * devuelve ÚNICAMENTE el loginHandle (el dato público, no sensible, que
+ * completa ese link) — vendor_credentials tiene "allow read, write: if
+ * false" en las Rules, así que el cliente no puede leerlo directo. Nunca
+ * devuelve pinHash/pinSalt, y nunca "recupera" ni inventa el PIN en texto
+ * plano — si hace falta un PIN nuevo, ese es el trabajo de setVendorPin,
+ * una acción separada y explícita ("Generar nuevo PIN").
+ */
+export const getVendorAccessInfo = onCall({ maxInstances: 10 }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Usuario no autenticado');
+  const { membershipId } = request.data as { membershipId?: string };
+  if (!membershipId) throw new HttpsError('invalid-argument', 'Falta membershipId');
+
+  const membershipRef = db.collection('memberships').doc(membershipId);
+  const membershipSnap = await membershipRef.get();
+  if (!membershipSnap.exists) throw new HttpsError('not-found', 'La membresía no existe');
+  const membership = membershipSnap.data()!;
+  const tenantId = membership.tenantId;
+
+  const callerUid = request.auth.uid;
+  const [callerUserSnap, callerMembershipSnap] = await Promise.all([
+    db.collection('users').doc(callerUid).get(),
+    db.collection('memberships').doc(`${callerUid}_${tenantId}`).get(),
+  ]);
+  const isSuperAdminCaller = callerUserSnap.exists && callerUserSnap.data()?.isSuperAdmin === true;
+  const callerMembershipData = callerMembershipSnap.data();
+
+  const auth = checkTenantAdminAuth({
+    isSuperAdmin: isSuperAdminCaller,
+    callerMembership: callerMembershipSnap.exists && callerMembershipData
+      ? { status: callerMembershipData.status, role: callerMembershipData.role }
+      : null,
+  });
+  if (!auth.allowed) {
+    throw new HttpsError('permission-denied', 'Solo un Owner/Admin activo de este negocio puede hacer esto.');
+  }
+
+  const credSnap = await db.collection('vendor_credentials').doc(membershipId).get();
+  if (!credSnap.exists) {
+    return { hasPinAccess: false };
+  }
+  return { hasPinAccess: true, loginHandle: credSnap.data()!.loginHandle as string };
+});
+
+/**
  * Acceso por PIN — el vendedor SOLO ve su nombre/usuario + PIN, nunca un
  * membershipId. tenantId + loginHandle resuelven el membership vía
  * login_handles/{tenantId}_{handle} (índice, no legible desde el cliente).

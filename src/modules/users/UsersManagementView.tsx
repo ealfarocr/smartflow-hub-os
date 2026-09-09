@@ -7,7 +7,9 @@ import { Plus, Edit2, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIco
 import { ALL_TOOL_KEYS, TOOL_LABELS, ADMIN_ONLY_TOOLS, TOOL_PRESETS, getEffectiveTools, getDefaultToolsForRole, ToolKey } from '@/utils/permissions';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 import { DeviceManagerModal } from './DeviceManagerModal';
-import { VendorAccessModal, VendorAccessData } from './VendorAccessModal';
+import { VendorAccessModal } from './VendorAccessModal';
+import type { VendorAccessData } from './vendorAccessHelpers';
+import { buildAccessLink } from './vendorAccessHelpers';
 import { formatLastSeen } from '@/utils/formatLastSeen';
 
 export const UsersManagementView = () => {
@@ -117,17 +119,50 @@ export const UsersManagementView = () => {
       const setVendorPin = httpsCallable<{ membershipId: string }, { pin: string; tenantId: string; loginHandle: string }>(getFunctions(), 'setVendorPin');
       const result = await setVendorPin({ membershipId: id });
       const { pin, loginHandle } = result.data;
-      const link = `https://hub.smartflow-suite.com/acceso?h=${encodeURIComponent(loginHandle)}&t=${tenantId}&n=${encodeURIComponent(name)}`;
       // FIX UX URGENTE: antes esto era un alert() — texto no seleccionable
       // de forma práctica, sin botones de copiar. VendorAccessModal deja
       // copiar enlace/PIN/mensaje completo para mandarlo por WhatsApp.
-      setVendorAccess({ name, loginHandle, pin, link });
+      setVendorAccess({ name, loginHandle, pin, link: buildAccessLink(loginHandle, tenantId, name) });
       addToast('PIN generado', 'success');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al generar el PIN';
       addToast(message, 'error');
     } finally {
       setGeneratingPinId(null);
+    }
+  };
+
+  // FIX URGENTE — el ícono 🔗 copiaba un link genérico
+  // (https://hub.smartflow-suite.com, que resuelve a /login) para
+  // CUALQUIER usuario que no fuera prepared/draft, en vez de su enlace real
+  // de acceso por PIN. Ahora abre el mismo VendorAccessModal, pero en modo
+  // "ver" (pin:null — nunca se inventa ni se muestra un PIN viejo; la única
+  // forma de ver un PIN en texto plano es generar uno nuevo con 🔑, que
+  // invalida el anterior).
+  const [loadingAccessId, setLoadingAccessId] = useState<string | null>(null);
+  const handleViewAccess = async (id: string, name: string, tenantId: string) => {
+    setLoadingAccessId(id);
+    try {
+      const getVendorAccessInfo = httpsCallable<{ membershipId: string }, { hasPinAccess: boolean; loginHandle?: string }>(getFunctions(), 'getVendorAccessInfo');
+      const result = await getVendorAccessInfo({ membershipId: id });
+      if (!result.data.hasPinAccess || !result.data.loginHandle) {
+        addToast('Este usuario todavía no tiene un PIN generado', 'info');
+        return;
+      }
+      const { loginHandle } = result.data;
+      const member = teamMembers.find((m) => m.id === id);
+      setVendorAccess({
+        name,
+        loginHandle,
+        pin: null,
+        link: buildAccessLink(loginHandle, tenantId, name),
+        accessStatus: member?.status,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error al obtener el acceso del usuario';
+      addToast(message, 'error');
+    } finally {
+      setLoadingAccessId(null);
     }
   };
 
@@ -357,18 +392,16 @@ export const UsersManagementView = () => {
         >
           {sendingInviteId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </button>
-      ) : (
+      ) : activeMembership?.tenantId ? (
         <button
-          onClick={() => {
-            navigator.clipboard.writeText('https://hub.smartflow-suite.com');
-            addToast('Enlace de invitación copiado', 'success');
-          }}
-          className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"
-          title="Copiar enlace de invitación"
+          onClick={() => handleViewAccess(u.id, u.name, activeMembership.tenantId)}
+          disabled={loadingAccessId === u.id}
+          className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
+          title="Ver enlace de acceso"
         >
-          <LinkIcon className="w-4 h-4" />
+          {loadingAccessId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <LinkIcon className="w-4 h-4" />}
         </button>
-      )}
+      ) : null}
       {(u.status === 'prepared' || u.status === 'draft') && activeMembership?.tenantId && (
         <button
           onClick={() => handleGeneratePin(u.id, u.name, activeMembership.tenantId)}
