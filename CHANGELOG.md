@@ -2,6 +2,27 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — LOOP DE EMERGENCIA: causa raíz real de outbound WhatsApp USADITOS encontrada
+
+> No es un bug de SmartFlow. Ver `PROJECT_STATE.md` (sección "⚠️ BLOQUEADOR
+> ACTIVO") para el detalle completo y el next action exacto para Eduardo.
+
+- diagnóstico: prueba directa a Graph API (`POST /messages`) sin pasar por
+  ningún código de SmartFlow falla idéntico a través de SmartFlow —
+  `OAuthException code 1`. Descarta a SmartFlow como causa primaria con
+  evidencia directa, no por descarte de hipótesis.
+- hallazgo: `GET /{phone-number-id}?fields=health_status` (endpoint separado
+  del de envío, no consultado en auditorías anteriores de esta sesión) revela
+  la causa real, que `/messages` nunca muestra: la WABA tiene
+  `can_send_message: BLOCKED` por error de método de pago (código 141006,
+  "bloquea conversaciones iniciadas por el negocio") y estado inactivo
+  (código 141008); el Business tiene verificación de negocio pendiente
+  (código 141010). Esto explica por qué inbound siempre funcionó mientras
+  outbound siempre falló con un error genérico sin pista real.
+- no se tocó código de SmartFlow — no había nada que corregir ahí. No se
+  reintentó el envío sin que Eduardo primero resuelva el pago/verificación en
+  Meta Business Manager.
+
 ## 2026-09-09 — LOOP: `main` reconciliado con producción real
 
 > `main` volvió a representar exactamente el frontend desplegado. No se

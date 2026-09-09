@@ -1,8 +1,153 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ⚠️ BLOQUEADOR ACTIVO — Outbound WhatsApp USADITOS: causa raíz encontrada, requiere acción de Eduardo en Meta (2026-09-09)
+
+**No es un bug de SmartFlow.** Causa raíz encontrada con evidencia directa de
+Meta vía el endpoint `health_status` (`GET /{phone-number-id}?fields=health_status`),
+que expone razones específicas que el endpoint de envío (`POST /messages`)
+NUNCA muestra — ahí solo aparece el genérico `OAuthException code 1 "An
+unknown error has occurred."`.
+
+```json
+"can_send_message": "BLOCKED",
+entity WABA (1659672582339181):
+  can_send_message: BLOCKED
+  error 141006: "There is an error with the payment method.
+                 This will block business initiated conversations."
+                 → "Please add a new payment method to the account."
+  error 141008: "The WABA status is not active."
+                 → "Please contact the WhatsApp support team to activate the account."
+entity BUSINESS (484626874413322):
+  can_send_message: LIMITED
+  error 141010: "The Business has not passed business verification."
+                 → "Visit business settings and start or resolve the business
+                    verification request."
+```
+
+**NEXT_ACTION_FOR_EDUARDO (en este orden):**
+1. Entrar a Meta Business Manager (Business ID `484626874413322`) → Configuración
+   de pagos de WhatsApp de la WABA `1659672582339181` → agregar un método de
+   pago válido. Sin esto, Meta bloquea TODA conversación iniciada por el
+   negocio (outbound), aunque el inbound siga funcionando — exactamente lo que
+   se observaba.
+2. Completar la verificación de negocio (Business Verification) de ese Business
+   Manager — actualmente `not_verified` / `error 141010`.
+3. Si después de (1) y (2) el WABA sigue sin activarse (`error 141008: WABA
+   status is not active`), contactar soporte de WhatsApp/Meta Business
+   directamente citando ese código de error y el WABA ID.
+
+Esto **no se puede resolver por API** — agregar un método de pago requiere
+entrar datos financieros reales en la interfaz de Meta Business Manager, una
+acción que le corresponde únicamente al dueño del negocio.
+
+Ver la sección "LOOP DE EMERGENCIA" más abajo para el diagnóstico completo,
+paso a paso, con las dos pruebas reales hechas (una desde SmartFlow, una
+directa a Meta sin pasar por SmartFlow — ambas fallan idéntico, confirmando
+que el código de SmartFlow no es la causa).
+
 > Documento de continuidad entre sesiones de agentes. Actualizar al final de cada sesión
 > que toque código: qué se investigó, qué se cambió, qué quedó pendiente de validar.
 > No reemplaza al historial de git — es un resumen de "dónde quedamos" para el próximo agente.
+
+## LOOP DE EMERGENCIA — Reparar outbound WhatsApp USADITOS (2026-09-09)
+
+### Fase 1 — Prueba directa a Meta, sin pasar por SmartFlow (obligatoria)
+
+`POST https://graph.facebook.com/v21.0/1354454937743475/messages` con el
+mismo token de la integración real (leído de Firestore, nunca impreso),
+payload mínimo oficial (`messaging_product`, `to`, `type:text`,
+`text.body:"Meta direct QA"`), completamente fuera del código de SmartFlow
+(script Node standalone, sin usar `functions/src/index.ts` para nada).
+
+**Resultado: falla idéntico.**
+```
+HTTP 500
+{
+  "error": {
+    "message": "An unknown error has occurred.",
+    "code": 1,
+    "type": "OAuthException",
+    "fbtrace_id": "Agn3Kwel-FHjeGnh2DaWTw4"
+  }
+}
+```
+
+**Decisión (regla del propio LOOP): SmartFlow queda descartado como causa
+primaria.** El mismo token, el mismo `phoneNumberId`, el mismo payload
+mínimo, sin ninguna línea de código de SmartFlow de por medio — falla igual.
+
+### Fase 2 — Auditoría de capacidad de envío (más allá de `CONNECTED`)
+
+`GET /1354454937743475?fields=verified_name,display_phone_number,quality_rating,platform_type,throughput,code_verification_status,name_status,new_name_status,is_official_business_account,messaging_limit_tier,status,account_mode`
+→ todo normal: `CONNECTED`, `CLOUD_API`, `VERIFIED`, `TIER_250`,
+`account_mode: LIVE`. Nada de esto explicaba el fallo — exactamente el
+patrón que el LOOP anticipó ("no quedarse con CONNECTED").
+
+**El campo que sí lo explica**: `GET /1354454937743475?fields=health_status`
+(documentado oficialmente en developers.facebook.com/documentation/business-messaging/whatsapp/support/health-status/,
+verificado en vivo antes de usarlo — no es un campo que hubiera consultado en
+sesiones anteriores de este mismo diagnóstico). Devuelve `can_send_message`
+por entidad (PHONE_NUMBER, WABA, BUSINESS, APP) — algo que el endpoint de
+envío nunca expone. Resultado completo:
+
+- **WABA (1659672582339181): `can_send_message: BLOCKED`**
+  - error 141006 — método de pago con error, bloquea conversaciones
+    iniciadas por el negocio.
+  - error 141008 — el estado del WABA no está activo.
+- **BUSINESS (484626874413322): `can_send_message: LIMITED`**
+  - error 141010 — el Business no pasó la verificación de negocio
+    (coincide con `business_verification_status: not_verified`, ya
+    conocido de auditorías anteriores, pero ahora con la confirmación
+    explícita de que SÍ es una causa de bloqueo, no solo un dato
+    informativo).
+- PHONE_NUMBER: `LIMITED` (el nombre para mostrar aún no está aprobado —
+  secundario, no bloqueante por sí solo).
+- APP: `AVAILABLE` (SmartFlow Hub Connect está bien).
+
+Esto explica perfectamente el patrón observado toda la sesión: **inbound
+funciona** (no requiere que el WABA pueda iniciar conversaciones) pero
+**outbound siempre falla** con un error genérico que no dice nada — porque
+la razón real vive en `health_status`, no en la respuesta de `/messages`.
+
+### Fase 3 — Cadena de ownership
+
+`GET /1659672582339181/subscribed_apps` → confirma que "SmartFlow Hub
+Connect" (App ID `26569977219364152`) está correctamente suscrita.
+`GET /1659672582339181/phone_numbers` → confirma que el número
+`1354454937743475` pertenece a esa WABA, `status: CONNECTED`. Cadena
+`BUSINESS (484626874413322) -> WABA (1659672582339181) -> PHONE
+(1354454937743475) -> APP (26569977219364152)` confirmada íntegra — el
+problema no es de permisos ni de ownership, es de facturación/verificación
+a nivel de Business/WABA. (No se corrió `debug_token` — el App Secret no
+estaba disponible en el proceso de este script puntual; no hacía falta para
+llegar a la causa raíz, que ya quedó confirmada con evidencia directa y
+específica de Meta.)
+
+### Fases 4-8 — no aplicaron
+
+Con una causa raíz esta específica y con evidencia directa de Meta (dos
+códigos de error de Meta, con su propia solución sugerida por Meta mismo),
+las fases de re-registro, billing genérico, ventana de 24h y comparación de
+endpoint quedaron respondidas por el propio hallazgo de Fase 2 — el bloqueo
+es incondicional a nivel de WABA, no depende de la ventana de conversación
+ni de la versión de Graph API usada.
+
+### Fase 9 — No hay corrección reversible y segura disponible por API
+
+Agregar un método de pago o completar la verificación de negocio en Meta
+Business Manager son acciones que requieren datos financieros/legales reales
+del dueño del negocio, ingresados directamente en la interfaz de Meta — no
+se pueden ni se deben hacer por API ni por mí. No se tocó nada más de
+SmartFlow (ya se había descartado como causa en Fase 1).
+
+### Fase 10 — No se hizo un envío final adicional
+
+La prueba directa de Fase 1 YA es un envío real que falló con evidencia
+completa. Reintentar sin haber corregido nada del lado de Meta habría violado
+la regla explícita del LOOP ("si vuelve a fallar, NO repetir automáticamente").
+Cuando Eduardo confirme que agregó el método de pago y/o avanzó la
+verificación de negocio, un solo reintento real (`SmartFlow QA Final`) debería
+bastar para confirmar el fix.
 
 ## Qué es este proyecto
 
