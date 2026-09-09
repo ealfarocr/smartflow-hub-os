@@ -2,6 +2,20 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — FIX VISUAL: botones de estado de turno (color completo al estar activo)
+
+- fix: `OperationalStatusSelector` (dropdown del header, mobile y desktop)
+  solo coloreaba un punto de 2.5px por estado — el estado activo era casi
+  indistinguible salvo por una etiqueta "Actual" chiquita. Ahora el botón
+  completo se llena del color: Trabajando=verde, Café/Pausa=amarillo,
+  Almuerzo=naranja, Diligencia=azul, Terminar turno=rojo, con borde
+  coherente y `active:scale` para feedback táctil. Texto elegido por
+  contraste real (amber-400/orange-500 con texto blanco fallan WCAG AA
+  ~1.6:1/~2.4:1 — usan texto oscuro; los otros 3 usan blanco). Sin cambios a
+  PresenceService, Firestore ni lógica de estados. `MyShiftView.tsx` (la
+  pantalla móvil separada) ya lo hacía bien y no se tocó.
+- deploy: `hosting:app` únicamente, commit `43e6e4a`, ya en `main`.
+
 ## 2026-09-09 — FIX URGENTE: bootstrap del primer Owner (USADITOS sin ningún Owner activo)
 
 > Corregido y desplegado. Falta 1 paso manual de Eduardo (generar el PIN de
