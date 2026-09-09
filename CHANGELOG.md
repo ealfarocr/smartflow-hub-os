@@ -2,6 +2,16 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — FIX UX: "Ir al sistema completo" pasa a ser la acción principal en /mi-turno
+
+- fix: en `/mi-turno`, "Ir al sistema completo" vivía al fondo con la misma
+  jerarquía visual que "Cambiar de usuario" (texto gris chiquito). Nuevo
+  orden: estado → **Ir al sistema completo** (botón primario, ancho
+  completo, color de marca `#1877F2`, ícono de grid) → Turno de hoy →
+  Cambiar de usuario (secundario, al fondo). Sin cambios a rutas ni lógica
+  de turno/Presence.
+- deploy: `hosting:app` únicamente, commit `1759232`, ya en `main`.
+
 ## 2026-09-09 — FIX VISUAL: botones de estado de turno (color completo al estar activo)
 
 - fix: `OperationalStatusSelector` (dropdown del header, mobile y desktop)
