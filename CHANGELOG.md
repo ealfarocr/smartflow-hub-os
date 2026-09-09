@@ -2,6 +2,20 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — FIX UX URGENTE: popup de acceso de usuario ahora es copiable
+
+- fix: generar el PIN de un vendedor mostraba un `alert()` nativo — texto no
+  seleccionable en la práctica, sin botón de copiar. Nuevo
+  `VendorAccessModal.tsx`: botones "Copiar enlace", "Copiar PIN" y, como
+  acción principal, "Copiar mensaje completo" (texto listo para pegar en
+  WhatsApp: Acceso SmartFlow / Usuario / PIN / Enlace / instrucción de un
+  solo uso) — 3 tests sobre el formato del mensaje. Feedback "Copiado" por
+  botón. `navigator.clipboard` con fallback a `textarea`+`execCommand` si
+  falla o el contexto no es seguro. El PIN solo vive en el estado local del
+  componente — nunca se loguea ni se persiste en otro lado. `setVendorPin` y
+  su lógica de autorización no se tocaron.
+- deploy: `hosting:app` únicamente, commit `38fea80`, ya en `main`.
+
 ## 2026-09-09 — FIX UX: "Ir al sistema completo" pasa a ser la acción principal en /mi-turno
 
 - fix: en `/mi-turno`, "Ir al sistema completo" vivía al fondo con la misma
