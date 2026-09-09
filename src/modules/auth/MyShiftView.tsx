@@ -96,7 +96,7 @@ export const MyShiftView = () => {
         <h1 className="text-slate-900 dark:text-white text-3xl font-black mb-8">{user.name}</h1>
 
         <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Tu estado</p>
-        <div className="space-y-3 mb-10">
+        <div className="space-y-3 mb-6">
           {STATUS_BUTTONS.map((btn) => {
             const isActive = btn.status === currentStatus;
             return (
@@ -117,6 +117,18 @@ export const MyShiftView = () => {
           })}
         </div>
 
+        {/* FIX UX — acción principal: marcaste tu estado, ahora entrás al
+            sistema. Antes vivía al fondo, con la misma jerarquía visual que
+            "Cambiar de usuario" (acción rara, casi de emergencia) — como si
+            fueran igual de importantes. */}
+        <button
+          onClick={() => navigate('/')}
+          className="w-full flex items-center justify-center gap-2.5 px-5 py-4 rounded-2xl text-base font-black text-white shadow-lg active:scale-[0.98] transition-all mb-8"
+          style={{ backgroundColor: 'var(--primary)' }}
+        >
+          <LayoutGrid className="w-5 h-5" /> Ir al sistema completo
+        </button>
+
         {session && (
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5 mb-8">
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Turno de hoy</p>
@@ -133,13 +145,7 @@ export const MyShiftView = () => {
           </div>
         )}
 
-        <div className="mt-auto space-y-1">
-          <button
-            onClick={() => navigate('/')}
-            className="w-full flex items-center justify-center gap-2 text-sm font-bold text-slate-400 hover:text-slate-600 py-3"
-          >
-            <LayoutGrid className="w-4 h-4" /> Ir al sistema completo
-          </button>
+        <div className="mt-auto">
           <button
             onClick={handleSwitchUser}
             className="w-full flex items-center justify-center gap-2 text-sm font-bold text-slate-400 hover:text-slate-600 py-3"
