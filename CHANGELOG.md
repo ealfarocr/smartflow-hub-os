@@ -2,6 +2,30 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — FIX URGENTE: ícono 🔗 abría /login en vez del enlace real de acceso
+
+- fix(bug real confirmado): la rama `else` de `renderActions` (mostrada para
+  cualquier usuario que no fuera prepared/draft — incluidos los de acceso
+  por PIN como "eduardo pruebas") copiaba `https://hub.smartflow-suite.com`
+  a secas — el link raíz, que resuelve a `/login` para cualquiera sin
+  sesión. Lógica vieja, pensada solo para invitación por email, nunca
+  actualizada cuando se agregó el acceso por PIN.
+- fix: 🔗 ahora llama a la función nueva `getVendorAccessInfo` (reusa
+  `checkTenantAdminAuth`, mismos 7 tests de siempre) que devuelve ÚNICAMENTE
+  el `loginHandle` — nunca el PIN ni su hash (`vendor_credentials` sigue
+  con `allow read, write: if false`) — y abre `VendorAccessModal` en modo
+  "ver" (`pin: null`, sin fila de PIN, sin inventar ni mostrar uno viejo).
+  "Generar nuevo PIN" (🔑) sigue siendo la única acción que efectivamente
+  muestra un PIN, una sola vez, recién generado.
+- refactor: `buildAccessLink`/`buildFullMessage`/`copyToClipboard`/
+  `VendorAccessData` extraídos a `vendorAccessHelpers.ts` (7 tests, 5
+  nuevos — cubren el caso real "eduardo pruebas"/`t-1788554584458`, tildes,
+  nombres con espacios/símbolos, y que nunca construye sobre `/login`). De
+  paso corrige un `react-refresh/only-export-components` que ya existía
+  antes de este cambio.
+- deploy: `functions:getVendorAccessInfo`, `hosting:app`. Commit `5766cc2`,
+  ya en `main`.
+
 ## 2026-09-09 — FIX URGENTE: sincronización móvil + Presence OFFLINE + Invalid Date
 
 > Los 3 síntomas, causa raíz real (confirmada leyendo código, no supuesta).
