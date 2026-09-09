@@ -12,6 +12,7 @@ import {
   PIN_LOGIN_GENERIC_ERROR, DUMMY_PIN_SALT, DUMMY_PIN_HASH,
 } from './pinAuth';
 import { checkMembershipAuth, checkConversationTenantMatch } from './sendMessageAuth';
+import { checkVendorPinAuth } from './vendorPinAuth';
 import { shouldApplyStatusUpdate } from './messageStatusUpdate';
 
 admin.initializeApp();
@@ -2628,7 +2629,39 @@ export const setVendorPin = onCall({ maxInstances: 10 }, async (request) => {
   const membership = membershipSnap.data()!;
   const tenantId = membership.tenantId;
 
-  await assertCallerIsTenantAdmin(request.auth.uid, tenantId);
+  // LOOP DE EMERGENCIA 2026-09-09: bootstrap del primer Owner. Un tenant
+  // recién creado tiene todos sus Owners en 'prepared' — nadie tiene una
+  // membership activa todavía, así que la regla normal (solo Owner/Admin
+  // activo administra accesos) deja al tenant sin forma de arrancar: nadie
+  // puede llamar setVendorPin para activar al primer Owner. Se permite a un
+  // SuperAdmin bootstrapear ÚNICAMENTE cuando el tenant tiene 0 Owners
+  // activos Y la membership objetivo es de rol Owner — se apaga solo apenas
+  // exista un Owner activo. Decisión testeada en vendorPinAuth.test.ts.
+  const callerUid = request.auth.uid;
+  const [callerUserSnap, callerMembershipSnap, activeOwnerSnap] = await Promise.all([
+    db.collection('users').doc(callerUid).get(),
+    db.collection('memberships').doc(`${callerUid}_${tenantId}`).get(),
+    db.collection('memberships')
+      .where('tenantId', '==', tenantId)
+      .where('role', '==', 'Owner')
+      .where('status', '==', 'active')
+      .limit(1)
+      .get(),
+  ]);
+  const isSuperAdminCaller = callerUserSnap.exists && callerUserSnap.data()?.isSuperAdmin === true;
+  const callerMembershipData = callerMembershipSnap.data();
+
+  const pinAuth = checkVendorPinAuth({
+    isSuperAdmin: isSuperAdminCaller,
+    callerMembership: callerMembershipSnap.exists && callerMembershipData
+      ? { status: callerMembershipData.status, role: callerMembershipData.role }
+      : null,
+    targetMembershipRole: membership.role,
+    tenantHasActiveOwner: !activeOwnerSnap.empty,
+  });
+  if (!pinAuth.allowed) {
+    throw new HttpsError('permission-denied', 'Solo un Owner/Admin activo de este negocio puede hacer esto.');
+  }
 
   const credRef = db.collection('vendor_credentials').doc(membershipId);
   const credSnap = await credRef.get();
