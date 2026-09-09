@@ -6,12 +6,17 @@ import { PresenceService } from '@/services/firebase/PresenceService';
 import { OperationalStatus, UserPresence } from '@/types';
 import { ChevronDown } from 'lucide-react';
 
-const STATUS_META: Record<OperationalStatus, { label: string; dot: string }> = {
-  working: { label: 'Trabajando', dot: 'bg-emerald-500' },
-  coffee: { label: 'Café / Pausa', dot: 'bg-amber-400' },
-  lunch: { label: 'Almuerzo', dot: 'bg-orange-500' },
-  errand: { label: 'Diligencia', dot: 'bg-blue-500' },
-  off_shift: { label: 'Terminar turno', dot: 'bg-red-500' },
+const STATUS_META: Record<OperationalStatus, { label: string; dot: string; activeBg: string; activeText: string }> = {
+  // activeBg/activeText: fondo completo del botón cuando ese estado está
+  // activo (antes solo cambiaba el dot de 2.5px, casi invisible en mobile).
+  // activeText elegido por contraste real, no copiado a ciegas de blanco
+  // para todos — amber-400/orange-500 con texto blanco no pasan WCAG AA
+  // (~1.6:1 y ~2.4:1); con texto oscuro sí.
+  working: { label: 'Trabajando', dot: 'bg-emerald-500', activeBg: 'bg-emerald-500 border-emerald-600', activeText: 'text-white' },
+  coffee: { label: 'Café / Pausa', dot: 'bg-amber-400', activeBg: 'bg-amber-400 border-amber-500', activeText: 'text-amber-950' },
+  lunch: { label: 'Almuerzo', dot: 'bg-orange-500', activeBg: 'bg-orange-500 border-orange-600', activeText: 'text-orange-950' },
+  errand: { label: 'Diligencia', dot: 'bg-blue-500', activeBg: 'bg-blue-500 border-blue-600', activeText: 'text-white' },
+  off_shift: { label: 'Terminar turno', dot: 'bg-red-500', activeBg: 'bg-red-500 border-red-600', activeText: 'text-white' },
 };
 const STATUS_ORDER: OperationalStatus[] = ['working', 'coffee', 'lunch', 'errand', 'off_shift'];
 
@@ -75,17 +80,25 @@ export const OperationalStatusSelector = () => {
       </button>
       {isOpen && (
         <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 py-1.5 z-50">
-          {STATUS_ORDER.map((s) => (
-            <button
-              key={s}
-              onClick={() => handleSelect(s)}
-              className="w-full flex items-center gap-2.5 px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-            >
-              <span className={`w-2.5 h-2.5 rounded-full ${STATUS_META[s].dot}`} />
-              {STATUS_META[s].label}
-              {s === status && <span className="ml-auto text-[10px] text-slate-400">Actual</span>}
-            </button>
-          ))}
+          {STATUS_ORDER.map((s) => {
+            const meta = STATUS_META[s];
+            const isActive = s === status;
+            return (
+              <button
+                key={s}
+                onClick={() => handleSelect(s)}
+                className={`w-full flex items-center gap-2.5 px-4 py-2 text-sm border-2 transition-colors active:scale-[0.98] ${
+                  isActive
+                    ? `${meta.activeBg} ${meta.activeText} font-bold`
+                    : 'border-transparent font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                }`}
+              >
+                <span className={`w-2.5 h-2.5 rounded-full ${isActive ? 'bg-white/70' : meta.dot}`} />
+                {meta.label}
+                {isActive && <span className="ml-auto text-[10px] font-bold uppercase tracking-wide opacity-80">Actual</span>}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
