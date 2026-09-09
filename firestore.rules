@@ -162,14 +162,34 @@ service cloud.firestore {
     }
     
     match /packages/{pkgId} {
+      // P1 SEGURIDAD: "isTenantAdmin(request.resource.data.tenantId || resource.data.tenantId)"
+      // evaluaba el tenantId PROPUESTO por el cliente antes que el del doc
+      // existente — un admin del Tenant B podía update/delete un package del
+      // Tenant A con solo mandar tenantId:B en el payload. Ahora update/delete
+      // se autorizan SIEMPRE contra resource.data.tenantId (el dueño real), y
+      // tenantId queda inmutable en update.
       allow read: if isTenantMember(resource.data.tenantId) || isSuperAdmin();
-      allow create, update, delete: if isTenantAdmin(request.resource.data.tenantId || resource.data.tenantId) || isSuperAdmin();
+      allow create: if isTenantAdmin(request.resource.data.tenantId) || isSuperAdmin();
+      allow update: if (
+        isTenantAdmin(resource.data.tenantId) &&
+        request.resource.data.tenantId == resource.data.tenantId
+      ) || isSuperAdmin();
+      allow delete: if isTenantAdmin(resource.data.tenantId) || isSuperAdmin();
     }
 
     match /catalog/{itemId} {
+      // P1 SEGURIDAD: "isTenantMember(resource.data.tenantId) || isTenantMember(request.resource.data.tenantId)"
+      // dejaba que CUALQUIER miembro (no solo admin) de un tenant ajeno se
+      // "adueñara" de un item de catálogo con solo mandar su propio tenantId
+      // en el update — la membresía en el tenant RECLAMADO alcanzaba. Ahora
+      // update se autoriza solo contra el tenantId real del doc, y ese campo
+      // queda inmutable.
       allow read: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
       allow create: if isSuperAdmin() || isTenantMember(request.resource.data.tenantId);
-      allow update: if isSuperAdmin() || isTenantMember(resource.data.tenantId) || isTenantMember(request.resource.data.tenantId);
+      allow update: if isSuperAdmin() || (
+        isTenantMember(resource.data.tenantId) &&
+        request.resource.data.tenantId == resource.data.tenantId
+      );
       allow delete: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
     }
     
@@ -206,7 +226,25 @@ service cloud.firestore {
     }
     
     match /integrations/{integrationId} {
-      allow read, create, update, delete: if isTenantAdmin(resource.data.tenantId || request.resource.data.tenantId) || isSuperAdmin();
+      // BUG REAL encontrado por el canary de Embedded Signup (LOOP Fase 9):
+      // "resource.data.tenantId || request.resource.data.tenantId" no es un
+      // "usar resource, si no existe usar request" al estilo JS — el operador
+      // || de Firestore Rules exige booleanos en AMBOS lados. Con
+      // resource.data.tenantId siendo un STRING no vacío, esto tira un error
+      // de tipo ("Received: [string] Expected: [bool]") y Firestore trata
+      // cualquier error de evaluación de regla como DENY — sin importar el
+      // rol. Confirmado con el emulador real: rompía el read/delete para
+      // TODO usuario (Owner, Admin, e incluso SuperAdmin, porque el error
+      // aborta la expresión completa antes de llegar al || isSuperAdmin()),
+      // sobre CUALQUIER doc existente. Para read/delete, resource SIEMPRE
+      // existe (no se puede leer/borrar lo que no existe) — el fallback a
+      // request nunca hacía falta ahí, solo en create.
+      allow read, delete: if isTenantAdmin(resource.data.tenantId) || isSuperAdmin();
+      allow create: if isTenantAdmin(request.resource.data.tenantId) || isSuperAdmin();
+      allow update: if (
+        isTenantAdmin(resource.data.tenantId) &&
+        request.resource.data.tenantId == resource.data.tenantId
+      ) || isSuperAdmin();
     }
 
     // Conexiones de marketing (Facebook Page Access Token, Instagram Business, Blog).
@@ -224,15 +262,101 @@ service cloud.firestore {
     // de tenant). Doc ID real es `{tenantId}_{uid}` (ver PresenceService.ts)
     // y siempre se escribe con esos dos campos, así que se puede exigir que
     // coincidan.
+    // LOOP Fase 10: la lectura se restringió más — ahora que el doc trae
+    // operationalStatus (dónde/en qué pausa está cada vendedor AHORA), un
+    // asesor cualquiera ya no puede leer la presencia del resto del equipo,
+    // solo la propia; el panel de equipo (Owner/Admin) sigue viendo todo.
+    //
+    // CHECKPOINT DE SEGURIDAD (post-Bloque 5): operationalStatus/
+    // operationalStatusChangedAt/activeWorkSessionId son SOLO del Admin SDK
+    // (setOperationalStatus en functions/src/index.ts) — el cliente puede
+    // seguir escribiendo su propio heartbeat de presencia TÉCNICA
+    // (status online/idle/offline, lastSeenAt, currentRoute — eso ya estaba
+    // bien y se conserva), pero el update() de create/update exige
+    // explícitamente que esos 3 campos NO cambien vía escritura directa del
+    // cliente (create: no pueden venir seteados; update: hasOnly excluye
+    // los 3 de la lista de campos que el cliente puede tocar).
     match /user_presence/{presenceId} {
-      allow read: if isTenantMember(resource.data.tenantId);
+      allow read: if isAuthenticated() && (
+        resource.data.uid == request.auth.uid ||
+        isTenantAdmin(resource.data.tenantId) ||
+        isSuperAdmin()
+      );
       allow create: if isAuthenticated() &&
         request.auth.uid == request.resource.data.uid &&
-        isTenantMember(request.resource.data.tenantId);
+        isTenantMember(request.resource.data.tenantId) &&
+        !('operationalStatus' in request.resource.data) &&
+        !('operationalStatusChangedAt' in request.resource.data) &&
+        !('activeWorkSessionId' in request.resource.data);
       allow update: if isAuthenticated() &&
         request.auth.uid == resource.data.uid &&
         request.resource.data.tenantId == resource.data.tenantId &&
-        isTenantMember(resource.data.tenantId);
+        isTenantMember(resource.data.tenantId) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'lastSeenAt', 'lastActiveAt', 'currentRoute', 'authProvider', 'userAgent', 'updatedAt', 'email', 'displayName', 'role']);
+    }
+
+    // Sesiones de turno (LOOP Fase 9) — CHECKPOINT DE SEGURIDAD: ya NO es
+    // self-write. startedAt/endedAt/activeSeconds/idleSeconds/status son
+    // telemetría que decide el Owner/Admin (presencia y tiempo operativo del
+    // equipo), así que un vendedor con acceso al navegador no puede
+    // fabricarlos ni editarlos — solo setOperationalStatus/tickPresence
+    // (Admin SDK) escriben acá.
+    match /work_sessions/{sessionId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isTenantAdmin(resource.data.tenantId) ||
+        isSuperAdmin()
+      );
+      allow write: if false;
+    }
+
+    // Log de cambios de estado operativo (LOOP Fase 9) — CHECKPOINT DE
+    // SEGURIDAD: ya NO se crea desde el cliente. changedAt/fromStatus/
+    // toStatus los escribe únicamente setOperationalStatus (Admin SDK),
+    // dentro de la misma transacción que abre/cierra/actualiza el
+    // work_session — así la línea de tiempo del día no se puede falsificar
+    // ni queda inconsistente con la sesión.
+    match /work_status_events/{eventId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isTenantAdmin(resource.data.tenantId) ||
+        isSuperAdmin()
+      );
+      allow write: if false;
+    }
+
+    // Credenciales de PIN de vendedores (LOOP dispositivo confiable) —
+    // NUNCA accesible desde el cliente, ni siquiera de lectura: el pinHash
+    // salteado, el authUid técnico y el contador de intentos fallidos solo
+    // los toca el Admin SDK de functions/src/index.ts (setVendorPin,
+    // loginWithPin). Esto es intencional, no un placeholder por completar.
+    match /vendor_credentials/{membershipId} {
+      allow read, write: if false;
+    }
+
+    // Índice de resolución "tenantId + usuario visible (Michelle) -> PIN
+    // login" (checkpoint de seguridad: el vendedor nunca ve/usa un
+    // membershipId). Mismo criterio que vendor_credentials — inalcanzable
+    // desde el cliente, solo loginWithPin/setVendorPin (Admin SDK) lo leen
+    // o escriben. Si fuera legible, listar esta colección revelaría todos
+    // los usuarios válidos de un tenant (enumeración).
+    match /login_handles/{handleId} {
+      allow read, write: if false;
+    }
+
+    // Dispositivos confiables (LOOP) — de lectura sí (para que el propio
+    // vendedor vea "sus" dispositivos y el Owner/Admin vea los de su equipo),
+    // pero de escritura NUNCA desde el cliente: todo pasa por registerDevice/
+    // renameDevice/revokeDevice (Admin SDK) para que un cliente comprometido
+    // no pueda auto-otorgarse confianza ni revivir un dispositivo revocado.
+    match /trusted_devices/{deviceId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isTenantAdmin(resource.data.tenantId) ||
+        isSuperAdmin()
+      );
+      allow write: if false;
     }
 
     match /tasks/{taskId} {
@@ -243,9 +367,75 @@ service cloud.firestore {
     }
 
     match /payment_requests/{requestId} {
+      // Privado — solo el tenant dueño y SuperAdmin. La página pública
+      // /pay/{id} NUNCA lee esta colección directamente (requeriría
+      // isAuthenticated(), que un cliente pagando jamás cumple) — lee
+      // public_payment_links, el snapshot sanitizado de abajo.
       allow read: if isAuthenticated() && (isTenantMember(resource.data.tenantId) || isSuperAdmin());
       allow create: if isTenantMember(request.resource.data.tenantId) || isSuperAdmin();
-      allow update: if isTenantMember(resource.data.tenantId) || isSuperAdmin();
+      // status 'paid' se escribe por DOS vías:
+      // 1) backend (verifyPaypalOrder/capturePaymentRequestPaypalOrder, Admin
+      //    SDK, bypasea esta regla) tras confirmar el cobro real con PayPal.
+      // 2) Owner/Admin del tenant confirmando manualmente un pago local
+      //    (SINPE/transferencia) — ver bloque isTenantAdmin abajo. Un
+      //    miembro cualquiera puede seguir administrando el link (archivar/
+      //    expirar) pero nunca tocar 'paid' por la vía genérica, ni
+      //    "despagar" uno ya confirmado (una vez paid, ninguna de las dos
+      //    ramas de client-side vuelve a aceptar cambios).
+      allow update: if isSuperAdmin() || (
+        isTenantMember(resource.data.tenantId) &&
+        request.resource.data.tenantId == resource.data.tenantId &&
+        (
+          (request.resource.data.status != 'paid' && resource.data.status != 'paid') ||
+          (
+            // Confirmación manual: solo Owner/Admin, solo pending -> paid,
+            // sin tocar monto/moneda/identidad del link ni el usuario que
+            // firma la confirmación.
+            isTenantAdmin(resource.data.tenantId) &&
+            resource.data.status == 'pending' &&
+            request.resource.data.status == 'paid' &&
+            request.resource.data.amount == resource.data.amount &&
+            request.resource.data.currency == resource.data.currency &&
+            request.resource.data.customer == resource.data.customer &&
+            request.resource.data.concept == resource.data.concept &&
+            request.resource.data.paymentMethod in ['sinpe', 'bank'] &&
+            request.resource.data.paidBy == request.auth.uid
+          )
+        )
+      );
+      allow delete: if isTenantAdmin(resource.data.tenantId) || isSuperAdmin();
+    }
+
+    // Snapshot público y mínimo de un link de pago — lo único que la página
+    // pública /pay/{id} puede leer sin autenticación. Se genera junto con
+    // payment_requests (mismo ID, mismo batch, ver PaymentService.createRequest)
+    // y NUNCA contiene el documento de settings completo del tenant ni
+    // ningún token/accessToken — solo los campos de contacto de pago que el
+    // asesor eligió incluir en ESE link puntual.
+    match /public_payment_links/{linkId} {
+      allow read: if true;
+      allow create: if isTenantMember(request.resource.data.tenantId) || isSuperAdmin();
+      // Mismo criterio que payment_requests: el tenant puede administrar el
+      // link (expirarlo, etc.) pero 'paid' solo lo escribe el backend tras un
+      // cobro real con PayPal, o Owner/Admin confirmando manualmente un pago
+      // local — nunca el negocio por la vía genérica, y mucho menos el
+      // pagador (que ni siquiera está autenticado).
+      allow update: if isSuperAdmin() || (
+        isTenantMember(resource.data.tenantId) &&
+        request.resource.data.tenantId == resource.data.tenantId &&
+        (
+          (request.resource.data.status != 'paid' && resource.data.status != 'paid') ||
+          (
+            isTenantAdmin(resource.data.tenantId) &&
+            resource.data.status == 'pending' &&
+            request.resource.data.status == 'paid' &&
+            request.resource.data.amount == resource.data.amount &&
+            request.resource.data.currency == resource.data.currency &&
+            request.resource.data.customer == resource.data.customer &&
+            request.resource.data.concept == resource.data.concept
+          )
+        )
+      );
       allow delete: if isTenantAdmin(resource.data.tenantId) || isSuperAdmin();
     }
 

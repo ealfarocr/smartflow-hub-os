@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.acceptTenantInvite = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
+exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.loginWithPin = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const crypto = __importStar(require("crypto"));
@@ -46,6 +46,9 @@ const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const mail_1 = __importDefault(require("@sendgrid/mail"));
 const axios_1 = __importDefault(require("axios"));
+const pinAuth_1 = require("./pinAuth");
+const sendMessageAuth_1 = require("./sendMessageAuth");
+const messageStatusUpdate_1 = require("./messageStatusUpdate");
 admin.initializeApp();
 const db = admin.firestore();
 /**
@@ -100,14 +103,78 @@ function isRateLimited(phoneNumber) {
         return true;
     return false;
 }
-// Limpia entradas expiradas del mapa cada 5 minutos para evitar memory leak
-setInterval(() => {
+// Limpia entradas expiradas del mapa cada 5 minutos para evitar memory leak.
+// .unref() es necesario: un timer de módulo sin unref() mantiene vivo el
+// event loop del proceso que usa `firebase deploy` para analizar el código
+// y detectar los exports (Node nunca "termina" mientras el timer siga
+// activo) — causaba "Cannot determine backend specification. Timeout after
+// 10000" al desplegar CUALQUIER función de este archivo. unref() no afecta
+// el comportamiento en Cloud Functions/Cloud Run (esos entornos no dependen
+// de que el proceso termine solo).
+const rateLimitCleanupInterval = setInterval(() => {
     const now = Date.now();
     for (const [key, val] of rateLimitMap.entries()) {
         if (now - val.windowStart > RATE_LIMIT_WINDOW_MS * 2)
             rateLimitMap.delete(key);
     }
 }, 5 * 60000);
+rateLimitCleanupInterval.unref();
+/**
+ * GUARDRAIL "ZERO HALLUCINATED PRICES" — el LLM NO es fuente de verdad de
+ * precio/producto. Hoy no existe un catálogo estructurado (los precios viven
+ * en texto libre subido por el negocio, ver knowledgeContext) — así que la
+ * validación real posible es: todo monto que la IA mencione en su respuesta
+ * debe aparecer TAMBIÉN, literalmente, en los documentos fuente del propio
+ * negocio. Un monto que no aparece en ningún lado del material fuente es una
+ * señal fuerte de precio inventado — más barato bloquear un falso positivo
+ * ocasional (precio real pero mal formateado) que dejar pasar un precio
+ * inventado a un cliente real.
+ *
+ * Extrae "tokens de precio": números asociados a un símbolo de moneda (₡, $)
+ * o a una palabra de moneda/precio (colones, dólares, USD, CRC), normalizados
+ * a solo dígitos para comparar el valor numérico sin importar el formato
+ * (₡200.000 vs 200000 vs 200,000 deben matchear).
+ */
+function extractPriceTokens(text) {
+    const tokens = new Set();
+    if (!text)
+        return tokens;
+    const re = /(?:[₡$]\s?\d[\d.,]*)|(?:\d[\d.,]*\s?(?:colones|dólares|dolares|usd|crc))/gi;
+    const matches = text.match(re) || [];
+    for (const m of matches) {
+        const digitsOnly = m.replace(/\D/g, '').replace(/^0+/, '');
+        if (digitsOnly.length >= 2)
+            tokens.add(digitsOnly); // ignora ruido de 1 dígito (ej. "$1" de un emoji o similar)
+    }
+    return tokens;
+}
+/**
+ * También dispara si la respuesta usa lenguaje de precio/descuento SIN un
+ * monto numérico reconocible (ej. "tiene descuento" sin decir cuánto) — ese
+ * caso no se puede validar contra la fuente, así que se trata como
+ * sospechoso igual, mejor pecar de cauteloso.
+ */
+const PRICE_LANGUAGE_RX = /₡|\$|precio|cuesta|descuento|%/i;
+function validateAiReplyPrices(aiReply, knowledgeContext) {
+    if (!PRICE_LANGUAGE_RX.test(aiReply))
+        return { ok: true };
+    const replyPrices = extractPriceTokens(aiReply);
+    if (replyPrices.size === 0) {
+        // Menciona precio/descuento/% pero sin un monto verificable — no se puede
+        // confirmar contra la fuente. Se deja pasar SOLO si tampoco hay % (que sí
+        // es chequeable por la regla de construcción existente) — en la práctica
+        // esto cubre frases como "tiene precio especial" sin monto, que son raras
+        // pero mejor no bloquear texto que no promete un número concreto.
+        return { ok: true };
+    }
+    const sourcePrices = extractPriceTokens(knowledgeContext);
+    const invalidTokens = [...replyPrices].filter((p) => !sourcePrices.has(p));
+    if (invalidTokens.length > 0) {
+        return { ok: false, reason: 'price_not_in_source', invalidTokens };
+    }
+    return { ok: true };
+}
+const AI_SAFE_ESCALATION_REPLY = 'Quiero confirmarte la información correcta antes de indicártela. Un asesor te ayuda con ese dato.';
 /**
  * Ejecuta el Piloto Automático con IA usando Gemini 1.5 Flash
  */
@@ -209,6 +276,7 @@ MENTALIDAD DE CIERRE (tu ADN — lo más importante):
 REGLAS ESTRICTAS:
 - Los precios en los documentos son los precios FINALES de contado en preventa. No existe ningún descuento adicional por pagar de contado — ese ya es el precio más bajo disponible.
 - Nunca inventes precios, descuentos o condiciones que no estén explícitamente en los documentos.
+- Si el cliente pregunta por un producto/precio/descuento específico y NO aparece en tus documentos: NO lo inventes ni des un número aproximado. Respondé exactamente: "Quiero confirmarte la información correcta antes de indicártela. Un asesor te ayuda con ese dato." y usa crm_action "seguimiento".
 - ⛔ PRESUPUESTO MENOR AL PRECIO (crítico): si el cliente dice tener un monto MENOR al precio mínimo (ej: "tengo 7 millones" y el lote inicia en su precio mínimo), JAMÁS le digas que con ese monto puede comprar, ni le ofrezcas el producto a ese precio, ni insinúes que "alcanza". Sé honesto y firme con el precio real de los documentos (ej: "Los lotes inician en [precio mínimo real] en preventa"). Luego pivota al valor: asesoría de crédito SIN COSTO, convenio CCSS y opciones de financiamiento para cubrir la diferencia. NUNCA bajes el precio, NUNCA negocies, NUNCA regales. El precio mínimo es intocable.
 - FORMAS DE PAGO / FINANCIAMIENTO: responde con lo que digan los documentos (contado, opciones de pago, asesoría de crédito) y usa el momento para AVANZAR la venta. Ej: "Manejamos contado en preventa al mejor precio, y te conectamos asesoría de crédito sin costo. ¿Cuál lote te está gustando?" Solo menciona que "el equipo coordina los términos exactos" DESPUÉS de dar la info general — nunca como respuesta evasiva de entrada.
 - ARCHIVOS — ENVÍO PROACTIVO: Cuando el cliente pide fotos, catálogo, información, precios o documentos: busca en ARCHIVOS DISPONIBLES y envía el más relevante poniendo su URL exacta en media_url y "image" o "document" en media_type. Si solo hay PDF → envíalo con reply "Aquí te comparto la información completa del proyecto." Si no hay ningún archivo disponible → di que un asesor coordinará el envío. NUNCA prometas enviar un archivo que no esté en ARCHIVOS DISPONIBLES.
@@ -419,6 +487,30 @@ Reglas para crm_action: null=conversación general | "seguimiento"=interés seri
                 aiReply = aiReply.replace(paymentMarker[0], '');
             }
         }
+        // GUARDRAIL DE PRECIO — última puerta antes de enviar. Si la respuesta
+        // menciona un monto que no está en los documentos fuente del negocio, se
+        // BLOQUEA el envío del texto original, se reemplaza por una respuesta
+        // segura, y se apaga el bot en esta conversación para que un humano la
+        // retome — nunca se manda un precio no verificado a un cliente real.
+        const priceCheck = validateAiReplyPrices(aiReply, knowledgeContext);
+        if (!priceCheck.ok) {
+            console.error('AI_PRICE_VALIDATION_FAILED', {
+                tenantId, conversationId, invalidTokens: priceCheck.invalidTokens, originalReply: aiReply,
+            });
+            aiReply = AI_SAFE_ESCALATION_REPLY;
+            await db.collection('conversations').doc(conversationId).update({ botEnabled: false }).catch(() => { });
+            await db.collection('notifications').add({
+                tenantId,
+                type: 'ai_price_validation_failed',
+                title: 'IA bloqueó un precio no verificado',
+                body: `Revisá la conversación de ${convData?.contactName || 'un cliente'} — la IA iba a mencionar un monto que no está en tus documentos. Se apagó el bot en esa conversación.`,
+                link: '/conversaciones',
+                leadId: convData?.leadId || null,
+                conversationId,
+                read: false,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            }).catch((e) => console.warn('[AI Autopilot] Notif price validation error:', e.message));
+        }
         console.log(`[AI Autopilot] Respuesta final: "${aiReply}"`);
         // ENVIAR RESPUESTA SEGÚN EL CANAL
         if (source === 'whatsapp') {
@@ -520,15 +612,25 @@ Reglas para crm_action: null=conversación general | "seguimiento"=interés seri
             // Resolver la etiqueta REAL de la etapa desde el pipeline del negocio (el tenant
             // puede haber renombrado las columnas, p.ej. "Agendo" en vez de "Agendado").
             // Se mapea por ID de etapa (estable); si no, por palabra clave; y por último al default.
+            //
+            // POLÍTICA (Fase 5 — go-live): "seguimiento" y "visita" son de riesgo bajo
+            // (reversibles, no declaran un resultado de negocio) y el LLM puede
+            // moverlas solo. "venta"/"perdido" quedan DELIBERADAMENTE fuera de este
+            // mapa — el LLM detecta la señal pero NUNCA mueve la etapa él mismo, ver
+            // el bloque de abajo que solo crea una notificación pidiendo confirmación
+            // humana. Antes "venta" sí movía a "Venta Realizada" automáticamente
+            // (ver notificación "¡Venta cerrada!" abajo) — eso es exactamente lo que
+            // un cliente ya sufrió con otro CRM/IA: un cierre falso-positivo sin que
+            // nadie lo confirme.
             const pipelineStages = settingsData.pipeline?.stages || [];
             const idForAction = {
-                seguimiento: 'seguimiento', visita: 'visita-tecnica', venta: 'venta-realizada', perdido: 'perdido',
+                seguimiento: 'seguimiento', visita: 'visita-tecnica',
             };
             const kwForAction = {
-                seguimiento: /seguim/i, visita: /agend|visita|cita/i, venta: /venta|vendid|cerrad|ganad/i, perdido: /perd/i,
+                seguimiento: /seguim/i, visita: /agend|visita|cita/i,
             };
             const fallbackLabel = {
-                seguimiento: 'Seguimiento', visita: 'Agendado', venta: 'Venta Realizada', perdido: 'Perdido',
+                seguimiento: 'Seguimiento', visita: 'Agendado',
             };
             const resolveStageLabel = (action) => {
                 const byId = pipelineStages.find((s) => s.id === idForAction[action]);
@@ -540,7 +642,7 @@ Reglas para crm_action: null=conversación general | "seguimiento"=interés seri
                     return byKw.label;
                 return fallbackLabel[action];
             };
-            const newStage = resolveStageLabel(crmAction);
+            const newStage = (crmAction === 'venta' || crmAction === 'perdido') ? undefined : resolveStageLabel(crmAction);
             if (newStage) {
                 // El leadId guardado en la conversación puede haber quedado huérfano
                 // (documento borrado/movido). Si el update falla por "not-found",
@@ -571,18 +673,37 @@ Reglas para crm_action: null=conversación general | "seguimiento"=interés seri
                     console.error(`[AI Autopilot] CRM: no se encontró ningún lead (ni por id ni por teléfono) para mover a "${newStage}"`);
                 }
             }
+            // "venta"/"perdido" NUNCA mueven la etapa solos (ver comentario arriba) —
+            // solo alertan a un humano para que confirme o descarte manualmente en
+            // el CRM. El bot tampoco confirma pago: eso sigue siendo exclusivo de
+            // "Confirmar pago recibido" (Owner/Admin, ver PaymentService.markAsPaid).
             if (crmAction === 'venta') {
+                console.log('AI_SALE_SUGGESTED', { tenantId, conversationId, leadId: convData.leadId });
                 await db.collection('notifications').add({
                     tenantId,
-                    type: 'venta_cerrada',
-                    title: '¡Venta cerrada! 🎉',
-                    body: `${convData.contactName || 'Cliente'} confirmó la compra`,
+                    type: 'venta_sugerida',
+                    title: 'Posible venta — confirmar en CRM',
+                    body: `${convData.contactName || 'Cliente'} parece haber confirmado la compra. Revisá y movelo a "Venta Realizada" manualmente si corresponde.`,
                     link: '/crm',
                     leadId: convData.leadId,
                     conversationId,
                     read: false,
                     createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                }).catch((e) => console.warn('[AI Autopilot] Notif venta error:', e.message));
+                }).catch((e) => console.warn('[AI Autopilot] Notif venta_sugerida error:', e.message));
+            }
+            if (crmAction === 'perdido') {
+                console.log('AI_LOST_SUGGESTED', { tenantId, conversationId, leadId: convData.leadId });
+                await db.collection('notifications').add({
+                    tenantId,
+                    type: 'perdido_sugerido',
+                    title: 'Posible lead perdido — confirmar en CRM',
+                    body: `${convData.contactName || 'Cliente'} parece haber rechazado la oferta. Revisá y movelo a "Perdido" manualmente si corresponde.`,
+                    link: '/crm',
+                    leadId: convData.leadId,
+                    conversationId,
+                    read: false,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                }).catch((e) => console.warn('[AI Autopilot] Notif perdido_sugerido error:', e.message));
             }
             // Solo agendar si hay una FECHA real confirmada por el cliente (nunca inventada).
             if (crmAction === 'visita' && visitDate) {
@@ -652,6 +773,100 @@ Reglas para crm_action: null=conversación general | "seguimiento"=interés seri
     }
     catch (err) {
         console.error('[AI Autopilot] Error:', err.message || err);
+    }
+}
+/**
+ * Elige el próximo asesor por round-robin y avanza el cursor, todo dentro de
+ * una transacción de Firestore sobre settings/{tenantId} — así, si dos
+ * conversaciones nuevas llegan casi al mismo tiempo para el mismo tenant,
+ * Firestore serializa/reintenta las transacciones en conflicto y ninguna
+ * lee un cursor obsoleto: no pueden terminar asignando la misma persona dos
+ * veces seguidas. La creación del documento de conversación en sí queda
+ * FUERA de esta transacción a propósito — el recurso compartido que hay que
+ * proteger es el cursor (un valor por tenant), no cada conversación
+ * individual, que es exclusiva de su propio flujo.
+ */
+async function assignConversationAdvisor(tenantId) {
+    console.log('MULTI_AGENT_ASSIGNMENT_START', { tenantId });
+    const settingsRef = db.collection('settings').doc(tenantId);
+    const membershipsQuery = db.collection('memberships').where('tenantId', '==', tenantId);
+    try {
+        return await db.runTransaction(async (tx) => {
+            const [settingsSnap, membershipsSnap] = await Promise.all([
+                tx.get(settingsRef),
+                tx.get(membershipsQuery),
+            ]);
+            const multiAgentConfig = settingsSnap.exists ? settingsSnap.data()?.multiAgentConfig : null;
+            // Modo Libre (o sin configurar todavía): la conversación entra sin
+            // advisorId — cualquier asesor elegible la puede reclamar a mano
+            // (ver claimConversation).
+            if (!multiAgentConfig?.isAutoDistributionEnabled) {
+                return { advisorId: null, assignmentSource: 'unassigned_free_mode' };
+            }
+            const includedUserIds = Array.isArray(multiAgentConfig.includedUserIds) ? multiAgentConfig.includedUserIds : [];
+            // null/undefined = todos los active+incluidos son elegibles (fallback,
+            // comportamiento por defecto); array explícito = lista curada — ver
+            // sección 8: este toggle NO afecta el estado de la cuenta del vendedor.
+            const leadEnabledUserIds = Array.isArray(multiAgentConfig.leadEnabledUserIds) ? multiAgentConfig.leadEnabledUserIds : null;
+            const candidateIds = [];
+            membershipsSnap.forEach(doc => {
+                const m = doc.data();
+                if (m.status !== 'active')
+                    return;
+                const identifier = m.userId || doc.id;
+                if (!includedUserIds.includes(identifier))
+                    return;
+                if (leadEnabledUserIds !== null && !leadEnabledUserIds.includes(identifier))
+                    return;
+                candidateIds.push(identifier);
+            });
+            // LOOP — dispositivo confiable + estado operativo: solo quien puso
+            // 'working' entra al pool de asignación AUTOMÁTICA. coffee/lunch/
+            // errand/off_shift lo sacan del round-robin sin tocar las conversaciones
+            // que ya tenía asignadas (eso no cambia acá, solo futuras asignaciones).
+            // Sin doc de presencia todavía (o sin operationalStatus) = tratar como
+            // off_shift, nunca 'working' por defecto (ver Fase 21 - migración).
+            const presenceSnaps = await Promise.all(candidateIds.map(id => tx.get(db.collection('user_presence').doc(`${tenantId}_${id}`))));
+            const eligibleIds = candidateIds.filter((_, i) => {
+                const presence = presenceSnaps[i];
+                return presence.exists && presence.data()?.operationalStatus === 'working';
+            });
+            // Orden determinístico y estable — el round-robin necesita una
+            // secuencia fija para que "el siguiente después del cursor" tenga
+            // sentido entre llamadas.
+            eligibleIds.sort();
+            console.log('MULTI_AGENT_ELIGIBLE_ADVISORS', { tenantId, candidateIds, eligibleIds });
+            if (eligibleIds.length === 0) {
+                console.warn('MULTI_AGENT_NO_ELIGIBLE_ADVISORS', { tenantId });
+                const notifRef = db.collection('notifications').doc();
+                tx.set(notifRef, {
+                    tenantId,
+                    type: 'multi_agent_unassigned',
+                    title: 'Conversación sin asignar ⚠️',
+                    body: 'Llegó una conversación nueva pero no hay ningún asesor elegible para recibir leads automáticamente. Revisá Multi-Agente.',
+                    link: '/multi-agent',
+                    read: false,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+                return { advisorId: null, assignmentSource: 'unassigned_no_eligible' };
+            }
+            const cursor = multiAgentConfig.roundRobinCursor;
+            const cursorIndex = cursor ? eligibleIds.indexOf(cursor) : -1;
+            const nextIndex = (cursorIndex + 1) % eligibleIds.length;
+            const selected = eligibleIds[nextIndex];
+            console.log('MULTI_AGENT_ROUND_ROBIN_SELECTED', { tenantId, selected, cursorIndex, nextIndex, eligibleCount: eligibleIds.length });
+            tx.update(settingsRef, {
+                'multiAgentConfig.roundRobinCursor': selected,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            console.log('MULTI_AGENT_ASSIGNMENT_SUCCESS', { tenantId, advisorId: selected });
+            return { advisorId: selected, assignmentSource: 'auto_round_robin' };
+        });
+    }
+    catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        console.error('[MultiAgente] Error en assignConversationAdvisor:', message);
+        return { advisorId: null, assignmentSource: 'unassigned_error' };
     }
 }
 /**
@@ -835,6 +1050,27 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                         utmSource = 'landing_page';
                         sourceLabel = 'Landing Page (botón web)';
                     }
+                    // Fase 4 go-live (atribución Meta): antes solo se guardaba sourceLabel
+                    // como STRING legible ("Campaña WhatsApp Ads — headline") — útil para
+                    // mostrar en el CRM, pero inservible el día que se implemente el envío
+                    // de eventos a Meta CAPI (necesita los IDs/campos crudos, no un texto
+                    // ya formateado). Se preserva el objeto `referral` completo tal como
+                    // llega de Meta, más los campos ya documentados hoy (source_type,
+                    // source_id, headline) sueltos para lectura fácil. El nombre exacto
+                    // del campo de click id de click-to-WhatsApp (`ctwa_clid` aquí) NO
+                    // está confirmado contra la documentación vigente de WhatsApp
+                    // Business Platform — por eso también se guarda `raw` completo: si el
+                    // campo real tiene otro nombre, no se pierde, solo no queda además
+                    // como columna suelta hasta confirmarlo. No se envía nada a Meta
+                    // todavía — esto es solo persistencia para no perder el dato.
+                    const adAttribution = referral ? {
+                        sourceType: referral.source_type || null,
+                        sourceId: referral.source_id || null,
+                        headline: referral.headline || null,
+                        ctwaClid: referral.ctwa_clid || null,
+                        raw: referral,
+                        capturedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    } : null;
                     // D.0 RESOLVER ETAPA POR DEFECTO DEL PIPELINE DEL TENANT
                     // El CRM (Kanban) solo renderiza leads cuya `stage` coincide con una etapa
                     // configurada en settings/{tenantId}.pipeline.stages. Si hardcodeamos 'Nuevo'
@@ -873,6 +1109,7 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                             source: 'WhatsApp',
                             utmSource,
                             productInterest: productInterest || '',
+                            ...(adAttribution ? { adAttribution } : {}),
                             stage: defaultStage,
                             lastActivity: new Date().toISOString(),
                             createdAt: new Date().toISOString(),
@@ -902,6 +1139,7 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                         .limit(1)
                         .get();
                     if (convSnapshot.empty) {
+                        const assignment = await assignConversationAdvisor(tenantId);
                         const newConvRef = await db.collection('conversations').add({
                             tenantId,
                             leadId,
@@ -919,9 +1157,25 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                             // chat con el toggle "Bot ON/OFF". Pedido explícito: nunca auto-ON.
                             botEnabled: false,
                             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                            advisorId: 'u-1'
+                            advisorId: assignment.advisorId || '',
+                            assignmentSource: assignment.assignmentSource,
+                            assignedAt: assignment.advisorId ? admin.firestore.FieldValue.serverTimestamp() : null,
+                            ...(adAttribution ? { adAttribution } : {}),
                         });
                         conversationId = newConvRef.id;
+                        // El lead se crea (paso D) ANTES de calcular la asignación de
+                        // Multi-Agente (recién disponible acá), así que siempre nacía con
+                        // advisorId:'' aunque la conversación sí quedara bien asignada —
+                        // el lead quedaba "Sin asignar" en el CRM aunque un asesor ya
+                        // tuviera la conversación. Se propaga la MISMA asignación al lead,
+                        // sin pisar un advisorId ya puesto a mano (ej. lead reusado).
+                        if (assignment.advisorId) {
+                            const leadRef = db.collection('leads').doc(leadId);
+                            const leadSnapForAssign = await leadRef.get();
+                            if (leadSnapForAssign.exists && !leadSnapForAssign.data()?.advisorId) {
+                                await leadRef.update({ advisorId: assignment.advisorId }).catch((e) => console.warn('[Webhook WA] No se pudo propagar advisorId al lead:', e.message));
+                            }
+                        }
                     }
                     else {
                         conversationId = convSnapshot.docs[0].id;
@@ -949,7 +1203,15 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                                     headers: { Authorization: `Bearer ${integrationData.accessToken}` }
                                 });
                                 const bucket = admin.storage().bucket();
-                                const filePath = `whatsapp-media/${tenantId}/${Date.now()}.${ext}`;
+                                // P1 SEGURIDAD: la ruta antes era `${tenantId}/${Date.now()}.${ext}`
+                                // — con el tenantId conocido y un timestamp en milisegundos
+                                // (rango acotado y adivinable), el audio/foto de un lead podía
+                                // enumerarse por fuerza bruta desde la URL pública. Se agrega un
+                                // token aleatorio de 16 bytes: sigue siendo una URL pública (no
+                                // rompe la reproducción de audio/video actual, que consume la
+                                // URL tal cual) pero deja de ser adivinable/enumerable.
+                                const randomToken = crypto.randomBytes(16).toString('hex');
+                                const filePath = `whatsapp-media/${tenantId}/${randomToken}.${ext}`;
                                 const fileRef = bucket.file(filePath);
                                 await fileRef.save(Buffer.from(mediaBuffer.data), { metadata: { contentType: mimeType } });
                                 await fileRef.makePublic();
@@ -963,7 +1225,22 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                         }
                     }
                     // G. TRANSACTIONAL PERSISTENCE (DEDUPLICATION + INSERCIÓN)
-                    await db.runTransaction(async (transaction) => {
+                    // El chequeo de arriba (dedupDoc.exists, paso A) es solo un fast-path
+                    // FUERA de la transacción — no cierra la ventana de carrera por sí
+                    // solo: Firestore solo detecta conflictos sobre documentos LEÍDOS
+                    // dentro de la transacción, y antes acá se hacía `transaction.set`
+                    // sin `transaction.get` previo. Dos entregas casi simultáneas del
+                    // mismo wamid (Meta reintenta si el webhook tarda, y este handler
+                    // baja medios a Storage de forma síncrona antes de llegar aquí, lo
+                    // que amplía la ventana) podían pasar ambas el chequeo externo antes
+                    // de que cualquiera terminara de comitear, y terminar creando el
+                    // mensaje/lead duplicado. Re-leer dedupRef DENTRO de la transacción
+                    // es lo que realmente cierra la ventana.
+                    const wasDuplicateInTransaction = await db.runTransaction(async (transaction) => {
+                        const dedupSnapInTx = await transaction.get(dedupRef);
+                        if (dedupSnapInTx.exists) {
+                            return true;
+                        }
                         // Registrar dedup
                         transaction.set(dedupRef, {
                             timestamp: admin.firestore.FieldValue.serverTimestamp(),
@@ -994,7 +1271,13 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
                             });
                         }
+                        return false;
                     });
+                    if (wasDuplicateInTransaction) {
+                        console.log('Documento duplicado omitido (detectado dentro de la transacción):', wamid);
+                        res.sendStatus(200);
+                        return;
+                    }
                     console.log(`Mensaje procesado para tenant ${tenantId}. Conv: ${conversationId}`);
                     // G. TRIGGER AI AUTOPILOT SI ESTÁ HABILITADO
                     if (integrationData.isAiAutomated) {
@@ -1004,11 +1287,47 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                         }).catch(e => console.error('Error running AI Autopilot WhatsApp:', e));
                     }
                 }
-                // G. GESTIÓN SILENCIOSA DE STATUSES (Delivery/Read Receipts)
+                // G. GESTIÓN DE STATUSES (Delivery/Read Receipts) — LOOP nocturno
+                // USADITOS, Fase 6. Antes esto solo logueaba; el mensaje se quedaba
+                // en status:'sent' para siempre aunque Meta confirmara delivered/read
+                // — afecta a TODOS los tenants, no solo a USADITOS. wamid es único
+                // globalmente en la plataforma de Meta, así que buscar por
+                // externalId con un collection-group query no tiene riesgo de
+                // ambigüedad entre tenants; igual se verifica abajo que la
+                // conversación dueña del mensaje sea la de ESTE tenant (defensa en
+                // profundidad, no debería poder fallar en la práctica).
                 if (value && value.statuses?.[0]) {
-                    const status = value.statuses[0];
-                    console.log(`Webhook Status Update: ${status.status} for wamid: ${status.id}`);
-                    // Aquí se podría actualizar el status del mensaje en Firestore en el futuro
+                    const statusUpdate = value.statuses[0];
+                    const wamid = statusUpdate.id;
+                    const newStatus = statusUpdate.status;
+                    console.log(`Webhook Status Update: ${newStatus} for wamid: ${wamid}`);
+                    try {
+                        const msgQuery = await db.collectionGroup('messages')
+                            .where('externalId', '==', wamid)
+                            .limit(1)
+                            .get();
+                        if (msgQuery.empty) {
+                            console.warn(`[Webhook Status] wamid desconocido (sin mensaje asociado): ${wamid}`);
+                        }
+                        else {
+                            const msgDoc = msgQuery.docs[0];
+                            const msgConversationRef = msgDoc.ref.parent.parent;
+                            const msgConvSnap = msgConversationRef ? await msgConversationRef.get() : null;
+                            if (!msgConvSnap?.exists || msgConvSnap.data()?.tenantId !== tenantId) {
+                                console.error(`[Webhook Status] wamid ${wamid} resolvió a una conversación de otro tenant — se ignora el update.`);
+                            }
+                            else if ((0, messageStatusUpdate_1.shouldApplyStatusUpdate)(msgDoc.data()?.status, newStatus)) {
+                                const updatePayload = { status: newStatus };
+                                if (newStatus === 'failed' && statusUpdate.errors?.[0]) {
+                                    updatePayload.errorMessage = statusUpdate.errors[0].title || statusUpdate.errors[0].message || 'Meta reportó un fallo de entrega';
+                                }
+                                await msgDoc.ref.update(updatePayload);
+                            }
+                        }
+                    }
+                    catch (statusErr) {
+                        console.error('[Webhook Status] Error procesando status update:', statusErr.message);
+                    }
                 }
             }
             catch (error) {
@@ -1154,6 +1473,7 @@ exports.metaWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).https.o
                             createdAt: new Date().toISOString(),
                             lastActivity: new Date().toISOString()
                         });
+                        const assignment = await assignConversationAdvisor(tenantId);
                         const newConvRef = await db.collection('conversations').add({
                             tenantId,
                             contactName,
@@ -1168,7 +1488,9 @@ exports.metaWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).https.o
                             // El bot SIEMPRE arranca apagado — el asesor lo activa a mano.
                             botEnabled: false,
                             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                            advisorId: 'u-1',
+                            advisorId: assignment.advisorId || '',
+                            assignmentSource: assignment.assignmentSource,
+                            assignedAt: assignment.advisorId ? admin.firestore.FieldValue.serverTimestamp() : null,
                             phoneRaw: '',
                             phoneE164: '',
                             phoneSearchKey: ''
@@ -1249,6 +1571,17 @@ exports.chatWithAgent = (0, https_1.onCall)({
             throw new https_1.HttpsError('invalid-argument', 'tenantId requerido');
         if (!messages?.length)
             throw new https_1.HttpsError('invalid-argument', 'messages requerido');
+        // P1 SEGURIDAD: antes se confiaba en el tenantId enviado por el cliente sin
+        // validar nada — cualquier usuario autenticado de CUALQUIER tenant podía
+        // pasar el tenantId de otro negocio y (a) recibir de vuelta, en las
+        // respuestas del chat, contenido de los documentos de entrenamiento
+        // privados de ese tenant ajeno, y (b) consumir su cupo mensual de
+        // consultas. Ahora se exige una membership activa del uid autenticado en
+        // EXACTAMENTE ese tenantId antes de leer nada de su configuración.
+        const callerMembershipSnap = await db.collection('memberships').doc(`${request.auth.uid}_${tenantId}`).get();
+        if (!callerMembershipSnap.exists || callerMembershipSnap.data()?.status !== 'active') {
+            throw new https_1.HttpsError('permission-denied', 'No tenés acceso activo a este negocio.');
+        }
         const apiKey = process.env.OPENAI_API_KEY;
         console.log('[chatWithAgent] apiKey present:', !!apiKey, '| length:', apiKey?.length ?? 0);
         if (!apiKey)
@@ -1470,10 +1803,30 @@ exports.sendWhatsappMessage = (0, https_1.onCall)({
         throw new https_1.HttpsError('invalid-argument', 'Faltan parámetros obligatorios');
     }
     // 2. VALIDACIÓN DE MEMBRESÍA Y ROL
+    // Bypass de SuperAdmin (mismo patrón que completeWhatsappEmbeddedSignup,
+    // Fase 4): un SuperAdmin puede no tener membership en el tenant que está
+    // operando (caso real: USADITOS todavía sin ningún miembro activado) y aun
+    // así necesita poder responder mensajes reales. El bypass es SOLO sobre el
+    // requisito de membership/rol — la validación de que la conversación
+    // pertenece exactamente a tenantId (paso 4, más abajo) sigue aplicando
+    // igual para SuperAdmin, así que no se abre ningún hueco cross-tenant.
+    // Decisión testeada en sendMessageAuth.test.ts (checkMembershipAuth).
+    const userSnap = await db.collection('users').doc(uid).get();
+    const isSuperAdminCaller = userSnap.exists && userSnap.data()?.isSuperAdmin === true;
     const membershipRef = db.collection('memberships').doc(`${uid}_${tenantId}`);
     const membershipDoc = await membershipRef.get();
-    if (!membershipDoc.exists || membershipDoc.data()?.status !== 'active') {
-        throw new https_1.HttpsError('permission-denied', 'No tienes una membresía activa en este tenant');
+    const membershipData = membershipDoc.data();
+    const membershipAuth = (0, sendMessageAuth_1.checkMembershipAuth)({
+        isSuperAdmin: isSuperAdminCaller,
+        membership: membershipDoc.exists && membershipData
+            ? { status: membershipData.status, role: membershipData.role }
+            : null,
+    });
+    if (!membershipAuth.allowed) {
+        const message = membershipAuth.reason === 'read-only-role'
+            ? 'Tu rol es de solo lectura — no podés enviar mensajes.'
+            : 'No tienes una membresía activa en este tenant';
+        throw new https_1.HttpsError('permission-denied', message);
     }
     // 3. OBTENER INTEGRACIÓN ACTIVA
     const integrationSnapshot = await db.collection('integrations')
@@ -1498,6 +1851,15 @@ exports.sendWhatsappMessage = (0, https_1.onCall)({
         throw new https_1.HttpsError('not-found', 'Conversación no encontrada');
     }
     const convData = conversationDoc.data();
+    // P1 SEGURIDAD: el chequeo de membresía (paso 2) solo prueba que el uid
+    // tiene acceso activo a `tenantId` — nunca que la conversación pedida
+    // pertenezca a ESE tenant. Sin esto, un usuario del Tenant A podía mandar
+    // tenantId:A (pasa el gate) pero conversationId de una conversación del
+    // Tenant B: se leía el teléfono destino de B, se enviaba el mensaje con el
+    // número de WhatsApp de A, y se escribía en el hilo de mensajes de B.
+    if (!(0, sendMessageAuth_1.checkConversationTenantMatch)(convData?.tenantId, tenantId)) {
+        throw new https_1.HttpsError('permission-denied', 'Esta conversación no pertenece a tu negocio.');
+    }
     const destinationPhone = convData?.phoneE164 || convData?.phoneRaw;
     if (convData?.lastMessageSender === 'advisor' && convData.lastMessageDate) {
         // Si el último que escribió fue el asesor, debemos verificar cuándo fue el último mensaje del LEAD
@@ -1536,6 +1898,11 @@ exports.sendWhatsappMessage = (0, https_1.onCall)({
     let status = 'sent';
     let externalId = `wamid.${crypto.randomBytes(8).toString('hex')}`;
     let errorMessage = '';
+    // Detalle estructurado del error de Meta (código/subcódigo/tipo/fbtrace_id),
+    // NUNCA el access token ni el App Secret — se persiste en Firestore para que
+    // un fallo real (como el de USADITOS) sea diagnosticable sin tener que ir a
+    // Cloud Logging cada vez. null cuando el envío es exitoso.
+    let metaErrorDetail = null;
     try {
         console.log(`Enviando mensaje HTTP a Meta para tenant ${tenantId}...`);
         // Switch between document or text payload
@@ -1605,7 +1972,19 @@ exports.sendWhatsappMessage = (0, https_1.onCall)({
         });
         const bodyData = await metaResponse.json();
         if (!metaResponse.ok) {
-            console.error('[Diagnostic] Meta API Error:', JSON.stringify(bodyData));
+            // Logging estructurado sin secretos (LOOP nocturno USADITOS, Fase 3):
+            // el catch de abajo solo tenía err.message — al perder el httpStatus,
+            // code/subcode/type/fbtrace_id, cada fallo real había que ir a
+            // reconstruirlo a mano desde Cloud Logging. Ahora queda en el propio
+            // documento del mensaje.
+            metaErrorDetail = {
+                httpStatus: metaResponse.status,
+                type: bodyData.error?.type,
+                code: bodyData.error?.code,
+                subcode: bodyData.error?.error_subcode,
+                fbtraceId: bodyData.error?.fbtrace_id,
+            };
+            console.error('[Diagnostic] Meta API Error:', JSON.stringify({ tenantId, phoneNumberId, to: messagePayload.to, ...metaErrorDetail, message: bodyData.error?.message }));
             throw new Error(bodyData.error?.message || 'Error en respuesta de Meta Graph API');
         }
         externalId = bodyData.messages?.[0]?.id || externalId;
@@ -1651,6 +2030,9 @@ exports.sendWhatsappMessage = (0, https_1.onCall)({
         status,
         externalId: status === 'sent' ? externalId : null,
         errorMessage: status === 'failed' ? errorMessage : null,
+        // Nunca incluye accessToken/appSecret — solo metadata de diagnóstico de
+        // Meta (LOOP nocturno USADITOS, Fase 3).
+        metaError: status === 'failed' && metaErrorDetail ? metaErrorDetail : null,
         ...(mediaUrl && { mediaUrl })
     };
     const msgRef = conversationRef.collection('messages').doc();
@@ -1690,12 +2072,36 @@ exports.completeWhatsappEmbeddedSignup = (0, https_1.onCall)({
     if (!code || !tenantId || !wabaId || !phoneNumberId) {
         throw new https_1.HttpsError('invalid-argument', 'Faltan parámetros obligatorios (code, tenantId, wabaId, phoneNumberId)');
     }
-    const membershipRef = db.collection('memberships').doc(`${uid}_${tenantId}`);
-    const membershipDoc = await membershipRef.get();
-    if (!membershipDoc.exists || membershipDoc.data()?.status !== 'active') {
-        throw new https_1.HttpsError('permission-denied', 'No tienes una membresía activa en este tenant');
+    // LOOP Fase 4 — validación server-side del rol, no solo de membresía activa.
+    // El tenantId viene del payload del cliente y nunca debe ser la única
+    // autoridad: se resuelve la membresía REAL de este uid en este tenant (o se
+    // exige SuperAdmin) antes de intercambiar el code con Meta. Asesor
+    // Comercial/Técnico/Solo lectura no pueden conectar/desconectar Meta aunque
+    // manipulen el payload, porque su rol real (de Firestore, no del cliente)
+    // no pasa el chequeo.
+    const userSnap = await db.collection('users').doc(uid).get();
+    const isSuperAdminCaller = userSnap.exists && userSnap.data()?.isSuperAdmin === true;
+    if (isSuperAdminCaller) {
+        // El SuperAdmin puede no tener membresía en el tenant que está conectando
+        // (justamente el caso de uso: conectar sin "Entrar" primero) — igual se
+        // exige que el tenant exista de verdad, no solo que el ID venga en el payload.
+        const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+        if (!tenantSnap.exists) {
+            throw new https_1.HttpsError('not-found', 'El tenant indicado no existe');
+        }
     }
-    const metaAppId = '265699977219364152'; // Meta App ID de SmartFlow Hub Connect (público)
+    else {
+        const membershipRef = db.collection('memberships').doc(`${uid}_${tenantId}`);
+        const membershipDoc = await membershipRef.get();
+        const membershipData = membershipDoc.data();
+        if (!membershipDoc.exists || membershipData?.status !== 'active') {
+            throw new https_1.HttpsError('permission-denied', 'No tienes una membresía activa en este tenant');
+        }
+        if (membershipData?.role !== 'Owner' && membershipData?.role !== 'Admin') {
+            throw new https_1.HttpsError('permission-denied', 'Solo Owner o Admin del negocio pueden conectar WhatsApp');
+        }
+    }
+    const metaAppId = '26569977219364152'; // Meta App ID de SmartFlow Hub Connect (público)
     const appSecret = (process.env.WHATSAPP_APP_SECRET || '').trim();
     if (!appSecret) {
         throw new https_1.HttpsError('failed-precondition', 'Falta configurar WHATSAPP_APP_SECRET en functions/.env');
@@ -1734,6 +2140,20 @@ exports.completeWhatsappEmbeddedSignup = (0, https_1.onCall)({
     catch (err) {
         console.warn('[completeWhatsappEmbeddedSignup] No se pudo leer info del número:', err?.response?.data || err.message);
     }
+    // P1 SEGURIDAD: antes nada impedía que el MISMO phoneNumberId quedara
+    // registrado como integración activa de DOS tenants distintos — el webhook
+    // (`.where('phoneNumberId','==',...).limit(1)`) resolvería el mensaje
+    // entrante a cualquiera de los dos de forma no determinística, filtrando
+    // conversaciones/leads del negocio real al negocio equivocado. Se rechaza
+    // la conexión si ese número ya está activo en OTRO tenant.
+    const collisionSnapshot = await db.collection('integrations')
+        .where('phoneNumberId', '==', phoneNumberId)
+        .where('isActive', '==', true)
+        .get();
+    const collidesWithOtherTenant = collisionSnapshot.docs.some((d) => d.data().tenantId !== tenantId);
+    if (collidesWithOtherTenant) {
+        throw new https_1.HttpsError('already-exists', 'Este número de WhatsApp ya está conectado a otro negocio en SmartFlow. Contactá a soporte antes de continuar.');
+    }
     const existingSnapshot = await db.collection('integrations')
         .where('tenantId', '==', tenantId)
         .where('provider', '==', 'whatsapp')
@@ -1744,11 +2164,145 @@ exports.completeWhatsappEmbeddedSignup = (0, https_1.onCall)({
         provider: 'whatsapp',
         isActive: true,
         phoneNumberId,
+        // wabaId es el campo canónico nuevo; whatsappBusinessAccountId se espeja
+        // por compatibilidad porque es el nombre que usa el formulario manual
+        // (IntegrationService.ts / IntegrationsPlaceholderView.tsx) y los 4
+        // tenants ya conectados por esa vía — así cualquier lectura futura, sea
+        // cual sea el nombre que use, encuentra el valor sin lógica condicional.
         wabaId,
+        whatsappBusinessAccountId: wabaId,
         accessToken,
         connectionType: connectionType === 'coexistent' ? 'coexistent' : 'api',
         displayPhoneNumber,
         verifiedName,
+        connectedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (existingSnapshot.empty) {
+        await db.collection('integrations').add(integrationData);
+    }
+    else {
+        await existingSnapshot.docs[0].ref.set(integrationData, { merge: true });
+    }
+    return { success: true, displayPhoneNumber, verifiedName };
+});
+/**
+ * saveManualWhatsAppConfig — LOOP nocturno USADITOS, Fase 4.
+ *
+ * Antes, el formulario manual (IntegrationsPlaceholderView.tsx) hacía un
+ * setDoc directo del cliente con isActive:true sin validar NADA contra Meta
+ * — exactamente la clase de hueco que dejó a USADITOS "verde/conectado" en
+ * SmartFlow con un phoneNumberId con un dígito trocado, indetectable hasta
+ * que se auditó manualmente. Esta función reemplaza ese setDoc directo:
+ * valida contra Meta que el phoneNumberId realmente pertenece a la WABA
+ * indicada (GET /{wabaId}/phone_numbers) y asegura la suscripción de la app
+ * (POST /{wabaId}/subscribed_apps, idempotente — no rompe nada si ya estaba
+ * suscrita) ANTES de guardar isActive:true. Si cualquiera de los dos pasos
+ * falla, no se guarda como activo — el usuario ve el error real de Meta, no
+ * un "Conectado" falso.
+ */
+exports.saveManualWhatsAppConfig = (0, https_1.onCall)({
+    maxInstances: 10,
+    timeoutSeconds: 30,
+}, async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    }
+    const { tenantId, phoneNumberId, wabaId, appSecret, verifyToken, accessToken, isAiAutomated, isActive } = request.data;
+    const uid = request.auth.uid;
+    // isActive default true (compatibilidad con clientes viejos que no mandan
+    // el campo); explícitamente false = solo pausar, no valida contra Meta.
+    const wantsActive = isActive !== false;
+    if (!tenantId || !phoneNumberId || !wabaId || !accessToken) {
+        throw new https_1.HttpsError('invalid-argument', 'Faltan campos obligatorios (Phone Number ID, WABA ID, Access Token).');
+    }
+    // Misma validación de rol que completeWhatsappEmbeddedSignup (Fase 4 del
+    // LOOP de Embedded Signup) — SuperAdmin sin membership, o Owner/Admin real.
+    const userSnap = await db.collection('users').doc(uid).get();
+    const isSuperAdminCaller = userSnap.exists && userSnap.data()?.isSuperAdmin === true;
+    if (isSuperAdminCaller) {
+        const tenantSnap = await db.collection('tenants').doc(tenantId).get();
+        if (!tenantSnap.exists) {
+            throw new https_1.HttpsError('not-found', 'El tenant indicado no existe');
+        }
+    }
+    else {
+        const membershipDoc = await db.collection('memberships').doc(`${uid}_${tenantId}`).get();
+        const membershipData = membershipDoc.data();
+        if (!membershipDoc.exists || membershipData?.status !== 'active') {
+            throw new https_1.HttpsError('permission-denied', 'No tienes una membresía activa en este tenant');
+        }
+        if (membershipData?.role !== 'Owner' && membershipData?.role !== 'Admin') {
+            throw new https_1.HttpsError('permission-denied', 'Solo Owner o Admin del negocio pueden conectar WhatsApp');
+        }
+    }
+    let displayPhoneNumber = null;
+    let verifiedName = null;
+    if (wantsActive) {
+        // Mismo bloqueo cross-tenant que completeWhatsappEmbeddedSignup — solo
+        // aplica cuando de verdad se está activando el número.
+        const collisionSnapshot = await db.collection('integrations')
+            .where('phoneNumberId', '==', phoneNumberId)
+            .where('isActive', '==', true)
+            .get();
+        const collidesWithOtherTenant = collisionSnapshot.docs.some((d) => d.data().tenantId !== tenantId);
+        if (collidesWithOtherTenant) {
+            throw new https_1.HttpsError('already-exists', 'Este número de WhatsApp ya está conectado a otro negocio en SmartFlow. Contactá a soporte antes de continuar.');
+        }
+        // 1. VALIDAR que el phoneNumberId realmente pertenece a esta WABA — sin
+        // esto, un typo (como el de USADITOS) queda invisible hasta el primer
+        // mensaje real.
+        try {
+            const phonesRes = await axios_1.default.get(`https://graph.facebook.com/v21.0/${wabaId}/phone_numbers`, {
+                params: { fields: 'id,display_phone_number,verified_name', access_token: accessToken },
+                timeout: 10000,
+            });
+            const match = (phonesRes.data?.data || []).find((p) => p.id === phoneNumberId);
+            if (!match) {
+                throw new https_1.HttpsError('failed-precondition', 'Ese Phone Number ID no pertenece a la WABA indicada (o el token no tiene acceso a esa WABA). Verificá ambos valores en Meta Business Settings.');
+            }
+            displayPhoneNumber = match.display_phone_number || null;
+            verifiedName = match.verified_name || null;
+        }
+        catch (err) {
+            if (err instanceof https_1.HttpsError)
+                throw err;
+            const metaMessage = err?.response?.data?.error?.message || err.message;
+            throw new https_1.HttpsError('failed-precondition', `No se pudo verificar el Phone Number ID contra la WABA: ${metaMessage}`);
+        }
+        // 2. ASEGURAR la suscripción de la app a la WABA — idempotente, si ya
+        // estaba suscrita Meta no hace nada distinto. Sin esto Meta nunca entrega
+        // webhooks aunque todo lo demás esté bien (el bug real que bloqueó el
+        // inbound de USADITOS antes de este LOOP).
+        try {
+            await axios_1.default.post(`https://graph.facebook.com/v21.0/${wabaId}/subscribed_apps`, {}, { params: { access_token: accessToken }, timeout: 10000 });
+        }
+        catch (err) {
+            const metaMessage = err?.response?.data?.error?.message || err.message;
+            throw new https_1.HttpsError('failed-precondition', `No se pudo suscribir la app a la WABA: ${metaMessage}`);
+        }
+    }
+    const existingSnapshot = await db.collection('integrations')
+        .where('tenantId', '==', tenantId)
+        .where('provider', '==', 'whatsapp')
+        .limit(1)
+        .get();
+    const integrationData = {
+        tenantId,
+        provider: 'whatsapp',
+        isActive: wantsActive,
+        phoneNumberId,
+        wabaId,
+        whatsappBusinessAccountId: wabaId,
+        accessToken,
+        appSecret: appSecret || null,
+        verifyToken: verifyToken || null,
+        isAiAutomated: !!isAiAutomated,
+        connectionType: 'manual',
+        // Solo se pisan estos dos si de verdad se consultaron a Meta ahora
+        // (wantsActive) — al pausar (isActive:false) no se tocan, para no borrar
+        // el último valor bueno conocido con un merge de null.
+        ...(wantsActive ? { displayPhoneNumber, verifiedName } : {}),
         connectedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
@@ -1856,6 +2410,505 @@ exports.acceptTenantInvite = (0, https_1.onCall)({ maxInstances: 10 }, async (re
         linkedCount,
         tenants: linkedTenants
     };
+});
+// ═══════════════════════════════════════════════════════════════════════
+// DISPOSITIVO CONFIABLE + PIN — capa operativa SOBRE Firebase Auth, no un
+// reemplazo. Cada vendedor sigue teniendo un uid real de Firebase Auth (con
+// un email técnico interno generado por el sistema, nunca visto por él);
+// el PIN solo decide si ese uid recibe un custom token para iniciar sesión.
+// El PIN NUNCA se guarda en texto plano ni es el único factor remoto: vive
+// hasheado (scrypt + salt aleatoria) en vendor_credentials/{membershipId},
+// una colección con Firestore Rules "allow read, write: if false" —
+// inalcanzable desde el cliente, solo el Admin SDK de estas Functions puede
+// tocarla. Reutiliza el flujo YA EXISTENTE de activación (acceptTenantInvite)
+// en vez de duplicar su lógica de migración de {docId} -> {uid}_{tenantId}
+// y de includedUserIds: setVendorPin deja la membership en 'pending' con un
+// email interno, y el primer signInWithCustomToken dispara el mismo
+// acceptTenantInvite que ya usa el flujo de invitación por correo.
+// ═══════════════════════════════════════════════════════════════════════
+// Helpers de PIN extraídos a pinAuth.ts (sin efectos secundarios, testeables
+// con vitest sin importar este archivo completo — ver functions/src/pinAuth.test.ts).
+async function assertCallerIsTenantAdmin(callerUid, tenantId) {
+    const membershipSnap = await db.collection('memberships').doc(`${callerUid}_${tenantId}`).get();
+    const m = membershipSnap.data();
+    const isAdminRole = m?.status === 'active' && (m.role === 'Owner' || m.role === 'Admin');
+    if (!isAdminRole) {
+        throw new https_1.HttpsError('permission-denied', 'Solo un Owner/Admin activo de este negocio puede hacer esto.');
+    }
+}
+/**
+ * Owner/Admin: genera (o regenera) el PIN de un vendedor. Primera vez sobre
+ * una membership 'prepared'/'draft': crea su cuenta técnica real de Firebase
+ * Auth (email interno + password aleatoria que nadie ve), un loginHandle
+ * único DENTRO del tenant (derivado del nombre — "Michelle" en dos tenants
+ * distintos no choca, ver login_handles/{tenantId}_{handle}) y dispara el
+ * mismo camino de activación que ya usa la invitación por correo. Devuelve
+ * el PIN en texto plano UNA sola vez, para que el Owner se lo entregue al
+ * vendedor junto con su loginHandle — nunca el membershipId.
+ */
+exports.setVendorPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    const { membershipId, loginHandle: requestedHandle } = request.data;
+    if (!membershipId)
+        throw new https_1.HttpsError('invalid-argument', 'Falta membershipId');
+    const membershipRef = db.collection('memberships').doc(membershipId);
+    const membershipSnap = await membershipRef.get();
+    if (!membershipSnap.exists)
+        throw new https_1.HttpsError('not-found', 'La membresía no existe');
+    const membership = membershipSnap.data();
+    const tenantId = membership.tenantId;
+    await assertCallerIsTenantAdmin(request.auth.uid, tenantId);
+    const credRef = db.collection('vendor_credentials').doc(membershipId);
+    const credSnap = await credRef.get();
+    let authUid;
+    let loginHandle;
+    if (credSnap.exists) {
+        // Regeneración: la cuenta técnica y el loginHandle ya existen, solo se cambia el PIN.
+        authUid = credSnap.data().authUid;
+        loginHandle = credSnap.data().loginHandle;
+    }
+    else {
+        if (membership.status !== 'prepared' && membership.status !== 'draft') {
+            throw new https_1.HttpsError('failed-precondition', 'Esta membresía ya tiene un método de acceso configurado (no es prepared/draft).');
+        }
+        // loginHandle único DENTRO del tenant — si hay choque (dos "Michelle" en
+        // el mismo negocio), se resuelve agregando un sufijo numérico
+        // determinístico en vez de fallar; el Owner puede pasar uno explícito
+        // (requestedHandle) si prefiere elegirlo a mano.
+        const baseHandle = (0, pinAuth_1.normalizeLoginHandle)(requestedHandle || membership.name || 'vendedor');
+        if (!baseHandle)
+            throw new https_1.HttpsError('invalid-argument', 'No se pudo derivar un usuario de acceso válido del nombre.');
+        loginHandle = baseHandle;
+        let suffix = 1;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            const handleSnap = await db.collection('login_handles').doc(`${tenantId}_${loginHandle}`).get();
+            if (!handleSnap.exists)
+                break;
+            suffix += 1;
+            loginHandle = `${baseHandle}${suffix}`;
+            if (suffix > 50)
+                throw new https_1.HttpsError('internal', 'No se pudo asignar un usuario de acceso único.');
+        }
+        // toLowerCase() es obligatorio acá: membershipId es un ID auto-generado
+        // de Firestore (mayúsculas/minúsculas mixtas), pero Firebase Auth
+        // normaliza el email a minúsculas al crear el usuario — sin esto, el
+        // email guardado en la membership nunca coincide con el claim `email`
+        // real del idToken, y acceptTenantInvite jamás la activa (encontrado y
+        // confirmado en el canary controlado del tenant demo, no en Michelle real).
+        const internalEmail = `vendedor.${membershipId}@${tenantId}.usuarios.smartflow.internal`.toLowerCase();
+        const randomPassword = crypto.randomBytes(24).toString('base64url');
+        const authUser = await admin.auth().createUser({
+            email: internalEmail,
+            password: randomPassword,
+            displayName: membership.name || 'Vendedor',
+        });
+        authUid = authUser.uid;
+        // Sin esto, AuthService.getUserProfile(uid) del frontend devuelve null
+        // para siempre (users/{uid} nunca existiría) y useAuthStore.user se
+        // queda null — /mi-turno y cualquier pantalla que dependa de `user`
+        // (no solo de activeMembership) se queda cargando indefinidamente.
+        // Mismo shape que escribe AuthService.register() para el flujo por
+        // correo — encontrado probando el login real por UI, no en el canary
+        // de backend (que nunca pasaba por getUserProfile).
+        await db.collection('users').doc(authUid).set({
+            id: authUid,
+            name: membership.name || 'Vendedor',
+            email: internalEmail,
+            isActive: true,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        await db.collection('login_handles').doc(`${tenantId}_${loginHandle}`).set({
+            tenantId,
+            membershipId,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        // Mismo estado que deja sendInvitation() para el flujo por correo — el
+        // primer signInWithCustomToken dispara acceptTenantInvite, que migra
+        // {docId} -> {uid}_{tenantId} e includedUserIds sin lógica duplicada acá.
+        await membershipRef.update({
+            email: internalEmail,
+            status: 'pending',
+            invitedAt: admin.firestore.FieldValue.serverTimestamp(),
+            accessMethod: 'pin',
+        });
+    }
+    const pin = (0, pinAuth_1.generatePin)();
+    const salt = crypto.randomBytes(16).toString('hex');
+    await credRef.set({
+        tenantId,
+        membershipId,
+        authUid,
+        loginHandle,
+        pinHash: (0, pinAuth_1.hashPin)(pin, salt),
+        pinSalt: salt,
+        pinSetAt: admin.firestore.FieldValue.serverTimestamp(),
+        pinSetBy: request.auth.uid,
+        failedAttempts: 0,
+        lockedUntil: null,
+    }, { merge: true });
+    console.log('VENDOR_PIN_SET', { tenantId, membershipId, setBy: request.auth.uid, regenerated: credSnap.exists });
+    return { pin, tenantId, loginHandle };
+});
+/**
+ * Acceso por PIN — el vendedor SOLO ve su nombre/usuario + PIN, nunca un
+ * membershipId. tenantId + loginHandle resuelven el membership vía
+ * login_handles/{tenantId}_{handle} (índice, no legible desde el cliente).
+ * Si el usuario no existe, se hace el MISMO trabajo de hash (DUMMY_PIN_HASH)
+ * y se devuelve el MISMO error genérico que un PIN incorrecto — nunca se
+ * revela si el usuario existe, ni por mensaje ni por tiempo de respuesta.
+ * Sin request.auth previo a propósito — este endpoint ES el paso de
+ * autenticación. El límite de intentos por identidad ya resuelta es
+ * transaccional sobre Firestore (no en memoria, válido entre instancias
+ * concurrentes); además hay un límite liviano en memoria por
+ * tenantId+handle y por IP de origen para frenar enumeración antes de
+ * siquiera tocar Firestore (best-effort, no distribuido — mismo criterio
+ * que el rate limiter de mensajes de arriba).
+ */
+exports.loginWithPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    const { tenantId, loginHandle: rawHandle, pin } = request.data;
+    if (!tenantId || !rawHandle || !pin)
+        throw new https_1.HttpsError('invalid-argument', 'Falta tenantId, loginHandle o pin');
+    const handle = (0, pinAuth_1.normalizeLoginHandle)(rawHandle);
+    const identityKey = `pin:${tenantId}:${handle}`;
+    const originIp = request.rawRequest?.ip || 'unknown';
+    if (isRateLimited(identityKey) || isRateLimited(`pin-origin:${originIp}`)) {
+        throw new https_1.HttpsError('resource-exhausted', 'Demasiados intentos. Probá de nuevo en unos minutos.');
+    }
+    const handleSnap = await db.collection('login_handles').doc(`${tenantId}_${handle}`).get();
+    if (!handleSnap.exists) {
+        // Costo constante: mismo hash que haría una verificación real, para no
+        // delatar por timing que este usuario no existe.
+        (0, pinAuth_1.verifyPinHash)(pin, pinAuth_1.DUMMY_PIN_SALT, pinAuth_1.DUMMY_PIN_HASH);
+        throw new https_1.HttpsError('permission-denied', pinAuth_1.PIN_LOGIN_GENERIC_ERROR);
+    }
+    const membershipId = handleSnap.data().membershipId;
+    const credRef = db.collection('vendor_credentials').doc(membershipId);
+    const result = await db.runTransaction(async (tx) => {
+        const credSnap = await tx.get(credRef);
+        if (!credSnap.exists)
+            throw new https_1.HttpsError('permission-denied', pinAuth_1.PIN_LOGIN_GENERIC_ERROR);
+        const cred = credSnap.data();
+        const lockedUntil = cred.lockedUntil?.toMillis?.() ?? 0;
+        if (lockedUntil > Date.now()) {
+            throw new https_1.HttpsError('resource-exhausted', 'Demasiados intentos fallidos. Probá de nuevo en unos minutos.');
+        }
+        const ok = (0, pinAuth_1.verifyPinHash)(pin, cred.pinSalt, cred.pinHash);
+        if (!ok) {
+            const attempts = (cred.failedAttempts || 0) + 1;
+            const update = { failedAttempts: attempts };
+            if (attempts >= pinAuth_1.PIN_MAX_ATTEMPTS) {
+                update.failedAttempts = 0;
+                update.lockedUntil = admin.firestore.Timestamp.fromMillis(Date.now() + pinAuth_1.PIN_LOCKOUT_MS);
+                console.warn('VENDOR_PIN_LOCKED', { membershipId, tenantId: cred.tenantId });
+            }
+            tx.update(credRef, update);
+            throw new https_1.HttpsError('permission-denied', pinAuth_1.PIN_LOGIN_GENERIC_ERROR);
+        }
+        tx.update(credRef, { failedAttempts: 0, lockedUntil: null, lastLoginAt: admin.firestore.FieldValue.serverTimestamp() });
+        return { authUid: cred.authUid, tenantId: cred.tenantId };
+    });
+    const customToken = await admin.auth().createCustomToken(result.authUid, { pinLogin: true });
+    console.log('VENDOR_PIN_LOGIN_SUCCESS', { membershipId, tenantId: result.tenantId });
+    return { customToken };
+});
+/**
+ * Registra (o refresca lastSeenAt de) el dispositivo desde el que un usuario
+ * ya autenticado está operando. deviceId lo genera el cliente
+ * (crypto.randomUUID) y solo sirve para RECONOCER el equipo — nunca sustituye
+ * al token de Firebase Auth, que sigue siendo lo único que autentica de verdad.
+ * Todas las escrituras de trusted_devices pasan por esta familia de
+ * Functions (las Rules bloquean escritura directa desde el cliente) para que
+ * un cliente comprometido no pueda auto-otorgarse confianza ni revivir un
+ * dispositivo ya revocado con solo reescribir el doc.
+ */
+exports.registerDevice = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    const { deviceId, tenantId, label } = request.data;
+    if (!deviceId || !tenantId)
+        throw new https_1.HttpsError('invalid-argument', 'Falta deviceId o tenantId');
+    const uid = request.auth.uid;
+    const membershipSnap = await db.collection('memberships').doc(`${uid}_${tenantId}`).get();
+    if (!membershipSnap.exists) {
+        throw new https_1.HttpsError('permission-denied', 'No tenés membresía en este negocio.');
+    }
+    const deviceRef = db.collection('trusted_devices').doc(deviceId);
+    const deviceSnap = await deviceRef.get();
+    if (deviceSnap.exists) {
+        const existing = deviceSnap.data();
+        if (existing.userId !== uid) {
+            throw new https_1.HttpsError('already-exists', 'Este dispositivo ya está vinculado a otro usuario.');
+        }
+        if (existing.status === 'revoked') {
+            // A propósito no se reactiva solo: si un Owner/Admin lo revocó, un
+            // cliente que todavía tiene ese deviceId en localStorage no debe poder
+            // deshacer esa decisión reintentando el registro (ver Fase 12).
+            throw new https_1.HttpsError('permission-denied', 'Este dispositivo fue revocado. Registrá uno nuevo.');
+        }
+        await deviceRef.update({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() });
+        return { deviceId, status: 'active' };
+    }
+    await deviceRef.set({
+        tenantId,
+        userId: uid,
+        label: label || 'Dispositivo sin nombre',
+        status: 'active',
+        registeredAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+        registeredBy: uid,
+        revokedAt: null,
+        revokedBy: null,
+    });
+    console.log('DEVICE_REGISTERED', { tenantId, userId: uid, deviceId });
+    return { deviceId, status: 'active' };
+});
+/** Renombra un dispositivo — el propio dueño o un Owner/Admin de su tenant. */
+exports.renameDevice = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    const { deviceId, label } = request.data;
+    if (!deviceId || !label?.trim())
+        throw new https_1.HttpsError('invalid-argument', 'Falta deviceId o label');
+    const deviceRef = db.collection('trusted_devices').doc(deviceId);
+    const deviceSnap = await deviceRef.get();
+    if (!deviceSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Dispositivo no encontrado');
+    const device = deviceSnap.data();
+    const uid = request.auth.uid;
+    if (device.userId !== uid) {
+        await assertCallerIsTenantAdmin(uid, device.tenantId);
+    }
+    await deviceRef.update({ label: label.trim() });
+    return { deviceId };
+});
+/** Revoca un dispositivo — exclusivo de Owner/Admin del tenant del dispositivo. */
+exports.revokeDevice = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    const { deviceId } = request.data;
+    if (!deviceId)
+        throw new https_1.HttpsError('invalid-argument', 'Falta deviceId');
+    const deviceRef = db.collection('trusted_devices').doc(deviceId);
+    const deviceSnap = await deviceRef.get();
+    if (!deviceSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Dispositivo no encontrado');
+    const device = deviceSnap.data();
+    await assertCallerIsTenantAdmin(request.auth.uid, device.tenantId);
+    await deviceRef.update({
+        status: 'revoked',
+        revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+        revokedBy: request.auth.uid,
+    });
+    console.log('DEVICE_REVOKED', { deviceId, tenantId: device.tenantId, revokedBy: request.auth.uid });
+    return { deviceId };
+});
+// ═══════════════════════════════════════════════════════════════════════
+// ESTADO OPERATIVO Y SESIONES DE TURNO — SERVER-AUTHORITATIVE (checkpoint
+// de seguridad post-Bloque 5). El cliente NUNCA escribe directamente
+// operationalStatus, work_sessions ni work_status_events — Firestore Rules
+// lo bloquean con "if false" (ver firestore.rules). Todo pasa por
+// setOperationalStatus/tickPresence: uid siempre sale del token verificado
+// (request.auth.uid), nunca del payload; todos los timestamps son
+// serverTimestamp(); startedAt/endedAt/changedAt/activeSeconds/idleSeconds
+// los decide y escribe exclusivamente esta Function. Telemetría operativa,
+// NO horas laborales oficiales/payroll.
+// ═══════════════════════════════════════════════════════════════════════
+const OPERATIONAL_STATUSES = ['working', 'coffee', 'lunch', 'errand', 'off_shift'];
+/**
+ * Único punto de escritura para operationalStatus/work_sessions/
+ * work_status_events. uid y tenantId nunca se confían del payload más allá
+ * de qué tenant se está consultando: el membership real (uid del token +
+ * tenantId) se valida server-side antes de escribir nada.
+ */
+exports.setOperationalStatus = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    const uid = request.auth.uid; // SIEMPRE del token verificado, nunca del payload
+    const { tenantId, status } = request.data;
+    if (!tenantId || !status)
+        throw new https_1.HttpsError('invalid-argument', 'Falta tenantId o status');
+    if (!OPERATIONAL_STATUSES.includes(status)) {
+        throw new https_1.HttpsError('invalid-argument', 'Estado operativo inválido.');
+    }
+    const toStatus = status;
+    const membershipSnap = await db.collection('memberships').doc(`${uid}_${tenantId}`).get();
+    if (!membershipSnap.exists || membershipSnap.data()?.status !== 'active') {
+        throw new https_1.HttpsError('permission-denied', 'No tenés una membresía activa en este tenant.');
+    }
+    const presenceRef = db.collection('user_presence').doc(`${tenantId}_${uid}`);
+    await db.runTransaction(async (tx) => {
+        const presenceSnap = await tx.get(presenceRef);
+        const current = presenceSnap.exists ? presenceSnap.data() : {};
+        const fromStatus = current.operationalStatus ?? null;
+        const activeSessionId = current.activeWorkSessionId ?? null;
+        let nextSessionId = activeSessionId;
+        if ((fromStatus === null || fromStatus === 'off_shift') && toStatus !== 'off_shift') {
+            const sessionRef = db.collection('work_sessions').doc();
+            tx.set(sessionRef, {
+                tenantId,
+                userId: uid,
+                startedAt: admin.firestore.FieldValue.serverTimestamp(),
+                endedAt: null,
+                lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+                activeSeconds: 0,
+                idleSeconds: 0,
+                status: toStatus,
+            });
+            nextSessionId = sessionRef.id;
+        }
+        else if (toStatus === 'off_shift' && activeSessionId) {
+            tx.update(db.collection('work_sessions').doc(activeSessionId), {
+                endedAt: admin.firestore.FieldValue.serverTimestamp(),
+                status: toStatus,
+            });
+            nextSessionId = null;
+        }
+        else if (activeSessionId) {
+            tx.update(db.collection('work_sessions').doc(activeSessionId), { status: toStatus });
+        }
+        tx.set(presenceRef, {
+            uid,
+            tenantId,
+            operationalStatus: toStatus,
+            operationalStatusChangedAt: admin.firestore.FieldValue.serverTimestamp(),
+            activeWorkSessionId: nextSessionId,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        tx.set(db.collection('work_status_events').doc(), {
+            tenantId,
+            userId: uid,
+            fromStatus,
+            toStatus,
+            changedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    });
+    console.log('OPERATIONAL_STATUS_CHANGED', { tenantId, uid, toStatus });
+    return { status: toStatus };
+});
+// Heartbeat servidor-autoritativo: el cliente NUNCA envía "estuve activo 60
+// segundos" — solo una señal de baja confianza (huboActividad: hubo
+// interacción real desde el último tick, según el mismo criterio de
+// mousemove/keydown/click/scroll que ya usa usePresenceTracker). El SERVIDOR
+// calcula cuánto tiempo pasó de verdad (ahora - lastSeenAt del propio
+// work_session, ambos server timestamps) y lo acota a un máximo razonable —
+// así un cliente no puede reclamar horas que nunca transcurrieron ni
+// inflar el contador reconectándose tras estar suspendido/cerrado. La única
+// cosa que el cliente puede "mentir" es a qué balde (activo vs idle) va ese
+// tiempo ya acotado — no la cantidad total.
+const HEARTBEAT_MAX_TICK_SECONDS = 90;
+exports.tickPresence = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    const uid = request.auth.uid;
+    const { tenantId, hadActivity } = request.data;
+    if (!tenantId)
+        throw new https_1.HttpsError('invalid-argument', 'Falta tenantId');
+    const membershipSnap = await db.collection('memberships').doc(`${uid}_${tenantId}`).get();
+    if (!membershipSnap.exists || membershipSnap.data()?.status !== 'active') {
+        throw new https_1.HttpsError('permission-denied', 'No tenés una membresía activa en este tenant.');
+    }
+    const presenceRef = db.collection('user_presence').doc(`${tenantId}_${uid}`);
+    const presenceSnap = await presenceRef.get();
+    const activeSessionId = presenceSnap.exists ? (presenceSnap.data()?.activeWorkSessionId ?? null) : null;
+    if (!activeSessionId) {
+        // Sin turno abierto (off_shift) — nada que sumar, no es un error.
+        return { ticked: false };
+    }
+    const sessionRef = db.collection('work_sessions').doc(activeSessionId);
+    await db.runTransaction(async (tx) => {
+        const sessionSnap = await tx.get(sessionRef);
+        if (!sessionSnap.exists)
+            return; // sesión cerrada entre snapshots — el próximo cambio de estado resincroniza
+        const session = sessionSnap.data();
+        if (session.tenantId !== tenantId || session.userId !== uid)
+            return; // defensa extra, no debería pasar nunca
+        const lastSeenMs = session.lastSeenAt?.toMillis?.() ?? Date.now();
+        const elapsedSeconds = Math.max(0, Math.min(HEARTBEAT_MAX_TICK_SECONDS, Math.round((Date.now() - lastSeenMs) / 1000)));
+        if (elapsedSeconds === 0)
+            return;
+        const field = hadActivity ? 'activeSeconds' : 'idleSeconds';
+        tx.update(sessionRef, {
+            [field]: admin.firestore.FieldValue.increment(elapsedSeconds),
+            lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    });
+    return { ticked: true };
+});
+/**
+ * Multi-Agente — Modo Libre: reclamo manual y atómico de una conversación
+ * sin asignar. El primero que llama gana; el resto recibe un error
+ * 'already-exists' para mostrar feedback de "ya fue tomada". La elegibilidad
+ * para reclamar es membership.status==='active' + incluido en el equipo
+ * configurado (includedUserIds) — a propósito NO depende de
+ * leadEnabledUserIds, que solo gobierna la asignación AUTOMÁTICA (ver
+ * sección 8 del pedido: ese toggle no debe bloquear que alguien tome a mano
+ * una conversación ya visible para todo el equipo en modo Libre).
+ */
+exports.claimConversation = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    }
+    const { conversationId } = request.data;
+    const uid = request.auth.uid;
+    if (!conversationId) {
+        throw new https_1.HttpsError('invalid-argument', 'Falta conversationId');
+    }
+    const convRef = db.collection('conversations').doc(conversationId);
+    try {
+        const result = await db.runTransaction(async (tx) => {
+            const convSnap = await tx.get(convRef);
+            if (!convSnap.exists) {
+                throw new https_1.HttpsError('not-found', 'La conversación no existe');
+            }
+            const conv = convSnap.data();
+            const tenantId = conv.tenantId;
+            if (conv.advisorId) {
+                console.warn('MULTI_AGENT_MANUAL_CLAIM_CONFLICT', { conversationId, alreadyAssignedTo: conv.advisorId, attemptedBy: uid });
+                throw new https_1.HttpsError('already-exists', 'Esta conversación ya fue tomada por otro asesor.');
+            }
+            const membershipRef = db.collection('memberships').doc(`${uid}_${tenantId}`);
+            const [membershipSnap, settingsSnap] = await Promise.all([
+                tx.get(membershipRef),
+                tx.get(db.collection('settings').doc(tenantId)),
+            ]);
+            if (!membershipSnap.exists || membershipSnap.data()?.status !== 'active') {
+                throw new https_1.HttpsError('permission-denied', 'No tenés una membresía activa en este tenant.');
+            }
+            const includedUserIds = settingsSnap.data()?.multiAgentConfig?.includedUserIds || [];
+            if (!includedUserIds.includes(uid)) {
+                throw new https_1.HttpsError('permission-denied', 'No estás configurado en el equipo de Multi-Agente de este tenant.');
+            }
+            // LOOP Fase 16 — recomendación aplicada: exigir 'working' también para
+            // el reclamo manual en Modo Libre, no solo para la asignación
+            // automática. Sin esto, alguien en coffee/lunch/errand/off_shift podía
+            // tomar una conversación a mano igual, contradiciendo el propósito
+            // completo de la feature (evitar que alguien fuera de turno reciba
+            // trabajo nuevo).
+            const presenceSnap = await tx.get(db.collection('user_presence').doc(`${tenantId}_${uid}`));
+            if (presenceSnap.data()?.operationalStatus !== 'working') {
+                throw new https_1.HttpsError('failed-precondition', 'Tenés que estar en estado "Trabajando" para tomar una conversación.');
+            }
+            tx.update(convRef, {
+                advisorId: uid,
+                assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+                assignedBy: uid,
+                assignmentSource: 'manual_claim',
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            return { conversationId, advisorId: uid };
+        });
+        console.log('MULTI_AGENT_MANUAL_CLAIM_SUCCESS', result);
+        return { success: true, ...result };
+    }
+    catch (e) {
+        if (e instanceof https_1.HttpsError)
+            throw e;
+        const message = e instanceof Error ? e.message : String(e);
+        console.error('[MultiAgente] Error en claimConversation:', message);
+        throw new https_1.HttpsError('internal', 'Error al reclamar la conversación.');
+    }
 });
 /**
  * Función Callable para enviar mensajes de Instagram/Facebook
@@ -2853,6 +3906,15 @@ exports.verifyPaypalOrder = (0, https_1.onCall)({}, async (request) => {
     // usuario aún no está autenticado cuando llama esta función. La seguridad
     // se mantiene por: validación regex del orderId, captura real contra PayPal
     // API, e idempotencia (un orderId solo se procesa una vez).
+    //
+    // Esta función es EXCLUSIVA del flujo de activación de tenant (CheckoutView).
+    // El flujo de Links de Pago (/pay/{id}) tiene sus propias funciones
+    // dedicadas — createPaymentRequestPaypalOrder / capturePaymentRequestPaypalOrder,
+    // más abajo — que crean la orden server-side y verifican el monto
+    // capturado exactamente contra el monto canónico de payment_requests. Este
+    // endpoint NUNCA debe recibir paymentRequestId: aceptar un amount que el
+    // navegador afirma (como hacía antes vía purchase_units creado en el
+    // cliente) permitía pagar $1 y marcar pagada una solicitud de $100.
     const { orderId, tenantId } = request.data;
     // Validacion estricta del orderId (PayPal usa IDs alfanumericos cortos)
     if (!orderId || typeof orderId !== 'string' || !/^[A-Z0-9_-]{6,40}$/i.test(orderId)) {
@@ -2894,11 +3956,12 @@ exports.verifyPaypalOrder = (0, https_1.onCall)({}, async (request) => {
         if (order.status !== 'COMPLETED') {
             throw new https_1.HttpsError('failed-precondition', `Pago no completado: ${order.status}`);
         }
+        const capturedAmount = order.purchase_units?.[0]?.payments?.captures?.[0]?.amount ?? null;
         // Registrar el pago en Firestore
         await db.collection('paypal_orders').doc(orderId).set({
             orderId,
             status: order.status,
-            amount: order.purchase_units?.[0]?.payments?.captures?.[0]?.amount ?? null,
+            amount: capturedAmount,
             payer: order.payer ?? null,
             capturedAt: admin.firestore.FieldValue.serverTimestamp(),
             tenantId: tenantId ?? null,
@@ -2911,6 +3974,223 @@ exports.verifyPaypalOrder = (0, https_1.onCall)({}, async (request) => {
             throw err;
         console.error('[verifyPaypalOrder] PayPal API error:', err?.response?.data || err?.message || err);
         // No exponer detalles del backend de PayPal al cliente
+        throw new https_1.HttpsError('internal', 'No se pudo verificar el pago. Intenta de nuevo.');
+    }
+});
+/**
+ * Crea la orden de PayPal server-side para un Link de Pago — el navegador
+ * nunca decide el amount/currency que se envía a PayPal, solo pide "creá la
+ * orden para este paymentRequestId"; el backend lee el monto canónico
+ * directamente de payment_requests y lo congela en expectedPaypalAmount /
+ * expectedPaypalCurrency, que es lo único contra lo que se compara al
+ * capturar (ver capturePaymentRequestPaypalOrder). Esto cierra el hueco que
+ * tenía el flujo anterior: el cliente armaba purchase_units con el amount
+ * que quisiera y PayPal lo aceptaba tal cual.
+ *
+ * Política CRC vs USD: PayPal solo se acepta hoy para links en USD. No hay
+ * una fuente de tipo de cambio server-side confiable en este proyecto, y
+ * calcular la conversión en el navegador (como hacía el código viejo,
+ * CRC/525 hardcodeado) es exactamente el tipo de dato que un atacante podría
+ * manipular. Hasta que exista una conversión server-side auditable, un link
+ * en CRC/otra moneda simplemente no ofrece PayPal como método.
+ */
+exports.createPaymentRequestPaypalOrder = (0, https_1.onCall)({}, async (request) => {
+    const { paymentRequestId } = request.data;
+    if (!paymentRequestId || typeof paymentRequestId !== 'string' || paymentRequestId.length > 100) {
+        throw new https_1.HttpsError('invalid-argument', 'paymentRequestId inválido');
+    }
+    const reqRef = db.collection('payment_requests').doc(paymentRequestId);
+    const reqSnap = await reqRef.get();
+    if (!reqSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'La solicitud de pago no existe.');
+    }
+    const reqData = reqSnap.data();
+    if (reqData.status === 'paid') {
+        throw new https_1.HttpsError('failed-precondition', 'Este link ya fue pagado.');
+    }
+    if (reqData.status !== 'pending') {
+        throw new https_1.HttpsError('failed-precondition', 'Este link no está disponible para cobro.');
+    }
+    const methods = Array.isArray(reqData.enabledMethods) ? reqData.enabledMethods : [];
+    if (!methods.includes('paypal')) {
+        throw new https_1.HttpsError('failed-precondition', 'Este link no tiene PayPal habilitado.');
+    }
+    if (reqData.currency !== 'USD') {
+        throw new https_1.HttpsError('failed-precondition', 'PayPal solo está disponible para links en USD por ahora.');
+    }
+    const amount = Number(reqData.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+        throw new https_1.HttpsError('failed-precondition', 'Monto inválido en la solicitud.');
+    }
+    const expectedPaypalAmount = amount.toFixed(2);
+    const expectedPaypalCurrency = 'USD';
+    const clientId = process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+        throw new https_1.HttpsError('internal', 'PayPal no está configurado en el servidor');
+    }
+    try {
+        const tokenRes = await axios_1.default.post('https://api-m.paypal.com/v1/oauth2/token', 'grant_type=client_credentials', {
+            auth: { username: clientId, password: clientSecret },
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            timeout: 15000,
+        });
+        const accessToken = tokenRes.data.access_token;
+        const orderRes = await axios_1.default.post('https://api-m.paypal.com/v2/checkout/orders', {
+            intent: 'CAPTURE',
+            purchase_units: [{
+                    reference_id: paymentRequestId,
+                    amount: { currency_code: expectedPaypalCurrency, value: expectedPaypalAmount },
+                    description: String(reqData.concept || '').slice(0, 127),
+                    ...(reqData.paypalEmail ? { payee: { email_address: reqData.paypalEmail } } : {}),
+                }],
+        }, {
+            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            timeout: 15000,
+        });
+        const orderId = orderRes.data.id;
+        await reqRef.update({
+            paypalOrderId: orderId,
+            expectedPaypalAmount,
+            expectedPaypalCurrency,
+            paypalOrderCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        // Liga este orderId EXCLUSIVAMENTE a este paymentRequestId — es lo que
+        // capturePaymentRequestPaypalOrder usa para rechazar cualquier intento
+        // de reusar un orderId contra otra solicitud.
+        await db.collection('paypal_orders').doc(orderId).set({
+            orderId,
+            paymentRequestId,
+            status: 'CREATED',
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return { orderId };
+    }
+    catch (err) {
+        console.error('[createPaymentRequestPaypalOrder] PayPal API error:', err?.response?.data || err?.message || err);
+        throw new https_1.HttpsError('internal', 'No se pudo iniciar el pago con PayPal. Intenta de nuevo.');
+    }
+});
+/**
+ * Captura server-side el pago de un Link de Pago. Solo marca 'paid' si el
+ * monto/moneda que PayPal realmente capturó coinciden EXACTAMENTE con
+ * expectedPaypalAmount/expectedPaypalCurrency (congelados al crear la orden,
+ * ver createPaymentRequestPaypalOrder) — nunca con nada que el navegador
+ * afirme. Cualquier discrepancia deja el link sin pagar y queda registrada
+ * como PAYPAL_AMOUNT_MISMATCH para auditoría, en vez de fallar en silencio.
+ */
+exports.capturePaymentRequestPaypalOrder = (0, https_1.onCall)({}, async (request) => {
+    const { paymentRequestId, orderId } = request.data;
+    if (!paymentRequestId || typeof paymentRequestId !== 'string' || paymentRequestId.length > 100) {
+        throw new https_1.HttpsError('invalid-argument', 'paymentRequestId inválido');
+    }
+    if (!orderId || typeof orderId !== 'string' || !/^[A-Z0-9_-]{6,40}$/i.test(orderId)) {
+        throw new https_1.HttpsError('invalid-argument', 'orderId inválido');
+    }
+    const reqRef = db.collection('payment_requests').doc(paymentRequestId);
+    const reqSnap = await reqRef.get();
+    if (!reqSnap.exists) {
+        throw new https_1.HttpsError('not-found', 'La solicitud de pago no existe.');
+    }
+    const reqData = reqSnap.data();
+    // Idempotencia: doble click, refresh o un segundo onApprove sobre un link
+    // ya pagado no vuelven a golpear la API de PayPal — solo confirman lo que
+    // ya está confirmado, sin reescribir nada.
+    if (reqData.status === 'paid') {
+        return { success: true, status: 'COMPLETED', alreadyCaptured: true };
+    }
+    // Anti-replay: el orderId capturado tiene que ser EXACTAMENTE el que este
+    // backend creó para ESTE paymentRequestId. Bloquea reusar/adivinar el
+    // orderId de otra solicitud para pagar esta.
+    if (!reqData.paypalOrderId || reqData.paypalOrderId !== orderId) {
+        console.warn('PAYPAL_ORDER_MISMATCH', { paymentRequestId, orderId, expected: reqData.paypalOrderId ?? null });
+        throw new https_1.HttpsError('permission-denied', 'La orden de pago no corresponde a esta solicitud.');
+    }
+    const orderDocRef = db.collection('paypal_orders').doc(orderId);
+    const orderDoc = await orderDocRef.get();
+    const orderDocData = orderDoc.data();
+    // Doble enlace defensivo: el doc de auditoría también debe apuntar a este
+    // mismo paymentRequestId — protege contra que un orderId capturado antes
+    // para otra solicitud se reintente acá.
+    if (orderDocData?.paymentRequestId && orderDocData.paymentRequestId !== paymentRequestId) {
+        console.warn('PAYPAL_ORDER_MISMATCH', { paymentRequestId, orderId, boundTo: orderDocData.paymentRequestId });
+        throw new https_1.HttpsError('permission-denied', 'La orden de pago no corresponde a esta solicitud.');
+    }
+    if (orderDocData?.status === 'COMPLETED') {
+        return { success: true, status: 'COMPLETED', alreadyCaptured: true };
+    }
+    const clientId = process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+        throw new https_1.HttpsError('internal', 'PayPal no está configurado en el servidor');
+    }
+    try {
+        const tokenRes = await axios_1.default.post('https://api-m.paypal.com/v1/oauth2/token', 'grant_type=client_credentials', {
+            auth: { username: clientId, password: clientSecret },
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            timeout: 15000,
+        });
+        const accessToken = tokenRes.data.access_token;
+        const captureRes = await axios_1.default.post(`https://api-m.paypal.com/v2/checkout/orders/${orderId}/capture`, {}, {
+            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            timeout: 15000,
+        });
+        const order = captureRes.data;
+        const capture = order.purchase_units?.[0]?.payments?.captures?.[0];
+        const capturedAmount = capture?.amount ?? null;
+        if (order.status !== 'COMPLETED' || !capturedAmount) {
+            await orderDocRef.set({
+                orderId, paymentRequestId, status: order.status || 'FAILED',
+                capturedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+            throw new https_1.HttpsError('failed-precondition', `Pago no completado: ${order.status}`);
+        }
+        // Comparación EXACTA en centavos (evita errores de punto flotante) contra
+        // el monto congelado al crear la orden. Si no coincide, NO se marca
+        // pagado — sin importar que PayPal haya devuelto COMPLETED.
+        const expectedAmountCents = Math.round(Number(reqData.expectedPaypalAmount) * 100);
+        const capturedAmountCents = Math.round(Number(capturedAmount.value) * 100);
+        const currencyOk = capturedAmount.currency_code === reqData.expectedPaypalCurrency;
+        const amountOk = Number.isFinite(expectedAmountCents) && expectedAmountCents === capturedAmountCents;
+        if (!currencyOk || !amountOk) {
+            console.error('PAYPAL_AMOUNT_MISMATCH', {
+                paymentRequestId, orderId,
+                expected: { amount: reqData.expectedPaypalAmount, currency: reqData.expectedPaypalCurrency },
+                captured: { amount: capturedAmount.value, currency: capturedAmount.currency_code },
+            });
+            await orderDocRef.set({
+                orderId, paymentRequestId, status: 'AMOUNT_MISMATCH',
+                capturedAmount: capturedAmount.value, capturedCurrency: capturedAmount.currency_code,
+                expectedAmount: reqData.expectedPaypalAmount, expectedCurrency: reqData.expectedPaypalCurrency,
+                capturedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+            throw new https_1.HttpsError('failed-precondition', 'El monto capturado no coincide con el monto solicitado.');
+        }
+        const batch = db.batch();
+        batch.update(reqRef, {
+            status: 'paid',
+            paidAt: admin.firestore.FieldValue.serverTimestamp(),
+            capturedAmount: capturedAmount.value,
+            capturedCurrency: capturedAmount.currency_code,
+        });
+        const publicRef = db.collection('public_payment_links').doc(paymentRequestId);
+        const publicSnap = await publicRef.get();
+        if (publicSnap.exists) {
+            batch.update(publicRef, { status: 'paid' });
+        }
+        await batch.commit();
+        await orderDocRef.set({
+            orderId, paymentRequestId, status: 'COMPLETED',
+            capturedAmount: capturedAmount.value, capturedCurrency: capturedAmount.currency_code,
+            capturedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        console.log('PAYMENT_LINK_MARKED_PAID', { paymentRequestId, orderId, capturedAmount: capturedAmount.value, capturedCurrency: capturedAmount.currency_code });
+        return { success: true, status: 'COMPLETED' };
+    }
+    catch (err) {
+        if (err instanceof https_1.HttpsError)
+            throw err;
+        console.error('[capturePaymentRequestPaypalOrder] PayPal API error:', err?.response?.data || err?.message || err);
         throw new https_1.HttpsError('internal', 'No se pudo verificar el pago. Intenta de nuevo.');
     }
 });

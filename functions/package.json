@@ -2,6 +2,7 @@
   "name": "functions",
   "scripts": {
     "lint": "eslint",
+    "test": "vitest run",
     "build": "tsc",
     "build:watch": "tsc --watch",
     "serve": "npm run build && firebase emulators:start --only functions",
@@ -26,7 +27,8 @@
   "devDependencies": {
     "@types/busboy": "^1.5.4",
     "firebase-functions-test": "^3.1.1",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^5.0.0"
   },
   "private": true
 }
