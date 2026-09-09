@@ -2,6 +2,33 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — FIX URGENTE: sincronización móvil + Presence OFFLINE + Invalid Date
+
+> Los 3 síntomas, causa raíz real (confirmada leyendo código, no supuesta).
+> Falta que alguien vuelva a abrir `/mi-turno` después de este deploy para
+> confirmarlo en un teléfono real — no lo pude hacer yo (mismo límite de
+> autenticación de toda la noche). Ver `PROJECT_STATE.md`.
+
+- fix: el botón de estado no cambiaba visualmente al instante en el
+  teléfono — `handleSelect` esperaba el round-trip completo de Firestore
+  antes de mostrar cualquier cambio. Agregada una capa optimista (cambia al
+  tocar, se reconcilia sola con el `onSnapshot` real, revierte + muestra
+  error si el backend rechaza) en `MyShiftView.tsx` y
+  `OperationalStatusSelector.tsx`.
+- fix(causa raíz real): `usePresenceTracker()` solo se llamaba desde
+  `MainLayout.tsx` — `/mi-turno` (adonde aterriza cualquiera que entra por
+  PIN) está montado standalone en `AppRouter.tsx`, nunca envuelto en
+  `MainLayout`. Un vendedor por PIN nunca disparaba el heartbeat de
+  presencia; el único write a su `user_presence` era de
+  `setOperationalStatus`, que nunca escribe `status` ni `lastActiveAt`. Esto
+  explica a la vez el badge OFFLINE atascado y el "Visto el Invalid Date".
+  Fix: `MyShiftView` ahora también llama `usePresenceTracker()`.
+- fix: `src/utils/formatLastSeen.ts` (nuevo, 11 tests) — nunca más muestra
+  "Invalid Date" pase lo que pase con el timestamp (undefined, string no
+  parseable, objeto Timestamp-like, reloj del cliente adelantado).
+- deploy: `hosting:app` únicamente — sin cambios de backend. Commit
+  `8f89108`, ya en `main`.
+
 ## 2026-09-09 — REQUERIMIENTO OPERATIVO CRÍTICO: reutilización de teléfonos corporativos
 
 > Auditado el ciclo completo antes de tocar código — casi todo ya estaba

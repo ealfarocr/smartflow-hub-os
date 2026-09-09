@@ -1,5 +1,60 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ FIX DESPLEGADO — Sincronización móvil + Presence OFFLINE + Invalid Date (2026-09-09)
+
+**Los 3 síntomas reportados, causa raíz real, no supuesta.**
+
+### Bug 1 — el botón de estado no cambiaba visualmente en el teléfono
+`handleSelect` (en `MyShiftView.tsx` y `OperationalStatusSelector.tsx`) no
+tocaba ningún estado local al tocar un botón — esperaba completo el
+round-trip de la Cloud Function `setOperationalStatus` + el `onSnapshot` de
+vuelta antes de mostrar cualquier cambio. En una red más lenta/inestable
+(móvil) esa espera se nota mucho más que en PC. Fix: capa optimista — el
+botón cambia AL INSTANTE al tocar, se reconcilia sola dentro del mismo
+callback de `onSnapshot` en cuanto Firestore confirma el mismo valor (no en
+un `useEffect` derivado aparte — eso dispara el mismo lint
+`set-state-in-effect` que ya existe en otro lado del archivo), y se
+revierte + muestra un toast de error si el backend rechaza el cambio.
+
+### Bug 2 y Bug 3 — misma causa raíz real, confirmada leyendo el código
+
+`usePresenceTracker()` (el hook que escribe `user_presence.status` /
+`lastSeenAt` / `lastActiveAt` y llama al heartbeat `tickPresence`) **solo se
+invoca desde `MainLayout.tsx`**. La ruta `/mi-turno` (`MyShiftView`, adonde
+aterriza cualquiera que entra por PIN — ver `AppRouter.tsx`) está montada
+**standalone**, nunca envuelta en `MainLayout`. Un vendedor por PIN nunca
+disparaba ese hook — el ÚNICO write que le llegaba a su `user_presence` era
+el de `setOperationalStatus` (Cloud Function), que escribe
+`operationalStatus` pero NUNCA `status` ni `lastActiveAt`. Eso explica los
+dos síntomas a la vez: sin `status`, la UI lo mostraba OFFLINE aunque
+estuviera activo; sin `lastActiveAt`, `new Date(undefined)` en
+`renderLastActivity` (`UsersManagementView.tsx`) producía un Invalid Date
+silencioso que se mostraba tal cual.
+
+**Fix**: `usePresenceTracker()` ahora también se llama desde `MyShiftView`.
+Además, `src/utils/formatLastSeen.ts` (nuevo, 11 tests) blinda el
+formateo en sí como defensa en profundidad — nunca más muestra "Invalid
+Date" pase lo que pase (`undefined`/`null`/string no parseable/objeto
+Timestamp-like/reloj del cliente adelantado), independientemente de si
+aparece otra forma de dejar `lastActiveAt` sin setear en el futuro.
+
+**No se tocó** ningún backend (`setOperationalStatus`, `tickPresence`,
+`usePresenceTracker` en sí mismos quedaron intactos), ni Multi-Agente, ni
+WhatsApp, ni Payments, ni roles/permisos.
+
+### ⚠️ Prueba real — no la pude correr yo
+
+Mismo límite de siempre: no puedo autenticarme en la app real. Verificado
+lo que sí pude: 96 tests (85 en total del proyecto, 11 nuevos) en verde,
+build limpio, el bundle desplegado contiene el fix confirmado
+(`"No se pudo cambiar el estado"` presente 2 veces — una por componente).
+Lo que falta confirmar en vivo, con un teléfono real: que "eduardo pruebas"
+(o cualquiera que entre por PIN a partir de AHORA, después de este deploy)
+aparezca EN LÍNEA con actividad reciente válida la próxima vez que abra
+`/mi-turno` — necesita que alguien vuelva a entrar después del deploy para
+que el hook recién arrancado tenga algo que reportar; no hay forma de
+retroactivamente "arreglar" una sesión que ya estaba abierta antes del fix.
+
 ## ✅ FIX DESPLEGADO — Reutilización de teléfonos corporativos (2026-09-09) — falta 1 prueba manual de Eduardo
 
 **Auditoría primero.** Antes de tocar código se revisó todo el ciclo:
@@ -120,8 +175,6 @@ generar PIN — con el fix ya desplegado, debería funcionar ahora aunque hoy
 no haya ningún Owner activo, porque tu cuenta es SuperAdmin). Eso te va a
 dar un `loginHandle` y un PIN de una sola vez — con eso entrás como el
 primer Owner activo de USADITOS.
-
-## ⚠️ BLOQUEADOR ACTIVO — Outbound WhatsApp USADITOS: causa raíz encontrada, requiere acción de Eduardo en Meta (2026-09-09)
 
 ## ⚠️ BLOQUEADOR ACTIVO — Outbound WhatsApp USADITOS: causa raíz encontrada, requiere acción de Eduardo en Meta (2026-09-09)
 
