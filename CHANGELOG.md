@@ -2,6 +2,29 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — FIX URGENTE: bootstrap del primer Owner (USADITOS sin ningún Owner activo)
+
+> Corregido y desplegado. Falta 1 paso manual de Eduardo (generar el PIN de
+> EDUARDO ADMIN desde su propia cuenta real de SuperAdmin) — no lo pude
+> completar yo por un límite real de permisos IAM en este entorno. Ver
+> `PROJECT_STATE.md`.
+
+- chore(git hygiene): `main` tenía `functions/src/index.ts` idéntico a
+  `04ac9a0` — sin el subsistema de PIN/vendedores, sin los fixes de WhatsApp
+  de esta misma noche, ambos ya confirmados en producción. Reconciliado
+  mediante cherry-pick quirúrgico desde `pending/post-baseline-work-2026-09-09`
+  (excluyendo `landing/index.html`, que no pertenece a este catch-up). Sin
+  deploy nuevo — solo puso a `main` al día con lo que ya corría.
+- fix(bug real, confirmado en producción): `setVendorPin` exigía una
+  membership activa de Owner/Admin para llamarla — un tenant nuevo tiene
+  todos sus Owners en `prepared`, así que nadie podía activar al primer
+  Owner. `functions/src/vendorPinAuth.ts` (8 tests) agrega un bootstrap
+  angosto: SuperAdmin puede activar el PRIMER Owner únicamente cuando el
+  tenant tiene 0 Owners activos; se cierra solo apenas exista uno. No toca
+  roles, IA, WhatsApp ni Payments.
+- deploy: `functions:setVendorPin` únicamente, desde el commit `f56c75a`
+  (ya integrado en `main`, sin ramas efímeras sin mergear).
+
 ## 2026-09-09 — LOOP DE EMERGENCIA: causa raíz real de outbound WhatsApp USADITOS encontrada
 
 > No es un bug de SmartFlow. Ver `PROJECT_STATE.md` (sección "⚠️ BLOQUEADOR

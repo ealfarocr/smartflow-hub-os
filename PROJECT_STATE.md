@@ -1,5 +1,45 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ FIX DESPLEGADO — Bootstrap del primer Owner (2026-09-09) — falta 1 paso manual de Eduardo
+
+**Bug confirmado y corregido.** `setVendorPin` exigía una membership activa de
+Owner/Admin para poder llamarla — pero un tenant recién creado tiene todos
+sus Owners en `status:'prepared'`, así que nadie tenía acceso activo todavía.
+Círculo cerrado: nadie podía activar al primer Owner porque activar a
+cualquiera requería ya tener un Owner activo. Confirmado en USADITOS: los 3
+Owners (Guimar Viviana Garzón, Dominique Rendon, **EDUARDO ADMIN**) estaban
+los 3 en `prepared`, cero activos.
+
+**Fix**: `functions/src/vendorPinAuth.ts` (`checkVendorPinAuth`, 8 tests)
+agrega un camino de bootstrap: un SuperAdmin puede llamar `setVendorPin`
+ÚNICAMENTE cuando (a) el tenant tiene 0 Owners activos y (b) la membership
+objetivo es de rol Owner. Se cierra solo, para siempre, apenas exista un
+Owner activo — incluso para activar a un segundo Owner. No toca roles, no
+activa IA, no toca WhatsApp/Payments. Desplegado: `functions:setVendorPin`
+únicamente, commit `f56c75a` ya en `main`.
+
+**Pendiente — 1 paso manual, no lo pude hacer yo**: intenté completar la
+activación de EDUARDO ADMIN llamando a la función real desplegada (no un
+bypass manual de Firestore) usando el propio SuperAdmin real ya existente en
+el sistema (EDUARDO ALFARO) vía custom token — sin crear ninguna cuenta
+nueva, sin tocar ninguna contraseña. Bloqueado por un límite real de permisos
+de este entorno: `admin.auth().createCustomToken()` requiere permiso IAM
+`iam.serviceAccounts.signBlob` (o una service account key completa), y las
+credenciales disponibles acá son de usuario (gcloud ADC), no de service
+account con esa capacidad. No hay archivo de service account key en el
+proyecto, y no intenté conseguir uno ni escalar permisos — es una decisión
+que le corresponde al dueño de la infraestructura, no a mí.
+
+**Lo que falta, para Eduardo**: iniciar sesión en `hub.smartflow-suite.com`
+con tu propia cuenta real de SuperAdmin, entrar al negocio USADITOS →
+Usuarios, y generar el PIN de "EDUARDO ADMIN" desde ahí (el botón normal de
+generar PIN — con el fix ya desplegado, debería funcionar ahora aunque hoy
+no haya ningún Owner activo, porque tu cuenta es SuperAdmin). Eso te va a
+dar un `loginHandle` y un PIN de una sola vez — con eso entrás como el
+primer Owner activo de USADITOS.
+
+## ⚠️ BLOQUEADOR ACTIVO — Outbound WhatsApp USADITOS: causa raíz encontrada, requiere acción de Eduardo en Meta (2026-09-09)
+
 ## ⚠️ BLOQUEADOR ACTIVO — Outbound WhatsApp USADITOS: causa raíz encontrada, requiere acción de Eduardo en Meta (2026-09-09)
 
 **No es un bug de SmartFlow.** Causa raíz encontrada con evidencia directa de
