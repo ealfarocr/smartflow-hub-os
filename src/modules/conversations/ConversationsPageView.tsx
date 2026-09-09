@@ -10,10 +10,10 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useWhatsappWindow } from '@/hooks/useWhatsappWindow';
 import {
   Search, Send, Phone, MoreVertical, UserCircle,
-  MessageSquareText, Loader2, CheckCheck, AlertCircle,
+  MessageSquareText, Loader2, CheckCheck, Check, AlertCircle,
   LayoutTemplate, ArrowLeft, Zap, CreditCard,
   Camera, Globe, Sparkles, UserPlus, Package,
-  FileText, Download, X, Bot, Settings2, Paperclip, Mic, Play, Trash2, Image,
+  FileText, Download, X, Bot, Settings2, Paperclip, Mic, Play, Trash2, Image, RotateCcw,
 } from 'lucide-react';
 import { VoiceRecorder } from '@/utils/audioRecorder';
 import { useTeam } from '@/hooks/useTeam';
@@ -23,7 +23,7 @@ import { WhatsappWindowBanner, WhatsappWindowHint } from './WhatsappWindowBanner
 import { TemplateSelector, TemplateComponent } from './TemplateSelector';
 import { WhatsappUsageStats } from './WhatsappUsageStats';
 import { TemplateCreditsModal } from './TemplateCreditsModal';
-import { WhatsappTemplate, TenantRecord, WhatsappQuota, CatalogItem } from '@/types';
+import { WhatsappTemplate, TenantRecord, WhatsappQuota, CatalogItem, Message } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
 import { TenantService } from '@/services/firebase/TenantService';
 import { WhatsappConnectionModal } from './WhatsappConnectionModal';
@@ -67,6 +67,7 @@ export const ConversationsPageView = () => {
 
   const [inputText, setInputText]   = useState('');
   const [isSending, setIsSending]   = useState(false);
+  const [retryingMsgId, setRetryingMsgId] = useState<string | null>(null);
   const [isClaiming, setIsClaiming] = useState(false);
   const messagesEndRef               = useRef<HTMLDivElement>(null);
   const [searchParams]               = useSearchParams();
@@ -277,6 +278,29 @@ export const ConversationsPageView = () => {
       setInputText(''); setMediaUrl(null); setMediaFilename(null);
     } catch { addToast('Error al enviar mensaje', 'error'); }
     finally { setIsSending(false); }
+  };
+
+  // LOOP nocturno USADITOS, Fase 5: reintento manual y explícito de un
+  // mensaje con status:'failed' — nunca automático (un error de Meta no debe
+  // reintentar solo). Crea un mensaje NUEVO con el mismo texto/adjunto; el
+  // bubble fallido original queda tal cual, como registro de que ese intento
+  // específico no llegó — no se sobreescribe ni se duplica el historial.
+  const handleRetryFailedMessage = async (msg: Message) => {
+    if (!activeConversation || !activeMembership?.tenantId || retryingMsgId) return;
+    setRetryingMsgId(msg.id);
+    try {
+      const originalText = (msg.text || '')
+        .replace(/^\[Imagen Enviada\]\n/, '')
+        .replace(/^\[Video Enviado\]\n/, '')
+        .replace(/^\[Audio Enviado\]\n/, '')
+        .replace(/^\[Documento Enviado:.*?\]\n/, '')
+        .replace(/^\[Error al enviar.*?\]\n/, '');
+      await sendMessage(activeConversation, originalText, 'advisor', activeMembership.tenantId, msg.mediaUrl || null, null);
+    } catch {
+      addToast('Error al reintentar el mensaje', 'error');
+    } finally {
+      setRetryingMsgId(null);
+    }
   };
 
   const handleSendTemplate = async (template: WhatsappTemplate, components: TemplateComponent[]) => {
@@ -795,12 +819,47 @@ export const ConversationsPageView = () => {
                         {msg.text?.replace(/^\[Imagen Enviada\]\n/, '').replace(/^\[Documento Enviado:.*?\]\n/, '').replace(/^\[Error al enviar.*?\]\n/, '')}
                       </p>
                     )}
-                    <div className="flex justify-end items-center gap-1 mt-1.5 opacity-40">
-                      <span className="text-[10px]">
+                    <div className="flex justify-end items-center gap-1 mt-1.5">
+                      <span className="text-[10px] opacity-40">
                         {msg.timestamp ? formatChatTimestamp(msg.timestamp) : '...'}
                       </span>
-                      {msg.sender === 'advisor' && <CheckCheck className="w-3.5 h-3.5 text-[#1877F2]" />}
+                      {/* LOOP nocturno USADITOS, Fase 5: antes esto era un
+                          CheckCheck azul fijo para TODO mensaje del asesor,
+                          sin mirar msg.status — un mensaje con status:'failed'
+                          se veía idéntico a uno realmente entregado. Ahora
+                          refleja el estado real que ya guarda el backend. */}
+                      {msg.sender === 'advisor' && (
+                        msg.status === 'failed' ? (
+                          <AlertCircle className="w-3.5 h-3.5 text-red-500" />
+                        ) : msg.status === 'read' ? (
+                          <CheckCheck className="w-3.5 h-3.5 text-[#1877F2]" />
+                        ) : msg.status === 'delivered' ? (
+                          <CheckCheck className="w-3.5 h-3.5 opacity-40" />
+                        ) : msg.status === 'sent' ? (
+                          <Check className="w-3.5 h-3.5 opacity-40" />
+                        ) : (
+                          <Loader2 className="w-3.5 h-3.5 opacity-40 animate-spin" />
+                        )
+                      )}
                     </div>
+                    {msg.sender === 'advisor' && msg.status === 'failed' && (
+                      <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-red-500/20 text-[10px] font-bold text-red-500 dark:text-red-400">
+                        <span className="flex-1 min-w-0 truncate" title={msg.errorMessage}>
+                          No enviado{msg.errorMessage ? ` — ${msg.errorMessage}` : ''}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRetryFailedMessage(msg)}
+                          disabled={retryingMsgId === msg.id}
+                          className="inline-flex items-center gap-1 shrink-0 text-[#1877F2] hover:underline disabled:opacity-50"
+                        >
+                          {retryingMsgId === msg.id
+                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                            : <RotateCcw className="w-3 h-3" />}
+                          Reintentar
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {msg.aiCoachingTip && (
                     <div className="mt-1 flex items-center gap-1.5 px-3 py-1 bg-amber-50 dark:bg-amber-900/20 border border-amber-100 rounded-full">
