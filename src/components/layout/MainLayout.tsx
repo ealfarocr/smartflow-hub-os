@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { usePresenceTracker } from '@/hooks/usePresenceTracker'
+import { OperationalStatusSelector } from '@/components/layout/OperationalStatusSelector'
 import { ToastContainer } from '@/components/ui/Toast'
 import { TenantFeatures } from '@/types'
 import { CreateTenantModal } from '@/modules/superadmin/CreateTenantModal'
@@ -37,7 +38,7 @@ const allNavItems = [
   { name: 'Multi-Agente',    href: '/multi-agent',     icon: Headset,            feature: 'hasMultiAgentPanel' as keyof TenantFeatures, toolKey: 'multi-agent' as ToolKey },
   { name: 'Agente IA',       href: '/ai-agent',        icon: Bot,                feature: 'hasAiAgent' as keyof TenantFeatures, toolKey: 'ai-agent' as ToolKey },
   { name: 'Auditor IA',      href: '/auditoria',       icon: ShieldCheck,        feature: 'hasQualityAuditor' as keyof TenantFeatures, toolKey: 'auditoria' as ToolKey },
-  { name: 'Links de Pago',   href: '/pagos',           icon: CreditCard,         feature: 'hasPaymentLinks' as keyof TenantFeatures, toolKey: 'pagos' as ToolKey },
+  { name: 'Cobros',          href: '/pagos',           icon: CreditCard,         feature: 'hasPaymentLinks' as keyof TenantFeatures, toolKey: 'pagos' as ToolKey },
   { name: 'Cotizaciones',    href: '/cotizaciones',    icon: FileText,           feature: 'hasQuotes' as keyof TenantFeatures, toolKey: 'cotizaciones' as ToolKey },
   { name: 'Catálogo',        href: '/catalogo',        icon: Package,            feature: 'hasCatalog' as keyof TenantFeatures, toolKey: 'catalogo' as ToolKey },
   { name: 'Agenda',          href: '/agenda',          icon: Calendar,           feature: 'hasAgenda' as keyof TenantFeatures, toolKey: 'agenda' as ToolKey },
@@ -412,6 +413,7 @@ export const MainLayout = () => {
             <Menu className="h-6 w-6" />
           </button>
           <div className="flex-1 flex justify-end items-center space-x-4">
+            <OperationalStatusSelector />
             <div className="hidden sm:flex items-center text-sm font-medium text-slate-600 dark:text-slate-400 mr-2">
                {user?.name || 'Cargando...'}
             </div>

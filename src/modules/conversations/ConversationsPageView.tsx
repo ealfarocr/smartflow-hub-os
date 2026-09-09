@@ -37,11 +37,24 @@ function formatChatTimestamp(iso: string): string {
   return isToday(d) ? format(d, 'HH:mm') : format(d, "d MMM, HH:mm", { locale: es });
 }
 
+// Selector "Asignar agente" — mostrar el nombre real de todo el equipo
+// (incluye prepared/draft/pending, útil para ver quién falta activar) pero
+// bloquear la asignación manual a cualquiera que no sea 'active': asignar
+// una conversación viva a alguien que todavía no puede loguearse no tiene
+// sentido operativo. Mostrar su nombre/estado sí sirve para que el
+// Admin/Owner vea de un vistazo quién está preparado.
+const TEAM_STATUS_LABEL: Record<string, string> = {
+  prepared: 'Preparado',
+  draft: 'Borrador',
+  pending: 'Invitado',
+  suspended: 'Suspendido',
+};
+
 export const ConversationsPageView = () => {
   const {
     conversations, activeConversation, activeMessages,
     setActiveConversation, subscribeInbox, subscribeMessages,
-    sendMessage, markAsRead, assignAgent, toggleBot, isLoadingInbox
+    sendMessage, markAsRead, assignAgent, claimConversation, toggleBot, isLoadingInbox
   } = useConversationStore();
   const { activeMembership } = useAuthStore();
   const { whatsappTemplates, templates: quickTemplates, company } = useSettingsStore();
@@ -54,6 +67,7 @@ export const ConversationsPageView = () => {
 
   const [inputText, setInputText]   = useState('');
   const [isSending, setIsSending]   = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
   const messagesEndRef               = useRef<HTMLDivElement>(null);
   const [searchParams]               = useSearchParams();
   const navigate                     = useNavigate();
@@ -165,6 +179,48 @@ export const ConversationsPageView = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeMessages]);
+
+  // Modo Libre — reclamo atómico de una conversación sin asesor. La decisión
+  // real (quién gana si dos hacen clic casi al mismo tiempo) la resuelve el
+  // backend con una transacción (claimConversation); acá solo mostramos el
+  // resultado. 'already-exists' = alguien más la tomó primero.
+  // Asignación manual (dropdown "Asignar agente") — guardia extra además del
+  // `disabled` nativo del <option>: si target es '' (Sin asignar) siempre se
+  // permite; si no, el miembro elegido debe estar 'active'. El <option>
+  // disabled ya bloquea esto en el uso normal del navegador, esta es una
+  // segunda capa defensiva por si el value llega por otro camino.
+  const handleAssignAgent = (conversationId: string, targetId: string) => {
+    if (targetId === '') { assignAgent(conversationId, targetId); return; }
+    const target = team.find(m => (m.userId || m.id) === targetId);
+    if (target && target.status !== 'active') {
+      addToast('Solo se puede asignar a miembros con acceso activo.', 'warning');
+      return;
+    }
+    assignAgent(conversationId, targetId);
+  };
+
+  const handleClaim = async (conversationId: string) => {
+    if (isClaiming) return;
+    setIsClaiming(true);
+    try {
+      await claimConversation(conversationId);
+      addToast('¡Conversación tomada! Ya es tuya.', 'success');
+    } catch (error) {
+      const code = (error as { code?: string; message?: string } | null)?.code;
+      const message = (error as { code?: string; message?: string } | null)?.message;
+      if (code === 'functions/already-exists') {
+        addToast('Esta conversación ya fue tomada por otro asesor.', 'warning');
+      } else if (code === 'functions/permission-denied') {
+        addToast(message || 'No estás habilitado para tomar conversaciones.', 'error');
+      } else if (code === 'functions/failed-precondition') {
+        addToast(message || 'Tenés que estar en estado "Trabajando" para tomar una conversación.', 'warning');
+      } else {
+        addToast('Error al tomar la conversación.', 'error');
+      }
+    } finally {
+      setIsClaiming(false);
+    }
+  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -567,7 +623,11 @@ export const ConversationsPageView = () => {
                     </div>
                     {conv.advisorId && (
                       <span className="text-[9px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full shrink-0">
-                        {team.find(m => m.userId === conv.advisorId)?.name?.split(' ')[0] || 'Agente'}
+                        {/* Fallback (m.userId || m.id) — un asesor prepared/pending recién
+                            asignado por Multi-Agente no tiene userId todavía (solo el id de
+                            membership), y sin este fallback el badge mostraba "Agente" genérico
+                            en vez de su nombre real. */}
+                        {team.find(m => (m.userId || m.id) === conv.advisorId)?.name?.split(' ')[0] || 'Agente'}
                       </span>
                     )}
                   </div>
@@ -609,18 +669,38 @@ export const ConversationsPageView = () => {
                   </p>
                 </div>
 
+                {/* Tomar conversación — Modo Libre, solo si nadie la tiene aún */}
+                {!activeChat.advisorId && (
+                  <button
+                    onClick={() => handleClaim(activeChat.id)}
+                    disabled={isClaiming}
+                    className="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 rounded-xl shrink-0 text-[10px] font-black uppercase tracking-tight hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors disabled:opacity-50"
+                    title="Tomar esta conversación sin asignar"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    {isClaiming ? 'Tomando...' : 'Tomar'}
+                  </button>
+                )}
+
                 {/* Assign agent — oculto en móvil */}
                 <div className="hidden md:flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl shrink-0">
                   <UserPlus className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <select
                     value={activeChat.advisorId || ''}
-                    onChange={e => assignAgent(activeChat.id, e.target.value)}
+                    onChange={e => handleAssignAgent(activeChat.id, e.target.value)}
                     className="bg-transparent text-[10px] font-bold text-slate-600 dark:text-slate-400 outline-none cursor-pointer max-w-[90px]"
                   >
                     <option value="">Sin asignar</option>
-                    {team.map(m => (
-                      <option key={m.userId} value={m.userId || ''}>{m.name || m.email}</option>
-                    ))}
+                    {team.map(m => {
+                      const effectiveId = m.userId || m.id;
+                      const isActive = m.status === 'active';
+                      const label = `${m.name || m.email || 'Sin nombre'}${!isActive ? ` (${TEAM_STATUS_LABEL[m.status] || m.status})` : ''}`;
+                      return (
+                        <option key={m.id} value={effectiveId} disabled={!isActive} title={!isActive ? 'Solo se puede asignar a miembros con acceso activo' : undefined}>
+                          {label}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 
@@ -841,7 +921,7 @@ export const ConversationsPageView = () => {
                     </button>
                     <button onClick={() => setShowPaymentModal(true)}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-900/10 hover:bg-emerald-100 rounded-xl text-xs font-bold text-emerald-600 transition-colors">
-                      <CreditCard className="w-3.5 h-3.5" /> Link de Pago
+                      <CreditCard className="w-3.5 h-3.5" /> Instrucciones de pago
                     </button>
                   </div>
                 )}

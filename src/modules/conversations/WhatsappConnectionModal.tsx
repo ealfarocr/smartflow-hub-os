@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Smartphone, Globe, CheckCircle2, Zap, AlertCircle, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { loadFacebookSdk, launchWhatsappEmbeddedSignup } from '@/utils/facebookSdk';
-import { WhatsappIntegrationService } from '@/services/firebase/WhatsappIntegrationService';
+import { useWhatsAppEmbeddedSignup } from '@/hooks/useWhatsAppEmbeddedSignup';
 
 interface ConnectionType {
   id: 'api' | 'coexistent';
@@ -34,51 +33,17 @@ const types: ConnectionType[] = [
   }
 ];
 
-type FlowStatus = 'idle' | 'loading-sdk' | 'waiting-popup' | 'saving' | 'success' | 'error';
-
 export const WhatsappConnectionModal = ({ onClose, tenantId }: { onClose: () => void; tenantId: string }) => {
   const [selected, setSelected] = useState<'api' | 'coexistent' | null>(null);
   const [step, setStep] = useState(1);
-  const [status, setStatus] = useState<FlowStatus>('idle');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [connectedInfo, setConnectedInfo] = useState<{ displayPhoneNumber: string | null; verifiedName: string | null } | null>(null);
-  const activeRunRef = useRef(0);
-
-  const runEmbeddedSignup = useCallback(async (connectionType: 'api' | 'coexistent') => {
-    const runId = ++activeRunRef.current;
-    const isStale = () => activeRunRef.current !== runId;
-
-    setStatus('loading-sdk');
-    setErrorMessage('');
-    try {
-      await loadFacebookSdk();
-      if (isStale()) return;
-      setStatus('waiting-popup');
-      const result = await launchWhatsappEmbeddedSignup(connectionType);
-      if (isStale()) return;
-      setStatus('saving');
-      const response = await WhatsappIntegrationService.completeEmbeddedSignup({
-        code: result.code,
-        tenantId,
-        wabaId: result.wabaId,
-        phoneNumberId: result.phoneNumberId,
-        connectionType,
-      });
-      if (isStale()) return;
-      setConnectedInfo({ displayPhoneNumber: response.displayPhoneNumber, verifiedName: response.verifiedName });
-      setStatus('success');
-    } catch (err: any) {
-      if (isStale()) return;
-      setErrorMessage(err?.message || 'No se pudo completar la conexión con WhatsApp');
-      setStatus('error');
-    }
-  }, [tenantId]);
+  const { status, errorMessage, connectedInfo, start, reset } = useWhatsAppEmbeddedSignup(tenantId);
 
   useEffect(() => {
     if (step === 2 && selected) {
-      runEmbeddedSignup(selected);
+      start(selected);
     }
-  }, [step, selected, runEmbeddedSignup]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, selected]);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 backdrop-blur-md bg-slate-900/20 animate-in fade-in duration-300">
@@ -202,10 +167,8 @@ export const WhatsappConnectionModal = ({ onClose, tenantId }: { onClose: () => 
                 <div className="flex gap-4 pt-4">
                   <button
                     onClick={() => {
-                      activeRunRef.current++; // invalida cualquier intento en curso, evita que pise un reintento nuevo
+                      reset(); // invalida cualquier intento en curso, evita que pise un reintento nuevo
                       setStep(1);
-                      setStatus('idle');
-                      setErrorMessage('');
                     }}
                     className="flex-1 py-4 text-slate-400 font-black text-xs uppercase tracking-widest hover:text-slate-600 transition-colors"
                   >

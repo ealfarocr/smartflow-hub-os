@@ -25,6 +25,8 @@ import { PartnersView } from '@/modules/partners/PartnersView'
 
 // Auth & Guards
 import { LoginView } from '@/modules/auth/LoginView'
+import { PinAccessView } from '@/modules/auth/PinAccessView'
+import { MyShiftView } from '@/modules/auth/MyShiftView'
 import { CheckoutView } from '@/modules/auth/CheckoutView'
 import { MagicOnboardingView } from '@/modules/auth/MagicOnboardingView'
 import { TenantSwitcher } from '@/modules/auth/TenantSwitcher'
@@ -57,6 +59,8 @@ export const AppRouter = () => {
         <Routes>
           {/* Rutas Públicas / Accesos sin Tenant */}
           <Route path="/login" element={<LoginView />} />
+          <Route path="/acceso" element={<PinAccessView />} />
+          <Route path="/mi-turno" element={<ProtectedRoute><MyShiftView /></ProtectedRoute>} />
           <Route path="/checkout" element={<CheckoutView />} />
           <Route path="/onboarding" element={<ProtectedRoute><MagicOnboardingView /></ProtectedRoute>} />
           <Route path="/switch-tenant" element={<ProtectedRoute><TenantSwitcher /></ProtectedRoute>} />

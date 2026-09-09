@@ -151,8 +151,14 @@ export const AuthService = {
     return enriched;
   },
 
+  // Sin filtro por status a propósito — el único consumidor (useTeam, usado
+  // por el selector "Asignar agente" de Conversaciones) necesita ver TODO el
+  // equipo (incluidos prepared/draft/pending) para mostrar nombre/estado,
+  // aunque solo los 'active' sean seleccionables (eso lo decide la UI, no
+  // esta query). Antes filtraba 'active' acá, lo que ocultaba por completo
+  // a cualquier miembro no activado del selector.
   async getTenantMemberships(tenantId: string): Promise<Membership[]> {
-    const q = query(collection(db, 'memberships'), where('tenantId', '==', tenantId), where('status', '==', 'active'));
+    const q = query(collection(db, 'memberships'), where('tenantId', '==', tenantId));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }) as Membership);
   }

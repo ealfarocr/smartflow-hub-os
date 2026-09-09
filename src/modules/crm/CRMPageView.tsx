@@ -46,7 +46,7 @@ export const CRMPageView = () => {
   const [isSeeding, setIsSeeding] = useState(false);
   const [agentFilter, setAgentFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [agents, setAgents] = useState<{id: string, name: string}[]>([]);
+  const [agents, setAgents] = useState<{id: string, name: string, status?: string}[]>([]);
   const [agendaModalLead, setAgendaModalLead] = useState<Lead | null>(null);
   const [initialAgendaData, setInitialAgendaData] = useState({});
   const [isPipelineModalOpen, setIsPipelineModalOpen] = useState(false);
@@ -194,10 +194,23 @@ export const CRMPageView = () => {
           const { db } = await import('@/lib/firebase');
           const q = query(collection(db, 'memberships'), where('tenantId', '==', activeMembership.tenantId));
           const snap = await getDocs(q);
-          const agentList = snap.docs.map(doc => ({
-            id: doc.data().userId,
-            name: doc.data().userName || 'Agente'
-          }));
+          // Bug encontrado: leía un campo 'userName' que nunca existió en el
+          // documento de membership (el campo real es 'name') — por eso
+          // SIEMPRE caía al fallback "Agente", para cualquier asesor, activo
+          // o no. También usaba solo 'userId' como id, que es null para
+          // prepared/draft/pending — varias opciones terminaban con el mismo
+          // id (null) y el mismo texto ("Agente"), indistinguibles entre sí.
+          // Mostrar el nombre acá NO implica elegibilidad para recibir leads
+          // (eso lo sigue decidiendo solo assignConversationAdvisor en el
+          // backend) — esto es puramente un selector de visualización/filtro.
+          const agentList = snap.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: data.userId || doc.id,
+              name: data.name || data.email || 'Sin nombre',
+              status: data.status,
+            };
+          });
           setAgents(agentList);
         } catch (e) {
           console.error("Error loading agents:", e);
@@ -386,6 +399,16 @@ export const CRMPageView = () => {
     return formatDistanceToNowStrict(d, { addSuffix: true, locale: es });
   };
 
+  // Sufijo de estado para el selector de agentes — mostrar el nombre real
+  // ≠ ser elegible para recibir leads (eso lo sigue decidiendo el backend).
+  // Un <option> nativo no soporta badges, así que se muestra como sufijo.
+  const AGENT_STATUS_SUFFIX: Record<string, string> = {
+    prepared: ' (Preparado)',
+    draft: ' (Borrador)',
+    pending: ' (Invitado)',
+  };
+  const agentStatusSuffix = (status?: string) => status ? (AGENT_STATUS_SUFFIX[status] || '') : '';
+
   const activeMobileStage = mobileStage && stages.some(s => s.label === mobileStage)
     ? mobileStage
     : (stages[0]?.label ?? '');
@@ -409,7 +432,7 @@ export const CRMPageView = () => {
                <option value="all">👥 Todos los Agentes</option>
                <option value="unassigned">👤 Sin Asignar</option>
                {agents.map(agent => (
-                 <option key={agent.id} value={agent.id}>👤 {agent.name}</option>
+                 <option key={agent.id} value={agent.id}>👤 {agent.name}{agentStatusSuffix(agent.status)}</option>
                ))}
             </select>
           </div>
@@ -466,7 +489,7 @@ export const CRMPageView = () => {
              <option value="all">👥 Todos los agentes</option>
              <option value="unassigned">👤 Sin asignar</option>
              {agents.map(agent => (
-               <option key={agent.id} value={agent.id}>👤 {agent.name}</option>
+               <option key={agent.id} value={agent.id}>👤 {agent.name}{agentStatusSuffix(agent.status)}</option>
              ))}
           </select>
           <button

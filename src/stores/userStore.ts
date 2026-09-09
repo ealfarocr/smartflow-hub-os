@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Role, UserPresence } from '@/types';
+import { Role, UserPresence, WorkSession } from '@/types';
 import { UserService } from '@/services/firebase/UserService';
 import { PresenceService } from '@/services/firebase/PresenceService';
 
@@ -21,6 +21,9 @@ export interface TeamMember {
 interface UserState {
   teamMembers: TeamMember[];
   presenceMap: Record<string, UserPresence>;
+  // Turno más reciente de cada userId (abierto o recién cerrado) — ver
+  // PresenceService.subscribeToTenantWorkSessions (Fase 10, panel Owner/Admin).
+  workSessionMap: Record<string, WorkSession>;
   isLoading: boolean;
   
   // Actions
@@ -39,9 +42,10 @@ interface UserState {
 export const useUserStore = create<UserState>((set) => ({
   teamMembers: [],
   presenceMap: {},
+  workSessionMap: {},
   isLoading: true,
 
-  reset: () => set({ teamMembers: [], presenceMap: {}, isLoading: false }),
+  reset: () => set({ teamMembers: [], presenceMap: {}, workSessionMap: {}, isLoading: false }),
 
   subscribe: (tenantId) => {
     set({ isLoading: true });
@@ -76,9 +80,17 @@ export const useUserStore = create<UserState>((set) => ({
       set({ presenceMap: map });
     });
 
+    // 3. Suscribirse a la sesión de turno más reciente de cada vendedor
+    const unsubSessions = PresenceService.subscribeToTenantWorkSessions(tenantId, (sessions) => {
+      const map: Record<string, WorkSession> = {};
+      sessions.forEach(s => { map[s.userId] = s; });
+      set({ workSessionMap: map });
+    });
+
     return () => {
       unsubMembers();
       unsubPresence();
+      unsubSessions();
     };
   },
 

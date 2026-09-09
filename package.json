@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run --exclude '**/firestore.rules.test.ts'",
+    "test:rules": "vitest run firestore.rules.test.ts"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
@@ -43,6 +45,7 @@
     "globals": "^17.5.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
-    "vite": "^8.0.9"
+    "vite": "^8.0.9",
+    "vitest": "^5.0.0"
   }
 }

@@ -43,9 +43,9 @@ export function usePresenceTracker() {
     };
 
     // Heartbeat cada 60 segundos
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       const inactiveTime = Date.now() - lastActivityRef.current;
-      
+
       // Si lleva más de 5 minutos sin mover el mouse, marcar como idle
       if (inactiveTime > 5 * 60 * 1000) {
         statusRef.current = 'idle';
@@ -53,7 +53,20 @@ export function usePresenceTracker() {
         statusRef.current = 'online';
       }
 
-      update();
+      await update();
+
+      // CHECKPOINT DE SEGURIDAD: ya no se lee/escribe work_sessions desde
+      // acá — tickPresence (Cloud Function) resuelve la sesión abierta y
+      // calcula el tiempo transcurrido con SU PROPIO reloj server-side; el
+      // cliente solo manda una señal de baja confianza (hadActivity), nunca
+      // una cantidad de segundos. Separado a propósito de operationalStatus/
+      // online-idle-offline (Fase 18): esto solo mide tiempo, nunca decide
+      // el estado en sí.
+      try {
+        await PresenceService.tickPresence(tenantId, statusRef.current === 'online');
+      } catch (err) {
+        console.error('Error en heartbeat de work_session:', err);
+      }
     }, 60 * 1000);
 
     // Detectar actividad

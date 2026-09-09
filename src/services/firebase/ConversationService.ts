@@ -146,6 +146,17 @@ export class ConversationService {
     });
   }
 
+  /**
+   * Modo Libre — reclamo atómico de una conversación sin asignar. Server-
+   * authoritative (Cloud Function con transacción): el primero que llama
+   * gana, el resto recibe 'already-exists' (ver functions/src/index.ts).
+   */
+  static async claimConversation(conversationId: string) {
+    const claimFn = httpsCallable(this.functions, 'claimConversation');
+    const result = await claimFn({ conversationId });
+    return result.data as { success: boolean; conversationId: string; advisorId: string };
+  }
+
   static async toggleBot(conversationId: string, enabled: boolean) {
     const convRef = doc(db, this.collectionName, conversationId);
     await updateDoc(convRef, {

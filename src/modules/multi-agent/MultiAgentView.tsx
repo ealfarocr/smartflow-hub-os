@@ -5,6 +5,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useUIStore } from '@/stores/uiStore';
 import { MultiAgentConfig, Membership } from '@/types';
 import { UserService } from '@/services/firebase/UserService';
+import { isEligibleForAutoLeads, getMemberIdentifier } from '@/utils/multiAgentEligibility';
 
 export const MultiAgentView = () => {
   const { activeMembership, user } = useAuthStore();
@@ -29,6 +30,8 @@ export const MultiAgentView = () => {
       const loaded = {
         isAutoDistributionEnabled: multiAgentConfig.isAutoDistributionEnabled || false,
         includedUserIds: multiAgentConfig.includedUserIds || [],
+        leadEnabledUserIds: multiAgentConfig.leadEnabledUserIds ?? null,
+        roundRobinCursor: multiAgentConfig.roundRobinCursor ?? null,
       };
       console.log('MULTI_AGENT_CONFIG_LOADED', loaded);
       setConfig(loaded);
@@ -104,14 +107,31 @@ export const MultiAgentView = () => {
     }
   };
 
-  const toggleUserInclusion = async (userId: string) => {
-    const isIncluded = config.includedUserIds.includes(userId);
+  // Saca a alguien del equipo configurado por completo (includedUserIds) —
+  // deja de aparecer en "Equipo Asignado" y, si tenía leadEnabledUserIds
+  // explícito, también se lo quita de ahí para no dejar un ID huérfano.
+  const removeFromTeam = async (identifier: string) => {
     await updateConfig({
       ...config,
-      includedUserIds: isIncluded
-        ? config.includedUserIds.filter(id => id !== userId)
-        : [...config.includedUserIds, userId],
+      includedUserIds: config.includedUserIds.filter(id => id !== identifier),
+      leadEnabledUserIds: config.leadEnabledUserIds
+        ? config.leadEnabledUserIds.filter(id => id !== identifier)
+        : config.leadEnabledUserIds,
     });
+  };
+
+  // Prende/apaga la elegibilidad para asignación AUTOMÁTICA de un miembro
+  // active — a propósito NO lo saca del equipo (ver sección 8: esto no
+  // afecta la cuenta del vendedor ni su lugar en "Equipo Asignado", solo si
+  // puede recibir la próxima conversación por round-robin).
+  const toggleLeadEnabled = async (identifier: string) => {
+    const currentlyEligible = configuredTeam
+      .filter(m => isEligibleForAutoLeads(m, config))
+      .map(getMemberIdentifier);
+    const newSet = currentlyEligible.includes(identifier)
+      ? currentlyEligible.filter(id => id !== identifier)
+      : [...currentlyEligible, identifier];
+    await updateConfig({ ...config, leadEnabledUserIds: newSet });
   };
 
   // "Equipo Asignado" muestra el equipo CONFIGURADO (includedUserIds), sin
@@ -122,10 +142,20 @@ export const MultiAgentView = () => {
   // directo el documento real de settings del tenant.
   // "Configurado en el equipo" ≠ "activo para recibir leads": un prepared
   // puede estar en el equipo (para dejar todo listo antes del lanzamiento)
-  // pero solo un membership.status === 'active' cuenta como elegible.
+  // pero solo un membership.status === 'active' cuenta como elegible, y
+  // dentro de los active, "Recibe leads" (leadEnabledUserIds) puede
+  // desactivar la elegibilidad para asignación AUTOMÁTICA sin tocar su cuenta.
   const teamMembers = memberships.filter(m => !m.id.startsWith('impersonated_'));
   const configuredTeam = teamMembers.filter(m => config.includedUserIds.includes(m.userId || m.id));
-  const activeCount = configuredTeam.filter(m => m.status === 'active').length;
+  const eligibleForLeads = configuredTeam.filter(m => isEligibleForAutoLeads(m, config));
+  const eligibleCount = eligibleForLeads.length;
+  // Vista previa del próximo turno — puramente informativa; la decisión real
+  // la toma el backend (assignConversationAdvisor) dentro de una transacción,
+  // esto solo replica la misma regla de orden para mostrarla en la UI.
+  const eligibleIdsSorted = eligibleForLeads.map(getMemberIdentifier).sort();
+  const cursorIdx = config.roundRobinCursor ? eligibleIdsSorted.indexOf(config.roundRobinCursor) : -1;
+  const nextTurnIdentifier = eligibleIdsSorted.length > 0 ? eligibleIdsSorted[(cursorIdx + 1) % eligibleIdsSorted.length] : null;
+  const nextTurnMember = nextTurnIdentifier ? eligibleForLeads.find(m => getMemberIdentifier(m) === nextTurnIdentifier) : null;
 
   const STATUS_META: Record<string, { label: string; className: string }> = {
     prepared: { label: 'Preparado', className: 'bg-violet-50 text-violet-600 dark:bg-violet-900/20 dark:text-violet-400' },
@@ -153,7 +183,7 @@ export const MultiAgentView = () => {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1877F2]/8 rounded-xl">
               <UsersIcon className="w-3.5 h-3.5 text-[#1877F2]" />
-              <span className="text-xs font-black text-[#1877F2]">{activeCount} activos</span>
+              <span className="text-xs font-black text-[#1877F2]">{eligibleCount} elegibles</span>
             </div>
             <button onClick={handleSave} disabled={isSaving}
               className="flex items-center gap-2 px-5 py-2.5 bg-[#1877F2] hover:bg-blue-600 text-white text-xs font-black rounded-xl shadow-sm shadow-[#1877F2]/20 transition-all disabled:opacity-50">
@@ -218,8 +248,13 @@ export const MultiAgentView = () => {
                     <div>
                       <p className="text-sm font-black text-emerald-700 dark:text-emerald-400 mb-1">Distribución Automática</p>
                       <p className="text-[11px] text-emerald-700/70 dark:text-emerald-400/70 leading-relaxed">
-                        Cada lead nuevo se asigna automáticamente al siguiente asesor activo en turno (Round-Robin).
+                        Cada conversación nueva se asigna automáticamente al siguiente asesor elegible en turno (Round-Robin), decidido en el backend.
                       </p>
+                      {eligibleCount === 0 ? (
+                        <p className="text-[10px] font-bold text-red-500 mt-2">⚠ Sin asesores elegibles — las conversaciones nuevas quedarán sin asignar.</p>
+                      ) : nextTurnMember ? (
+                        <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-2">Próximo turno: {nextTurnMember.name || nextTurnMember.email || 'Sin nombre'}</p>
+                      ) : null}
                     </div>
                   </div>
                 ) : (
@@ -246,7 +281,7 @@ export const MultiAgentView = () => {
             <ul className="space-y-1.5">
               <li className="text-[11px] text-amber-700/80 dark:text-amber-400/80 flex items-start gap-1.5">
                 <span className="font-black mt-0.5">·</span>
-                En <strong>Conversaciones</strong>: usá el selector de agente en el encabezado del chat para asignar manualmente.
+                En <strong>Modo Libre</strong>: una conversación nueva sin asesor puede ser tomada por cualquier asesor elegible — el primero que la reclama gana, sin importar si tiene el panel de Multi-Agente visible.
               </li>
               <li className="text-[11px] text-amber-700/80 dark:text-amber-400/80 flex items-start gap-1.5">
                 <span className="font-black mt-0.5">·</span>
@@ -254,7 +289,7 @@ export const MultiAgentView = () => {
               </li>
               <li className="text-[11px] text-amber-700/80 dark:text-amber-400/80 flex items-start gap-1.5">
                 <span className="font-black mt-0.5">·</span>
-                Con <strong>Distribución Automática</strong> activa, cada lead nuevo se asigna solo al siguiente asesor del turno.
+                Con <strong>Distribución Automática</strong> activa, cada conversación nueva se asigna solo a quien tenga "Recibe leads" activo.
               </li>
             </ul>
           </div>
@@ -279,10 +314,11 @@ export const MultiAgentView = () => {
 
             {/* Column headers */}
             <div className="grid grid-cols-12 px-5 py-2.5 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700">
-              <div className="col-span-5 text-[9px] font-black text-slate-400 uppercase tracking-widest">Asesor</div>
+              <div className="col-span-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Asesor</div>
               <div className="col-span-2 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Rol</div>
               <div className="col-span-2 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Estado</div>
               <div className="col-span-3 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Recibe leads</div>
+              <div className="col-span-1 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Quitar</div>
             </div>
 
             <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
@@ -298,10 +334,11 @@ export const MultiAgentView = () => {
                 const isActiveStatus = m.status === 'active';
                 const statusMeta = STATUS_META[m.status] || STATUS_META.active;
                 const initials = m.name ? m.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : (m.email?.charAt(0).toUpperCase() || 'U');
+                const receivesLeads = isEligibleForAutoLeads(m, config);
 
                 return (
                   <div key={m.id} className={`grid grid-cols-12 items-center px-5 py-4 transition-colors ${isActiveStatus ? 'bg-emerald-50/30 dark:bg-emerald-900/5' : 'hover:bg-slate-50 dark:hover:bg-slate-900/30'}`}>
-                    <div className="col-span-5 flex items-center gap-3">
+                    <div className="col-span-4 flex items-center gap-3">
                       <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${
                         isActiveStatus ? 'bg-[#1877F2] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
                       }`}>
@@ -329,21 +366,23 @@ export const MultiAgentView = () => {
                     <div className="col-span-3 flex justify-end items-center gap-2">
                       {isActiveStatus ? (
                         <>
-                          <span className="text-[9px] font-black uppercase text-emerald-500">Activo</span>
-                          <button onClick={() => toggleUserInclusion(identifier)} title="Quitar del equipo"
-                            className="w-10 h-5 rounded-full relative transition-all duration-300 bg-emerald-500">
-                            <div className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 left-5" />
+                          <span className={`text-[9px] font-black uppercase ${receivesLeads ? 'text-emerald-500' : 'text-slate-300'}`}>
+                            {receivesLeads ? 'Activo' : 'Pausado'}
+                          </span>
+                          <button onClick={() => toggleLeadEnabled(identifier)} title="Activar/pausar elegibilidad para asignación automática"
+                            className={`w-10 h-5 rounded-full relative transition-all duration-300 ${receivesLeads ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}>
+                            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 ${receivesLeads ? 'left-5' : 'left-0.5'}`} />
                           </button>
                         </>
                       ) : (
-                        <>
-                          <span className="text-[9px] font-black uppercase text-slate-300" title="Solo los miembros con acceso activo pueden recibir leads">No elegible</span>
-                          <button onClick={() => toggleUserInclusion(identifier)} title="Quitar del equipo"
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
-                            <UserMinus className="w-3.5 h-3.5" />
-                          </button>
-                        </>
+                        <span className="text-[9px] font-black uppercase text-slate-300" title="Solo los miembros con acceso activo pueden recibir leads">No elegible</span>
                       )}
+                    </div>
+                    <div className="col-span-1 flex justify-end">
+                      <button onClick={() => removeFromTeam(identifier)} title="Quitar del equipo"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                        <UserMinus className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 );

@@ -3,11 +3,13 @@ import { useUserStore } from '@/stores/userStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { User, Role } from '@/types';
-import { Plus, Edit2, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIcon, Send, Mail, Crown, ShieldCheck, Wrench, Eye, type LucideIcon } from 'lucide-react';
+import { Plus, Edit2, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIcon, Send, Mail, Crown, ShieldCheck, Wrench, Eye, KeyRound, Smartphone, type LucideIcon } from 'lucide-react';
 import { ALL_TOOL_KEYS, TOOL_LABELS, ADMIN_ONLY_TOOLS, TOOL_PRESETS, getEffectiveTools, getDefaultToolsForRole, ToolKey } from '@/utils/permissions';
+import { httpsCallable, getFunctions } from 'firebase/functions';
+import { DeviceManagerModal } from './DeviceManagerModal';
 
 export const UsersManagementView = () => {
-  const { teamMembers, presenceMap, updateMemberRole, updateMemberStatus, createDraftMember, sendInvitation, createPreparedMember, convertPreparedToDraft, updateAllowedTools, subscribe, isLoading } = useUserStore();
+  const { teamMembers, presenceMap, workSessionMap, updateMemberRole, updateMemberStatus, createDraftMember, sendInvitation, createPreparedMember, convertPreparedToDraft, updateAllowedTools, subscribe, isLoading } = useUserStore();
   const { activeMembership } = useAuthStore();
   const { addToast } = useUIStore();
 
@@ -19,6 +21,7 @@ export const UsersManagementView = () => {
   }, [activeMembership?.tenantId, subscribe]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [deviceModalUser, setDeviceModalUser] = useState<{ userId: string; name: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filterRole, setFilterRole] = useState<Role | 'All'>('All');
@@ -91,6 +94,40 @@ export const UsersManagementView = () => {
       addToast('Error al enviar la invitación', 'error');
     } finally {
       setSendingInviteId(null);
+    }
+  };
+
+  // Acceso por PIN (LOOP dispositivo confiable) — alternativa a email+invitación
+  // para vendedores que no necesitan/quieren un Gmail propio. Funciona sobre
+  // 'prepared' o 'draft': el backend (setVendorPin) crea la cuenta técnica de
+  // Firebase Auth y deja la membership en 'pending' lista para el primer
+  // acceso por PIN — mismo destino final ('active') que el flujo por correo,
+  // solo cambia cómo llega ahí.
+  const [generatingPinId, setGeneratingPinId] = useState<string | null>(null);
+  const handleGeneratePin = async (id: string, name: string, tenantId: string) => {
+    if (!window.confirm(`¿Generar PIN de acceso para ${name}?\n\nSi ya tiene uno, se reemplaza por uno nuevo.`)) return;
+    setGeneratingPinId(id);
+    try {
+      // Checkpoint de seguridad: el backend devuelve loginHandle (usuario
+      // público, ej. "michelle"), nunca el membershipId — es lo único que
+      // el link de enrolamiento y el propio vendedor van a conocer.
+      const setVendorPin = httpsCallable<{ membershipId: string }, { pin: string; tenantId: string; loginHandle: string }>(getFunctions(), 'setVendorPin');
+      const result = await setVendorPin({ membershipId: id });
+      const { pin, loginHandle } = result.data;
+      const link = `https://hub.smartflow-suite.com/acceso?h=${encodeURIComponent(loginHandle)}&t=${tenantId}&n=${encodeURIComponent(name)}`;
+      alert(
+        `Acceso generado para ${name}\n\n` +
+        `Usuario: ${loginHandle}\n` +
+        `PIN: ${pin}\n\n` +
+        `Compartí este link (abrilo UNA vez en su teléfono) + el PIN:\n${link}\n\n` +
+        `Después de esa primera vez, el teléfono queda reconocido y solo va a pedir el PIN.`
+      );
+      addToast('PIN generado', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error al generar el PIN';
+      addToast(message, 'error');
+    } finally {
+      setGeneratingPinId(null);
     }
   };
 
@@ -214,6 +251,41 @@ export const UsersManagementView = () => {
     );
   };
 
+  // LOOP Fase 10 — estado operativo (independiente de online/idle/offline,
+  // ver Fase 18: "conectado" no es lo mismo que "disponible para leads").
+  const OPERATIONAL_META: Record<string, { label: string; dot: string }> = {
+    working: { label: 'Trabajando', dot: 'bg-emerald-500' },
+    coffee: { label: 'Café / Pausa', dot: 'bg-amber-400' },
+    lunch: { label: 'Almuerzo', dot: 'bg-orange-500' },
+    errand: { label: 'Diligencia', dot: 'bg-blue-500' },
+    off_shift: { label: 'Fuera de turno', dot: 'bg-red-500' },
+  };
+  const formatDuration = (totalSeconds: number) => {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    if (h === 0 && m === 0) return '< 1m';
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+  const renderOperationalStatus = (u: Row) => {
+    const opStatus = presenceMap[u.userId]?.operationalStatus || 'off_shift';
+    const meta = OPERATIONAL_META[opStatus];
+    const session = workSessionMap[u.userId];
+    const connectedSeconds = (session?.activeSeconds || 0) + (session?.idleSeconds || 0);
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200">
+          <span className={`w-2 h-2 rounded-full ${meta.dot}`} />
+          {meta.label}
+        </span>
+        {session && (
+          <span className="text-[10px] text-slate-400 font-medium">
+            Conectado {formatDuration(connectedSeconds)} · Activo {formatDuration(session.activeSeconds || 0)}
+          </span>
+        )}
+      </div>
+    );
+  };
+
   const renderRoleChip = (role: Role) => {
     const meta = ROLE_META[role];
     const Icon = meta.icon;
@@ -298,9 +370,28 @@ export const UsersManagementView = () => {
           <LinkIcon className="w-4 h-4" />
         </button>
       )}
+      {(u.status === 'prepared' || u.status === 'draft') && activeMembership?.tenantId && (
+        <button
+          onClick={() => handleGeneratePin(u.id, u.name, activeMembership.tenantId)}
+          disabled={generatingPinId === u.id}
+          className="text-slate-400 hover:text-amber-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
+          title="Generar PIN de acceso (sin email)"
+        >
+          {generatingPinId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+        </button>
+      )}
       {u.status !== 'draft' && u.status !== 'prepared' && (
         <button onClick={() => toggleStatus(u.id, u.isActive, u.name)} className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title={u.isActive ? 'Desactivar / Suspender' : 'Reactivar'}>
           {u.isActive ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+        </button>
+      )}
+      {u.status === 'active' && u.userId && (
+        <button
+          onClick={() => setDeviceModalUser({ userId: u.userId, name: u.name })}
+          className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"
+          title="Ver dispositivos"
+        >
+          <Smartphone className="w-4 h-4" />
         </button>
       )}
       <button onClick={() => handleOpenModal(u)} className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title="Editar">
@@ -363,6 +454,7 @@ export const UsersManagementView = () => {
               <tr>
                 <th className="px-6 py-4 font-bold">Usuario</th>
                 <th className="px-6 py-4 font-bold text-center">Presencia</th>
+                <th className="px-6 py-4 font-bold">Estado / Turno</th>
                 <th className="px-6 py-4 font-bold">Rol de Acceso</th>
                 <th className="px-6 py-4 font-bold">Seguridad / Acceso</th>
                 <th className="px-6 py-4 font-bold">Última Actividad / Ubicación</th>
@@ -413,6 +505,7 @@ export const UsersManagementView = () => {
                             {renderPresence(u)}
                           </div>
                         </td>
+                        <td className="px-6 py-4">{u.status === 'active' ? renderOperationalStatus(u) : <span className="text-slate-300 text-xs">—</span>}</td>
                         <td className="px-6 py-4">{renderRoleChip(u.role)}</td>
                         <td className="px-6 py-4">{renderStatusBadge(u)}</td>
                         <td className="px-6 py-4">{renderLastActivity(u)}</td>
@@ -468,6 +561,7 @@ export const UsersManagementView = () => {
                             {renderRoleChip(u.role)}
                             {renderStatusBadge(u)}
                           </div>
+                          {u.status === 'active' && <div>{renderOperationalStatus(u)}</div>}
                           <div>{renderLastActivity(u)}</div>
                           <div className="flex justify-end gap-1 pt-2 border-t border-slate-100 dark:border-slate-800">
                             {renderActions(u)}
@@ -674,6 +768,13 @@ export const UsersManagementView = () => {
             </div>
           </div>
         </div>
+      )}
+      {deviceModalUser && (
+        <DeviceManagerModal
+          userId={deviceModalUser.userId}
+          userName={deviceModalUser.name}
+          onClose={() => setDeviceModalUser(null)}
+        />
       )}
     </div>
   );

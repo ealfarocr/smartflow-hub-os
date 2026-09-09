@@ -24,6 +24,16 @@ export interface OnboardingState {
   lastNotificationDate?: any;
 }
 
+// Una cuenta bancaria/IBAN configurada por el negocio — se renderiza como su
+// propia tarjeta con su propio botón "Copiar" (nunca agrupada con otras en
+// un solo bloque de texto libre, ver PublicPaymentView.tsx).
+export interface BankAccount {
+  id: string;
+  bankName: string;
+  accountNumber: string; // IBAN, número de cuenta, CLABE, etc.
+  owner?: string;
+}
+
 // ─── Tenant Settings ──────────────────────────────────────
 export interface TenantSettings {
   tenantId?: string;
@@ -31,7 +41,12 @@ export interface TenantSettings {
   sinpePhone?: string;
   sinpeOwner?: string;
   sinpeId?: string;
-  bankAccounts?: string;
+  // Antes era un solo string de texto libre (una cuenta por línea, sin
+  // estructura) — ahora es una lista de cuentas individuales para que cada
+  // una se pueda mostrar y copiar por separado. migrateSettings() abajo
+  // convierte el formato viejo (string) a una sola entrada de esta lista sin
+  // perder el dato, en vez de descartarlo.
+  bankAccounts?: BankAccount[];
   company: {
     legalName: string;
     tradeName: string;
@@ -76,6 +91,21 @@ export interface TenantSettings {
   updatedBy?: string;
 }
 
+// Normaliza bankAccounts a BankAccount[] sin importar el formato en que haya
+// quedado guardado en Firestore: array nuevo, string legacy (una cuenta por
+// línea) o vacío/null. Compartida entre SettingsService (config del negocio)
+// y PublicPaymentView (ficha pública de cobro) para que ambas lecturas del
+// mismo campo se comporten igual y ninguna pueda crashear con datos legacy.
+export function normalizeBankAccounts(rawBankAccounts: unknown, fallbackOwner?: string): BankAccount[] {
+  if (Array.isArray(rawBankAccounts)) {
+    return rawBankAccounts.filter((a) => a && typeof a.accountNumber === 'string' && a.accountNumber.trim());
+  }
+  if (typeof rawBankAccounts === 'string' && rawBankAccounts.trim()) {
+    return [{ id: 'legacy', bankName: '', accountNumber: rawBankAccounts.trim(), owner: fallbackOwner || '' }];
+  }
+  return [];
+}
+
 // ─── Migración: mapea campos antiguos → nuevos ───────────
 function migrateSettings(raw: Record<string, any>): TenantSettings {
   // Root fields
@@ -83,7 +113,7 @@ function migrateSettings(raw: Record<string, any>): TenantSettings {
   const sinpePhone = raw.sinpePhone || '';
   const sinpeOwner = raw.sinpeOwner || '';
   const sinpeId = raw.sinpeId || '';
-  const bankAccounts = raw.bankAccounts || '';
+  const bankAccounts = normalizeBankAccounts(raw.bankAccounts, raw.sinpeOwner);
 
   // company
   const oldCompany = raw.company || {};

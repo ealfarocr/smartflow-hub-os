@@ -1,3 +1,5 @@
+import type { Timestamp, FieldValue } from 'firebase/firestore';
+
 export type Role = 'Owner' | 'Admin' | 'Asesor Comercial' | 'Técnico' | 'Solo lectura';
 
 export interface TenantFeatures {
@@ -33,6 +35,16 @@ export interface AIAgentConfig {
 export interface MultiAgentConfig {
   isAutoDistributionEnabled: boolean;
   includedUserIds: string[];
+  // Elegibilidad para asignación AUTOMÁTICA de leads — independiente de estar
+  // "en el equipo" (includedUserIds) y de la cuenta del vendedor.
+  // null/undefined = todos los active+incluidos son elegibles (fallback,
+  // reproduce el comportamiento sin este campo); array explícito = lista
+  // curada por el Owner/Admin. Ver src/utils/multiAgentEligibility.ts.
+  leadEnabledUserIds?: string[] | null;
+  // Último identificador (userId) asignado por el round-robin — server-side,
+  // solo lo escribe functions/src/index.ts (assignConversationAdvisor)
+  // dentro de una transacción. El frontend nunca decide ni escribe esto.
+  roundRobinCursor?: string | null;
 }
 
 export type TenantPlan = 'starter' | 'pro' | 'enterprise';
@@ -247,7 +259,10 @@ export interface Conversation {
   lastInboundDate?: string;    // Fecha del último mensaje entrante (lead) — para cálculo de ventana 24h
   unreadCount: number;
   
-  advisorId: string;
+  advisorId: string; // '' = sin asignar (modo Libre, o Automático sin elegibles)
+  assignedAt?: string;
+  assignedBy?: string; // uid de quien reclamó manualmente, o ausente si fue automático
+  assignmentSource?: 'manual_claim' | 'manual_reassign' | 'auto_round_robin' | 'unassigned_free_mode' | 'unassigned_no_eligible' | 'unassigned_error';
   status: 'active' | 'archived' | 'bot_handling';
   aiScore?: number;
   aiSentiment?: 'positive' | 'neutral' | 'negative' | 'critical';
@@ -293,6 +308,12 @@ export interface AgendaItem {
   isCompleted: boolean;
 }
 
+// Estado operativo (LOOP) — quién puede recibir leads AHORA, no si tiene
+// sesión abierta. Independiente de online/idle/offline: una pestaña abierta
+// nunca cuenta como "trabajando" (ver Fase 18) — solo lo pone así una
+// elección explícita del vendedor en el selector.
+export type OperationalStatus = 'working' | 'coffee' | 'lunch' | 'errand' | 'off_shift';
+
 export interface UserPresence {
   uid: string;
   tenantId: string;
@@ -306,6 +327,45 @@ export interface UserPresence {
   authProvider: string; // google.com, password, etc.
   userAgent: string;
   updatedAt: any; // serverTimestamp
+  // Sin operationalStatus todavía (memberships previas a esta feature) =
+  // tratar como 'off_shift' en TODO lado, nunca como 'working' por defecto
+  // (ver Fase 21 — evita asignar leads a alguien que nunca inició turno).
+  operationalStatus?: OperationalStatus;
+  operationalStatusChangedAt?: string; // ISO
+  // Sesión de turno abierta actualmente (o null si operationalStatus es
+  // 'off_shift') — usePresenceTracker usa esto para saber a qué
+  // work_sessions/{id} sumarle los segundos de cada heartbeat.
+  activeWorkSessionId?: string | null;
+}
+
+// Un turno: desde que el vendedor sale de 'off_shift' por primera vez hasta
+// que vuelve a 'off_shift' (o cierra sesión). connected/active/idle se
+// mantienen separados a propósito (Fase 18) — "tiempo conectado" nunca se
+// etiqueta solo como "horas trabajadas" en la UI.
+export interface WorkSession {
+  id: string;
+  tenantId: string;
+  userId: string;
+  deviceId?: string;
+  startedAt: Timestamp | FieldValue;
+  endedAt?: Timestamp | FieldValue | null;
+  lastSeenAt: Timestamp | FieldValue;
+  activeSeconds: number;
+  idleSeconds: number;
+  status: OperationalStatus;
+}
+
+// Log append-only de cada cambio de estado operativo — permite reconstruir
+// la línea de tiempo del día (08:03 working, 10:17 coffee, ...) sin
+// depender de que work_sessions guarde el historial completo de pausas.
+export interface WorkStatusEvent {
+  id: string;
+  tenantId: string;
+  userId: string;
+  deviceId?: string;
+  fromStatus: OperationalStatus | null;
+  toStatus: OperationalStatus;
+  changedAt: Timestamp | FieldValue;
 }
 
 export interface Task {

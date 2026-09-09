@@ -5,7 +5,9 @@ import {
   CheckCircle2, Save, X, Bot, Zap, Sparkles, MessageSquare 
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
-import { IntegrationService, WhatsAppIntegration, MetaIntegration } from '@/services/firebase/IntegrationService';
+import { IntegrationService, WhatsAppIntegration, MetaIntegration, getWabaId } from '@/services/firebase/IntegrationService';
+import { WhatsAppEmbeddedSignupButton } from '@/components/integrations/WhatsAppEmbeddedSignupButton';
+import { deriveStatusFromIntegration } from '@/utils/whatsappStatus';
 
 export const IntegrationsPlaceholderView = () => {
   const { activeMembership } = useAuthStore();
@@ -17,6 +19,11 @@ export const IntegrationsPlaceholderView = () => {
 
   // Modal active state
   const [activeModal, setActiveModal] = useState<'whatsapp' | 'facebook' | 'instagram' | null>(null);
+  // LOOP Fase 4B: el formulario manual (Phone Number ID/WABA/Verify Token/App
+  // Secret/Access Token) pasa a ser "Configuración avanzada", colapsado por
+  // defecto — la acción principal es Embedded Signup (WhatsAppEmbeddedSignupButton).
+  const [showManualWaForm, setShowManualWaForm] = useState(false);
+  const canManageWhatsApp = activeMembership?.role === 'Owner' || activeMembership?.role === 'Admin';
 
   // Form States
   const [waForm, setWaForm] = useState({
@@ -65,7 +72,7 @@ export const IntegrationsPlaceholderView = () => {
         setWaConfig(wa);
         setWaForm({
           phoneNumberId: wa.phoneNumberId || '',
-          whatsappBusinessAccountId: wa.whatsappBusinessAccountId || '',
+          whatsappBusinessAccountId: getWabaId(wa),
           appSecret: wa.appSecret || '',
           verifyToken: wa.verifyToken || '',
           accessToken: wa.accessToken || '',
@@ -302,7 +309,7 @@ export const IntegrationsPlaceholderView = () => {
       {/* WhatsApp Modal */}
       {activeModal === 'whatsapp' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-800 rounded-[2rem] shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 dark:border-slate-700 animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white dark:bg-slate-800 rounded-[2rem] shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto border border-slate-200 dark:border-slate-700 animate-in fade-in zoom-in-95 duration-150">
             <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
               <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center">
                 <MessageCircle className="w-5 h-5 mr-2 text-emerald-500" />
@@ -312,8 +319,61 @@ export const IntegrationsPlaceholderView = () => {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
-            <form onSubmit={handleSaveWhatsApp} className="p-6 space-y-4">
+
+            <div className="p-6 space-y-4">
+              {/* LOOP Fase 4B: acción principal = Embedded Signup, mismo core que Super Admin/tarjeta */}
+              {activeMembership && (() => {
+                const waStatus = deriveStatusFromIntegration(waConfig);
+                if (waStatus === 'CONNECTED') {
+                  return (
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-5 flex items-center justify-between gap-4 flex-wrap">
+                      <div>
+                        <p className="text-[10px] font-black text-emerald-700 dark:text-emerald-300 uppercase tracking-widest">Conectado</p>
+                        <p className="text-sm font-bold text-slate-900 dark:text-white mt-1">{waConfig?.displayPhoneNumber || `ID: ${waConfig?.phoneNumberId}`}</p>
+                      </div>
+                      {canManageWhatsApp && (
+                        <WhatsAppEmbeddedSignupButton
+                          tenantId={activeMembership.tenantId}
+                          label="Reconectar"
+                          size="compact"
+                          hideDetails
+                          onConnected={() => loadAllConfigs()}
+                        />
+                      )}
+                    </div>
+                  );
+                }
+                if (!canManageWhatsApp) {
+                  return (
+                    <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      Solo el Owner o un Admin de este negocio puede conectar o administrar WhatsApp.
+                    </div>
+                  );
+                }
+                return (
+                  <div className="bg-blue-500/5 border border-blue-500/20 rounded-2xl p-5">
+                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-3">
+                      Conectá tu WhatsApp Business Platform directamente con Meta — sin copiar Phone Number ID, WABA ID, tokens ni secretos a mano.
+                    </p>
+                    <WhatsAppEmbeddedSignupButton
+                      tenantId={activeMembership.tenantId}
+                      label="Conectar con Meta"
+                      onConnected={() => { loadAllConfigs(); setActiveModal(null); }}
+                    />
+                  </div>
+                );
+              })()}
+
+              <button
+                type="button"
+                onClick={() => setShowManualWaForm((v) => !v)}
+                className="text-[10px] font-black text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 uppercase tracking-widest"
+              >
+                {showManualWaForm ? 'Ocultar conexión manual' : 'Configuración avanzada / Conexión manual'}
+              </button>
+
+              {showManualWaForm && (
+            <form onSubmit={handleSaveWhatsApp} className="space-y-4 pt-2 border-t border-slate-100 dark:border-slate-700">
               <div className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 p-4 rounded-2xl text-xs font-semibold leading-relaxed">
                 Obtén estos datos desde tu portal de Meta Developers para tu App vinculada.
                 La URL del webhook debe apuntar a la Cloud Function de este sistema.
@@ -438,6 +498,8 @@ export const IntegrationsPlaceholderView = () => {
                 </button>
               </div>
             </form>
+              )}
+            </div>
           </div>
         </div>
       )}

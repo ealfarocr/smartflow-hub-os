@@ -28,6 +28,7 @@ interface ConversationState {
   ) => Promise<{ success: boolean; messageId?: string; status?: string; externalId?: string; errorMessage?: string | null } | undefined>;
   markAsRead: (conversationId: string) => Promise<void>;
   assignAgent: (conversationId: string, advisorId: string) => Promise<void>;
+  claimConversation: (conversationId: string) => Promise<{ success: boolean; conversationId: string; advisorId: string }>;
   toggleBot: (conversationId: string, enabled: boolean) => Promise<void>;
   seedConversations: (tenantId: string, advisorId: string) => Promise<void>;
 }
@@ -114,6 +115,10 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   
   assignAgent: async (conversationId, advisorId) => {
     await ConversationService.assignAgent(conversationId, advisorId);
+  },
+
+  claimConversation: async (conversationId) => {
+    return ConversationService.claimConversation(conversationId);
   },
 
   toggleBot: async (conversationId, enabled) => {

@@ -15,15 +15,29 @@ export interface WhatsAppIntegration {
   tenantId: string;
   provider: 'whatsapp';
   phoneNumberId: string;
+  // whatsappBusinessAccountId es el campo legacy (formulario manual);
+  // wabaId es el canónico nuevo (Embedded Signup). completeWhatsappEmbeddedSignup
+  // escribe ambos, pero se leen los dos por si un doc viejo solo tiene uno.
   whatsappBusinessAccountId: string;
+  wabaId?: string;
   appSecret: string;
   verifyToken: string;
   accessToken: string;
   isActive: boolean;
   isAiAutomated?: boolean;
+  // Solo presentes cuando la integración vino de Embedded Signup.
+  displayPhoneNumber?: string | null;
+  verifiedName?: string | null;
+  connectionType?: 'api' | 'coexistent';
   createdAt?: any;
   updatedAt?: any;
 }
+
+/** WABA ID de un doc de integrations, sin importar cuál de los dos campos tenga. */
+export const getWabaId = (integration: Pick<WhatsAppIntegration, 'wabaId' | 'whatsappBusinessAccountId'> | null | undefined): string => {
+  if (!integration) return '';
+  return integration.wabaId || integration.whatsappBusinessAccountId || '';
+};
 
 export interface MetaIntegration {
   id?: string;

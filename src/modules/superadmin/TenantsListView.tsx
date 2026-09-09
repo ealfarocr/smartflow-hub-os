@@ -11,6 +11,8 @@ import { SuperAdminService, WhatsappNumberInfo } from '@/services/firebase/Super
 import { useAuthStore } from '@/stores/authStore';
 import { CreateTenantModal } from './CreateTenantModal';
 import { EditTenantModal } from './EditTenantModal';
+import { WhatsAppEmbeddedSignupButton } from '@/components/integrations/WhatsAppEmbeddedSignupButton';
+import { deriveStatusFromSuperAdminEntry, WHATSAPP_STATUS_LABEL } from '@/utils/whatsappStatus';
 
 // ─── Mapeo de features → icono + color ────────────────────
 const FEATURE_ICONS: Record<keyof TenantFeatures, { icon: React.ElementType; label: string; color: string }> = {
@@ -57,6 +59,7 @@ export const TenantsListView = () => {
   // Estado mobile-only (presentación, sin lógica de negocio nueva): sheet de filtros y sheet de herramientas por tarjeta
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [toolsSheetTenant, setToolsSheetTenant] = useState<TenantRecord | null>(null);
+  const [managingWaTenantId, setManagingWaTenantId] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
@@ -319,33 +322,72 @@ export const TenantsListView = () => {
                     </div>
                   </div>
 
-                  {/* Número API (WhatsApp) */}
+                  {/* WhatsApp Business Platform — estado + Embedded Signup (LOOP Fase 4A) */}
                   <div className="w-44 min-w-0">
                     {(() => {
                       const wa = waNumbers[tenant.id];
-                      const number = wa?.displayPhoneNumber;
                       if (isLoadingNumbers && !wa) {
                         return <span className="text-[10px] font-bold text-slate-300 dark:text-slate-600">Cargando…</span>;
                       }
-                      if (number) {
+
+                      const waStatus = deriveStatusFromSuperAdminEntry(wa);
+
+                      if (waStatus === 'CONNECTED') {
                         return (
-                          <div className="flex items-center gap-1.5 min-w-0" title={wa?.verifiedName || undefined}>
-                            <Phone className="w-3 h-3 text-[#25D366] flex-shrink-0" />
-                            <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200 truncate">{number}</span>
-                            {!wa?.isActive && (
-                              <span className="text-[7px] font-black text-amber-500 uppercase">inactivo</span>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 min-w-0" title={wa?.verifiedName || undefined}>
+                              <Phone className="w-3 h-3 text-[#25D366] flex-shrink-0" />
+                              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200 truncate">{wa?.displayPhoneNumber || `ID: ${wa?.phoneNumberId}`}</span>
+                            </div>
+                            {managingWaTenantId === tenant.id ? (
+                              <WhatsAppEmbeddedSignupButton
+                                tenantId={tenant.id}
+                                label="Reconectar"
+                                size="compact"
+                                className="mt-1.5"
+                                onConnected={() => { loadWhatsAppNumbers(); setManagingWaTenantId(null); }}
+                              />
+                            ) : (
+                              <button
+                                onClick={() => setManagingWaTenantId(tenant.id)}
+                                className="text-[8px] font-black text-slate-400 hover:text-slate-600 uppercase tracking-widest mt-0.5"
+                              >
+                                Administrar
+                              </button>
                             )}
                           </div>
                         );
                       }
-                      if (wa?.phoneNumberId) {
+
+                      if (waStatus === 'PENDING') {
+                        return <span className="text-[10px] font-bold text-amber-500 uppercase tracking-wide">{WHATSAPP_STATUS_LABEL.PENDING}</span>;
+                      }
+
+                      if (waStatus === 'ERROR') {
                         return (
-                          <span className="text-[9px] font-bold text-slate-400 truncate" title={wa.error || 'ID interno de Meta — número no disponible'}>
-                            ID: {wa.phoneNumberId}
-                          </span>
+                          <div className="min-w-0">
+                            <span className="text-[9px] font-black text-red-500 uppercase tracking-wide" title={wa?.error}>Revisar conexión</span>
+                            <WhatsAppEmbeddedSignupButton
+                              tenantId={tenant.id}
+                              label="Reconectar"
+                              size="compact"
+                              hideDetails
+                              className="mt-1"
+                              onConnected={loadWhatsAppNumbers}
+                            />
+                          </div>
                         );
                       }
-                      return <span className="text-[10px] font-bold text-slate-300 dark:text-slate-600">—</span>;
+
+                      return (
+                        <WhatsAppEmbeddedSignupButton
+                          tenantId={tenant.id}
+                          label="Conectar WhatsApp"
+                          size="compact"
+                          hideDetails
+                          onConnected={loadWhatsAppNumbers}
+                        />
+                      );
                     })()}
                   </div>
 

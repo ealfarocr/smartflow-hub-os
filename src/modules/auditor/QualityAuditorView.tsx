@@ -128,7 +128,18 @@ export const QualityAuditorView = () => {
     setTimeout(() => setIsScanning(false), 1500);
   };
 
-  const auditorReports = useMemo(() => {
+  // Quién entra al ranking de DESEMPEÑO COMERCIAL — no toca la auditoría de
+  // fondo de conversaciones (eso sigue analizando todo, sin filtrar por rol),
+  // solo decide qué filas se muestran en el panel de Asesores.
+  // Owner: excluido por defecto (es administración, no vende).
+  // Técnico / Solo lectura: excluidos, no participan en ventas.
+  // Admin: incluido solo si tiene actividad comercial real (conversaciones
+  // asociadas) — hoy no existe un campo de "marca explícita de que participa
+  // en ventas" en el modelo, así que la actividad real es el único criterio
+  // disponible; si se agrega ese campo más adelante, este es el lugar para
+  // sumarlo con un `||`.
+  // Asesor Comercial: siempre incluido.
+  const commercialReports = useMemo(() => {
     return teamMembers.map(member => {
       const agentConvs = conversations.filter(c => c.advisorId === member.userId);
       const resolved = agentConvs.filter(c => c.status === 'archived').length;
@@ -144,12 +155,21 @@ export const QualityAuditorView = () => {
         activeCount: agentConvs.filter(c => c.status === 'active').length,
         lastActivity: safeFormatDate(lastConv?.updatedAt),
         sentiment: finalScore >= 80 ? 'Positivo' : finalScore >= 50 ? 'Neutral' : 'Crítico',
+        hasCommercialActivity: agentConvs.length > 0,
       };
-    }).filter(m =>
+    }).filter(m => {
+      if (m.role === 'Owner' || m.role === 'Técnico' || m.role === 'Solo lectura') return false;
+      if (m.role === 'Admin') return m.hasCommercialActivity;
+      return true;
+    });
+  }, [teamMembers, conversations]);
+
+  const auditorReports = useMemo(() => {
+    return commercialReports.filter(m =>
       m.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       m.email?.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  }, [teamMembers, conversations, searchQuery]);
+  }, [commercialReports, searchQuery]);
 
   const globalMetrics = useMemo(() => {
     const total = conversations.length;
@@ -210,7 +230,7 @@ export const QualityAuditorView = () => {
                 <span className="text-lg font-black text-[#1877F2] italic">IA</span>
                 <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 text-[9px] font-black rounded-lg uppercase tracking-widest">En vivo</span>
               </div>
-              <p className="text-xs text-slate-400 font-medium">Control de calidad · {teamMembers.length} asesores · {botMetrics.total} conversaciones del bot</p>
+              <p className="text-xs text-slate-400 font-medium">Control de calidad · {commercialReports.length} asesores · {botMetrics.total} conversaciones del bot</p>
             </div>
           </div>
           <button onClick={handleRefresh} disabled={isScanning}
