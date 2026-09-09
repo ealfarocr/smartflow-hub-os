@@ -1,5 +1,88 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ FIX DESPLEGADO — Reutilización de teléfonos corporativos (2026-09-09) — falta 1 prueba manual de Eduardo
+
+**Auditoría primero.** Antes de tocar código se revisó todo el ciclo:
+desactivar/reactivar, revocar dispositivo, login por PIN, elegibilidad de
+Multi-Agente. La mayor parte YA estaba bien construida:
+- `revokeDevice`/`renameDevice` + botones "Revocar"/"Ver dispositivos" en
+  `UsersManagementView.tsx` — ya funcionan, con auditoría real
+  (`revokedAt`/`revokedBy`).
+- `isEligibleForAutoLeads`/`isEligibleForManualClaim`
+  (`src/utils/multiAgentEligibility.ts`) y sus equivalentes reales en el
+  backend (`assignConversationAdvisor`, `claimConversation`) YA excluyen
+  `status !== 'active'` — confirmado leyendo el código, no asumido.
+- `forgetDeviceAndIdentity()` (llamado por "Cambiar de usuario" en
+  `MyShiftView.tsx`) YA borra identidad recordada + `deviceId` de
+  localStorage JUNTOS — el próximo enrolamiento en el mismo teléfono genera
+  un `deviceId` nuevo, así que el siguiente usuario nunca hereda la
+  confianza del anterior. Ya resuelto desde antes (comentario "Fase 11" en
+  el código).
+
+**Hallazgo real (el único gap de seguridad genuino encontrado)**:
+`loginWithPin` nunca chequeaba `membership.status`. Todas las acciones
+privilegiadas después del login (`sendWhatsappMessage`, `claimConversation`,
+`setVendorPin`, etc.) ya exigían `status==='active'` — pero el login en sí
+no. Un vendedor desactivado, mientras su PIN no se regenerara, podía
+seguir sacando una sesión válida.
+
+**Fix aplicado**:
+1. `functions/src/vendorPinAuth.ts` → `checkPinLoginAllowed` (4 tests).
+   `loginWithPin` ahora chequea el status de la membership DENTRO de la
+   misma transacción, después de verificar el PIN, con el MISMO error
+   genérico que un PIN incorrecto — a propósito, para no dejar distinguir
+   "PIN incorrecto" de "cuenta desactivada" por la respuesta.
+2. `functions/src/tenantAdminAuth.ts` → `checkTenantAdminAuth` (7 tests):
+   SuperAdmin o Owner/Admin activo del mismo tenant.
+3. Función nueva `setMembershipActive` (reemplaza el `updateDoc` directo
+   del cliente que hacía esto antes — las Rules ya lo autorizaban bien,
+   pero sin guardar quién/cuándo): registra
+   `deactivatedAt`/`deactivatedBy`/`reactivatedAt`/`reactivatedBy`, bloquea
+   auto-desactivación (evita quedarse sin Owner/Admin activo), y al
+   desactivar llama `admin.auth().revokeRefreshTokens()` — corta una sesión
+   YA abierta, no solo bloquea logins nuevos.
+4. **No se agregó ninguna UI nueva** — los botones "Desactivar/Reactivar",
+   "Ver dispositivos", "Generar PIN" ya existían y ya coincidían con lo
+   pedido; solo pasan a llamar al backend auditado.
+
+**No se tocó** (fuera de alcance, deliberado): `assertCallerIsTenantAdmin`
+(usada por `renameDevice`/`revokeDevice`) tiene el mismo gap de SuperAdmin
+que tenía `checkMembershipAuth` antes de esta sesión — no se retocó sin
+necesidad; anotado como seguimiento.
+
+### ⚠️ Prueba obligatoria — no la pude correr yo, necesita a Eduardo
+
+El mismo límite de siempre esta noche: no tengo forma de autenticarme en la
+app real (no crear cuentas, no contraseñas) para hacer clic por la UI en
+vivo. Lo que SÍ hice: 11 tests unitarios nuevos cubriendo exactamente los
+escenarios de autorización (incluida la exclusión de Multi-Agente,
+verificada leyendo el código real, no un test nuevo) + verificación de que
+ambas funciones (`loginWithPin`, `setMembershipActive`) están desplegadas y
+el bundle en vivo las referencia.
+
+**Guión exacto para que Eduardo lo corra** (el membership real
+`eduardo pruebas` en USADITOS existe hoy, `status:'prepared'`, sin PIN
+generado todavía — hay que generarle uno primero para simular "activo en el
+teléfono"):
+1. En Usuarios → generar PIN para "eduardo pruebas" (queda `pending` hasta
+   el primer login) → entrar con ese link+PIN desde un teléfono/navegador de
+   prueba → confirmar que carga `/mi-turno`.
+2. Desde otra sesión (Owner/Admin real) → Desactivar a "eduardo pruebas".
+3. Volver al teléfono de prueba: refrescar o esperar a que expire el token
+   → debería perder acceso (redirigir a login, o rechazar la próxima acción
+   con "solo Owner/Admin activo..."/PIN inválido si intenta reloguearse).
+4. En Usuarios → "Ver dispositivos" de "eduardo pruebas" → Revocar el
+   dispositivo de prueba.
+5. Generar PIN para un usuario QA nuevo (o el mismo "eduardo pruebas"
+   reactivado, si se prefiere no crear uno adicional) → entrar con ese
+   nuevo acceso EN EL MISMO teléfono/navegador de prueba (mismo `deviceId`
+   local, porque "Cambiar de usuario" ya lo limpia).
+6. Confirmar: el nuevo usuario NO ve conversaciones/permisos/PIN del
+   anterior; Multi-Agente no lo marca elegible salvo que esté
+   `active`+incluido+`working`.
+
+## ⚠️ BLOQUEADOR ACTIVO — Outbound WhatsApp USADITOS: causa raíz encontrada, requiere acción de Eduardo en Meta (2026-09-09)
+
 ## ✅ FIX DESPLEGADO — Bootstrap del primer Owner (2026-09-09) — falta 1 paso manual de Eduardo
 
 **Bug confirmado y corregido.** `setVendorPin` exigía una membership activa de

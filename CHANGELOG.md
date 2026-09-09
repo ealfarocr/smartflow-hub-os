@@ -2,6 +2,33 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — REQUERIMIENTO OPERATIVO CRÍTICO: reutilización de teléfonos corporativos
+
+> Auditado el ciclo completo antes de tocar código — casi todo ya estaba
+> bien construido. Un solo gap real de seguridad encontrado y corregido.
+> Falta 1 prueba manual de Eduardo (no la pude correr yo, mismo límite de
+> autenticación de toda la noche). Ver `PROJECT_STATE.md`.
+
+- auditoría: confirmado leyendo código (no asumido) que Multi-Agente
+  (`assignConversationAdvisor`, `claimConversation`,
+  `multiAgentEligibility.ts`) ya excluye `status!=='active'`;
+  `revokeDevice`/`renameDevice` + botones ya existían con auditoría real;
+  `forgetDeviceAndIdentity()` ya evita que un usuario nuevo en el mismo
+  teléfono herede el `deviceId`/identidad del anterior.
+- fix(seguridad, todos los tenants): `loginWithPin` nunca chequeaba
+  `membership.status` — un vendedor desactivado podía seguir logueándose
+  mientras su PIN no cambiara. `checkPinLoginAllowed` (4 tests) lo corrige,
+  con el mismo error genérico que un PIN incorrecto a propósito.
+- feat: `setMembershipActive` (Cloud Function nueva, `checkTenantAdminAuth`
+  — 7 tests) reemplaza el `updateDoc` directo que activaba/desactivaba
+  usuarios: agrega `deactivatedAt/By`/`reactivatedAt/By`, bloquea
+  auto-desactivación, y revoca los refresh tokens de Firebase Auth al
+  desactivar (corta sesión ya abierta, no solo logins nuevos). No borra
+  ningún historial — conversaciones/leads/CRM/métricas siguen atribuidos
+  igual.
+- deploy: `functions:loginWithPin`, `functions:setMembershipActive`,
+  `hosting:app`. Commit `c43549b`, ya en `main`.
+
 ## 2026-09-09 — FIX UX URGENTE: popup de acceso de usuario ahora es copiable
 
 - fix: generar el PIN de un vendedor mostraba un `alert()` nativo — texto no
