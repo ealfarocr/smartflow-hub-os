@@ -10,6 +10,9 @@ import {
   getRememberedVendorIdentity,
   rememberVendorIdentity,
   forgetDeviceAndIdentity,
+  getDeviceSecret,
+  rememberDeviceSecret,
+  forgetDeviceSecret,
   type VendorIdentity,
 } from '@/utils/deviceTrust';
 import { playAccessFeedback } from '@/utils/accessSound';
@@ -57,7 +60,11 @@ export const PinAccessView = () => {
   const [forceCode, setForceCode] = useState(false);
 
   const hasLiveSession = isAuthenticated && !!user && memberships.length > 0;
-  const quickEntryAvailable = hasLiveSession && !!identity && !forceCode;
+  // Entrada rapida disponible si hay a quien saludar y una forma de entrar sin
+  // codigo: la sesion viva de Firebase, o la credencial de dispositivo que el
+  // servidor emitio al vincularse (lo que permite volver despues de cerrar sesion).
+  const [hasDeviceSecret] = useState(() => !!getDeviceSecret());
+  const quickEntryAvailable = !!identity && !forceCode && (hasLiveSession || hasDeviceSecret);
 
   const handleDigit = (d: string) => {
     if (pin.length >= 6) return;
@@ -87,6 +94,24 @@ export const PinAccessView = () => {
     setIsProcessing(true);
     setError('');
     try {
+      if (!hasLiveSession) {
+        // REENTRADA SIN CODIGO: la sesion de Firebase se cerro, pero este equipo
+        // tiene la credencial que emitio el servidor al vincularse. El servidor
+        // revalida todo (equipo no revocado, credencial vigente, persona activa).
+        const secret = getDeviceSecret();
+        if (!secret) { setForceCode(true); return; }
+        const loginWithDevice = httpsCallable<
+          { deviceId: string; deviceSecret: string; tenantId: string },
+          { customToken: string; displayName: string }
+        >(getFunctions(), 'loginWithDevice');
+        const res = await loginWithDevice({ deviceId: getOrCreateDeviceId(), deviceSecret: secret, tenantId: identity.tenantId });
+        await signInWithCustomToken(auth, res.data.customToken);
+        await AuthService.linkPendingMembership();
+        playAccessFeedback();
+        navigate('/', { replace: true });
+        return;
+      }
+
       const verifyDeviceSession = httpsCallable<
         { tenantId: string; deviceId: string },
         { allowed: boolean; reason?: string; fallback?: 'require-code' | 'sign-out'; displayName?: string }
@@ -109,12 +134,16 @@ export const PinAccessView = () => {
       playAccessFeedback();
       navigate('/', { replace: true });
     } catch {
-      setError('No se pudo entrar. Probá con tu código de acceso.');
+      // Equipo revocado, codigo regenerado o persona desactivada: la credencial
+      // ya no sirve. Se descarta (asi no se reintenta en cada apertura) y se pide
+      // el codigo, que es exactamente para lo que existe: la recuperacion.
+      if (!hasLiveSession) forgetDeviceSecret();
+      setError('No se pudo entrar con este equipo. Usá tu código de acceso.');
       setForceCode(true);
     } finally {
       setIsProcessing(false);
     }
-  }, [identity, isProcessing, navigate]);
+  }, [identity, isProcessing, navigate, hasLiveSession]);
 
   const submit = useCallback(async () => {
     const loginHandle = identity?.loginHandle ?? handleInput.trim();
@@ -150,12 +179,20 @@ export const PinAccessView = () => {
       // autenticada. Si su equipo fue revocado por un Admin (o el id quedó
       // tomado por otra persona), se pide una vinculación nueva de forma
       // transparente — un deviceId nuevo — en vez de dejarla afuera.
-      const registerDevice = httpsCallable(functions, 'registerDevice');
-      const registerWithCurrentDevice = () => registerDevice({
-        deviceId: getOrCreateDeviceId(),
-        tenantId: confirmed.tenantId,
-        label: `Teléfono de ${confirmed.displayName}`,
-      });
+      const registerDevice = httpsCallable<
+        { deviceId: string; tenantId: string; label: string },
+        { deviceId: string; status: string; deviceSecret?: string }
+      >(functions, 'registerDevice');
+      const registerWithCurrentDevice = async () => {
+        const r = await registerDevice({
+          deviceId: getOrCreateDeviceId(),
+          tenantId: confirmed.tenantId,
+          label: `Teléfono de ${confirmed.displayName}`,
+        });
+        // La credencial de dispositivo llega UNA sola vez, en este momento: es lo
+        // que va a permitir volver a entrar sin el codigo despues de cerrar sesion.
+        if (r.data.deviceSecret) rememberDeviceSecret(r.data.deviceSecret);
+      };
       try {
         await registerWithCurrentDevice();
       } catch {

@@ -365,6 +365,59 @@ const TB = 't-e2e-otro-negocio';
   check('no cruza tenants', cruzado.result?.allowed === false, JSON.stringify(cruzado.result || cruzado.error));
 
 
+  // --- 17. REENTRADA SIN CODIGO DESPUES DE CERRAR SESION ------------
+  // El codigo es para vincular el equipo, no para cada apertura. Al vincularse,
+  // el servidor entrega una credencial de dispositivo (256 bits, en Firestore
+  // solo el hash). Despues de cerrar sesion, esa credencial alcanza para volver
+  // a entrar... mientras el equipo no este revocado, la persona siga activa y
+  // el codigo no se haya regenerado.
+  console.log('\n=== 17. Reentrada sin codigo con credencial de dispositivo ===');
+  const vincular = await loginPin({ tenantId: TA, loginHandle: handle, pin: pinStale });
+  const tokenCodigo = await idTokenForCustomToken(vincular.result.customToken);
+  const reg = await callFn('registerDevice', { deviceId: 'tel-vinculado-1', tenantId: TA, label: 'Moto G' }, tokenCodigo);
+  const secreto = reg.result?.deviceSecret;
+  check('al vincular con el codigo, el servidor entrega la credencial de dispositivo', typeof secreto === 'string' && secreto.length >= 40, JSON.stringify(reg.error || {}));
+  const devDocV = await db.collection('trusted_devices').doc('tel-vinculado-1').get();
+  check('en Firestore queda solo el HASH, nunca el valor en claro', !!devDocV.data()?.secretHash && !JSON.stringify(devDocV.data()).includes(secreto));
+
+  const reentra = await callFn('loginWithDevice', { deviceId: 'tel-vinculado-1', deviceSecret: secreto, tenantId: TA });
+  check('despues de cerrar sesion, vuelve a entrar SIN codigo', !!reentra.result?.customToken, JSON.stringify(reentra.error || {}));
+  check('y se lo saluda por su nombre', reentra.result?.displayName === 'eduardo pruebas', JSON.stringify(reentra.result || {}));
+
+  const tokenEquipo = await idTokenForCustomToken(reentra.result.customToken);
+  const reg2 = await callFn('registerDevice', { deviceId: 'tel-vinculado-1', tenantId: TA, label: 'Moto G' }, tokenEquipo);
+  check('una sesion abierta por el equipo NO rota ni emite credencial nueva', reg2.result && !reg2.result.deviceSecret, JSON.stringify(reg2.result || reg2.error));
+
+  const malo = await callFn('loginWithDevice', { deviceId: 'tel-vinculado-1', deviceSecret: 'no-es-el-secreto', tenantId: TA });
+  check('credencial incorrecta -> DENY', !!malo.error && !malo.result);
+  const soloId = await callFn('loginWithDevice', { deviceId: 'tel-vinculado-1', deviceSecret: 'tel-vinculado-1', tenantId: TA });
+  check('conocer el deviceId NO alcanza para entrar', !!soloId.error && !soloId.result);
+  const otroTenant = await callFn('loginWithDevice', { deviceId: 'tel-vinculado-1', deviceSecret: secreto, tenantId: TB });
+  check('no cruza a otro negocio', !!otroTenant.error && !otroTenant.result);
+
+  await callFn('setMembershipActive', { membershipId: newId, isActive: false }, ownerToken);
+  const susp = await callFn('loginWithDevice', { deviceId: 'tel-vinculado-1', deviceSecret: secreto, tenantId: TA });
+  check('persona desactivada -> DENY aunque el equipo sea valido', !!susp.error && !susp.result);
+  await callFn('setMembershipActive', { membershipId: newId, isActive: true }, ownerToken);
+  const reac = await callFn('loginWithDevice', { deviceId: 'tel-vinculado-1', deviceSecret: secreto, tenantId: TA });
+  check('reactivada -> vuelve a entrar con el mismo equipo', !!reac.result?.customToken, JSON.stringify(reac.error || {}));
+
+  await callFn('revokeDevice', { deviceId: 'tel-vinculado-1' }, ownerToken);
+  const revocado2 = await callFn('loginWithDevice', { deviceId: 'tel-vinculado-1', deviceSecret: secreto, tenantId: TA });
+  check('equipo revocado por el Owner -> DENY, hay que usar el codigo', !!revocado2.error && !revocado2.result);
+
+  // Codigo regenerado = recuperacion (telefono perdido): las credenciales de
+  // dispositivo de esa persona dejan de servir.
+  const vincular2 = await loginPin({ tenantId: TA, loginHandle: handle, pin: pinStale });
+  const tokenCodigo2 = await idTokenForCustomToken(vincular2.result.customToken);
+  const reg3 = await callFn('registerDevice', { deviceId: 'tel-vinculado-2', tenantId: TA, label: 'Moto G 2' }, tokenCodigo2);
+  const secreto2 = reg3.result?.deviceSecret;
+  const antes = await callFn('loginWithDevice', { deviceId: 'tel-vinculado-2', deviceSecret: secreto2, tenantId: TA });
+  check('equipo nuevo vinculado entra sin codigo', !!antes.result?.customToken, JSON.stringify(antes.error || {}));
+  await callFn('setVendorPin', { membershipId: newId }, ownerToken);
+  const despues = await callFn('loginWithDevice', { deviceId: 'tel-vinculado-2', deviceSecret: secreto2, tenantId: TA });
+  check('tras regenerar el codigo, la credencial del equipo deja de servir', !!despues.error && !despues.result);
+
   console.log('\n=== 15. Rate limiting ===');
   rateLimitTestMode = true;
   let exhausted = false;

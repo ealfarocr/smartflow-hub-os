@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.verifyDeviceSession = exports.loginWithPin = exports.getTenantAccessOverview = exports.getVendorAccessInfo = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
+exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.verifyDeviceSession = exports.loginWithDevice = exports.loginWithPin = exports.getTenantAccessOverview = exports.getVendorAccessInfo = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const crypto = __importStar(require("crypto"));
@@ -61,6 +61,7 @@ const messageStatusUpdate_1 = require("./messageStatusUpdate");
 const tenantAdminAuth_1 = require("./tenantAdminAuth");
 const accessLifecycle_1 = require("./accessLifecycle");
 const deviceSessionAuth_1 = require("./deviceSessionAuth");
+const deviceSecret_1 = require("./deviceSecret");
 admin.initializeApp();
 const db = admin.firestore();
 /**
@@ -2815,6 +2816,21 @@ exports.setVendorPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
     // persona vuelve a entrar con el PIN nuevo. No aplica a bootstrap/attach
     // (no hay sesión previa que cortar en un acceso que recién se crea).
     if (transition.mode === 'regenerate') {
+        // Regenerar el codigo ES recuperacion (codigo filtrado, telefono perdido): las
+        // credenciales de dispositivo de esta persona tambien dejan de servir, o un
+        // telefono robado seguiria entrando sin codigo. Se invalida solo la
+        // credencial, no el registro del equipo: el historial queda.
+        try {
+            const devices = await db.collection('trusted_devices').where('userId', '==', authUid).get();
+            await Promise.all(devices.docs.map((d) => d.ref.update({
+                secretHash: null,
+                secretSalt: null,
+                secretInvalidatedAt: firestore_1.FieldValue.serverTimestamp(),
+            })));
+        }
+        catch (err) {
+            console.warn('DEVICE_SECRETS_INVALIDATE_FAILED', { membershipId, error: err.message });
+        }
         try {
             await admin.auth().revokeRefreshTokens(authUid);
         }
@@ -3124,6 +3140,61 @@ exports.loginWithPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
     throw new https_1.HttpsError('permission-denied', pinAuth_1.PIN_LOGIN_GENERIC_ERROR);
 });
 /**
+ * REENTRADA SIN CÓDIGO desde un dispositivo ya vinculado — "Hola <nombre>" +
+ * mantener presionado, después de haber cerrado sesión.
+ *
+ * Sin request.auth a propósito: igual que loginWithPin, este endpoint ES el
+ * paso de autenticación. Lo que se presenta no es el deviceId (público) sino la
+ * credencial de dispositivo que el servidor emitió al vincularse con el código
+ * (ver deviceSecret.ts). Se revalida TODO en cada uso: equipo existente y no
+ * revocado, credencial vigente y correcta, mismo negocio, y persona activa.
+ *
+ * Cualquier rechazo devuelve el MISMO error genérico: no se revela si el equipo
+ * existe, si fue revocado ni si la persona fue desactivada. La UI, ante un
+ * rechazo, simplemente cae al código de acceso.
+ */
+exports.loginWithDevice = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    const { deviceId, deviceSecret, tenantId } = request.data;
+    if (!deviceId || !deviceSecret || !tenantId)
+        throw new https_1.HttpsError('invalid-argument', 'Falta deviceId, deviceSecret o tenantId');
+    const originIp = request.rawRequest?.ip || 'unknown';
+    if (isRateLimited(`device:${deviceId}`) || isRateLimited(`device-origin:${originIp}`)) {
+        throw new https_1.HttpsError('resource-exhausted', 'Demasiados intentos. Probá de nuevo en unos minutos.');
+    }
+    const DENIED = 'No se pudo entrar con este equipo. Usá tu código de acceso.';
+    const deviceSnap = await db.collection('trusted_devices').doc(deviceId).get();
+    const device = deviceSnap.data();
+    // Costo constante aunque el equipo no exista: siempre se calcula un hash.
+    const secretMatches = device?.secretHash && device?.secretSalt
+        ? (0, deviceSecret_1.verifyDeviceSecret)(deviceSecret, device.secretSalt, device.secretHash)
+        : ((0, deviceSecret_1.hashDeviceSecret)(deviceSecret, 'sin-sal'), false);
+    const membershipSnap = device?.userId
+        ? await db.collection('memberships').doc(`${device.userId}_${tenantId}`).get()
+        : null;
+    const decision = (0, deviceSecret_1.checkDeviceLogin)({
+        deviceExists: deviceSnap.exists,
+        deviceStatus: device?.status,
+        hasSecret: !!device?.secretHash,
+        secretMatches,
+        deviceTenantId: device?.tenantId,
+        requestedTenantId: tenantId,
+        membershipExists: !!membershipSnap?.exists,
+        membershipStatus: membershipSnap?.data()?.status,
+    });
+    if (!decision.allowed) {
+        console.warn('DEVICE_LOGIN_DENIED', { deviceId, tenantId, reason: decision.reason });
+        throw new https_1.HttpsError('permission-denied', DENIED);
+    }
+    await deviceSnap.ref.update({ lastSeenAt: firestore_1.FieldValue.serverTimestamp() });
+    const customToken = await admin.auth().createCustomToken(device.userId, { deviceLogin: true });
+    console.log('DEVICE_LOGIN_SUCCESS', { deviceId, tenantId });
+    return {
+        customToken,
+        // Nombre visible de la membership, nunca el correo técnico interno.
+        displayName: membershipSnap.data()?.name || 'Vendedor',
+    };
+});
+/**
  * Entrada rápida desde un dispositivo reconocido ("mantener presionado para
  * entrar"). NO es un método de autenticación: exige request.auth, o sea que la
  * persona YA está autenticada (su sesión de Firebase sigue viva; ese refresh
@@ -3195,6 +3266,23 @@ exports.registerDevice = (0, https_1.onCall)({ maxInstances: 10 }, async (reques
     }
     const deviceRef = db.collection('trusted_devices').doc(deviceId);
     const deviceSnap = await deviceRef.get();
+    // CREDENCIAL DE DISPOSITIVO (ver deviceSecret.ts): se emite —y se rota— SOLO
+    // cuando esta sesion salio de un login con CODIGO (claim pinLogin). Asi una
+    // reentrada por dispositivo no la regenera en cada uso, y un usuario corporativo
+    // (Google/correo) nunca recibe una. El valor en claro viaja una sola vez al
+    // telefono; aca solo queda el hash.
+    const issueSecret = request.auth.token.pinLogin === true;
+    let deviceSecret;
+    let secretFields = {};
+    if (issueSecret) {
+        deviceSecret = (0, deviceSecret_1.generateDeviceSecret)();
+        const salt = crypto.randomBytes(16).toString('hex');
+        secretFields = {
+            secretHash: (0, deviceSecret_1.hashDeviceSecret)(deviceSecret, salt),
+            secretSalt: salt,
+            secretIssuedAt: firestore_1.FieldValue.serverTimestamp(),
+        };
+    }
     if (deviceSnap.exists) {
         const existing = deviceSnap.data();
         if (existing.userId !== uid) {
@@ -3206,8 +3294,8 @@ exports.registerDevice = (0, https_1.onCall)({ maxInstances: 10 }, async (reques
             // deshacer esa decisión reintentando el registro (ver Fase 12).
             throw new https_1.HttpsError('permission-denied', 'Este dispositivo fue revocado. Registrá uno nuevo.');
         }
-        await deviceRef.update({ lastSeenAt: firestore_1.FieldValue.serverTimestamp() });
-        return { deviceId, status: 'active' };
+        await deviceRef.update({ lastSeenAt: firestore_1.FieldValue.serverTimestamp(), ...secretFields });
+        return { deviceId, status: 'active', ...(deviceSecret ? { deviceSecret } : {}) };
     }
     await deviceRef.set({
         tenantId,
@@ -3219,9 +3307,10 @@ exports.registerDevice = (0, https_1.onCall)({ maxInstances: 10 }, async (reques
         registeredBy: uid,
         revokedAt: null,
         revokedBy: null,
+        ...secretFields,
     });
-    console.log('DEVICE_REGISTERED', { tenantId, userId: uid, deviceId });
-    return { deviceId, status: 'active' };
+    console.log('DEVICE_REGISTERED', { tenantId, userId: uid, deviceId, withSecret: !!deviceSecret });
+    return { deviceId, status: 'active', ...(deviceSecret ? { deviceSecret } : {}) };
 });
 /** Renombra un dispositivo — el propio dueño o un Owner/Admin de su tenant. */
 exports.renameDevice = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {

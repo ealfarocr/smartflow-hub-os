@@ -28,6 +28,7 @@ import {
   SUSPENDED_PIN_ERROR,
 } from './accessLifecycle';
 import { checkDeviceQuickEntry, quickEntryFallback } from './deviceSessionAuth';
+import { generateDeviceSecret, hashDeviceSecret, verifyDeviceSecret, checkDeviceLogin } from './deviceSecret';
 
 admin.initializeApp();
 
@@ -3034,6 +3035,20 @@ export const setVendorPin = onCall({ maxInstances: 10 }, async (request) => {
   // persona vuelve a entrar con el PIN nuevo. No aplica a bootstrap/attach
   // (no hay sesión previa que cortar en un acceso que recién se crea).
   if (transition.mode === 'regenerate') {
+    // Regenerar el codigo ES recuperacion (codigo filtrado, telefono perdido): las
+    // credenciales de dispositivo de esta persona tambien dejan de servir, o un
+    // telefono robado seguiria entrando sin codigo. Se invalida solo la
+    // credencial, no el registro del equipo: el historial queda.
+    try {
+      const devices = await db.collection('trusted_devices').where('userId', '==', authUid).get();
+      await Promise.all(devices.docs.map((d) => d.ref.update({
+        secretHash: null,
+        secretSalt: null,
+        secretInvalidatedAt: FieldValue.serverTimestamp(),
+      })));
+    } catch (err) {
+      console.warn('DEVICE_SECRETS_INVALIDATE_FAILED', { membershipId, error: (err as Error).message });
+    }
     try {
       await admin.auth().revokeRefreshTokens(authUid);
     } catch (err) {
@@ -3371,6 +3386,68 @@ export const loginWithPin = onCall({ maxInstances: 10 }, async (request) => {
 });
 
 /**
+ * REENTRADA SIN CÓDIGO desde un dispositivo ya vinculado — "Hola <nombre>" +
+ * mantener presionado, después de haber cerrado sesión.
+ *
+ * Sin request.auth a propósito: igual que loginWithPin, este endpoint ES el
+ * paso de autenticación. Lo que se presenta no es el deviceId (público) sino la
+ * credencial de dispositivo que el servidor emitió al vincularse con el código
+ * (ver deviceSecret.ts). Se revalida TODO en cada uso: equipo existente y no
+ * revocado, credencial vigente y correcta, mismo negocio, y persona activa.
+ *
+ * Cualquier rechazo devuelve el MISMO error genérico: no se revela si el equipo
+ * existe, si fue revocado ni si la persona fue desactivada. La UI, ante un
+ * rechazo, simplemente cae al código de acceso.
+ */
+export const loginWithDevice = onCall({ maxInstances: 10 }, async (request) => {
+  const { deviceId, deviceSecret, tenantId } = request.data as { deviceId?: string; deviceSecret?: string; tenantId?: string };
+  if (!deviceId || !deviceSecret || !tenantId) throw new HttpsError('invalid-argument', 'Falta deviceId, deviceSecret o tenantId');
+
+  const originIp = request.rawRequest?.ip || 'unknown';
+  if (isRateLimited(`device:${deviceId}`) || isRateLimited(`device-origin:${originIp}`)) {
+    throw new HttpsError('resource-exhausted', 'Demasiados intentos. Probá de nuevo en unos minutos.');
+  }
+
+  const DENIED = 'No se pudo entrar con este equipo. Usá tu código de acceso.';
+  const deviceSnap = await db.collection('trusted_devices').doc(deviceId).get();
+  const device = deviceSnap.data();
+
+  // Costo constante aunque el equipo no exista: siempre se calcula un hash.
+  const secretMatches = device?.secretHash && device?.secretSalt
+    ? verifyDeviceSecret(deviceSecret, device.secretSalt, device.secretHash)
+    : (hashDeviceSecret(deviceSecret, 'sin-sal'), false);
+
+  const membershipSnap = device?.userId
+    ? await db.collection('memberships').doc(`${device.userId}_${tenantId}`).get()
+    : null;
+
+  const decision = checkDeviceLogin({
+    deviceExists: deviceSnap.exists,
+    deviceStatus: device?.status,
+    hasSecret: !!device?.secretHash,
+    secretMatches,
+    deviceTenantId: device?.tenantId,
+    requestedTenantId: tenantId,
+    membershipExists: !!membershipSnap?.exists,
+    membershipStatus: membershipSnap?.data()?.status,
+  });
+
+  if (!decision.allowed) {
+    console.warn('DEVICE_LOGIN_DENIED', { deviceId, tenantId, reason: decision.reason });
+    throw new HttpsError('permission-denied', DENIED);
+  }
+
+  await deviceSnap.ref.update({ lastSeenAt: FieldValue.serverTimestamp() });
+  const customToken = await admin.auth().createCustomToken(device!.userId, { deviceLogin: true });
+  console.log('DEVICE_LOGIN_SUCCESS', { deviceId, tenantId });
+  return {
+    customToken,
+    // Nombre visible de la membership, nunca el correo técnico interno.
+    displayName: (membershipSnap!.data()?.name as string) || 'Vendedor',
+  };
+});
+
+/**
  * Entrada rápida desde un dispositivo reconocido ("mantener presionado para
  * entrar"). NO es un método de autenticación: exige request.auth, o sea que la
  * persona YA está autenticada (su sesión de Firebase sigue viva; ese refresh
@@ -3447,6 +3524,24 @@ export const registerDevice = onCall({ maxInstances: 10 }, async (request) => {
   const deviceRef = db.collection('trusted_devices').doc(deviceId);
   const deviceSnap = await deviceRef.get();
 
+  // CREDENCIAL DE DISPOSITIVO (ver deviceSecret.ts): se emite —y se rota— SOLO
+  // cuando esta sesion salio de un login con CODIGO (claim pinLogin). Asi una
+  // reentrada por dispositivo no la regenera en cada uso, y un usuario corporativo
+  // (Google/correo) nunca recibe una. El valor en claro viaja una sola vez al
+  // telefono; aca solo queda el hash.
+  const issueSecret = request.auth.token.pinLogin === true;
+  let deviceSecret: string | undefined;
+  let secretFields: Record<string, unknown> = {};
+  if (issueSecret) {
+    deviceSecret = generateDeviceSecret();
+    const salt = crypto.randomBytes(16).toString('hex');
+    secretFields = {
+      secretHash: hashDeviceSecret(deviceSecret, salt),
+      secretSalt: salt,
+      secretIssuedAt: FieldValue.serverTimestamp(),
+    };
+  }
+
   if (deviceSnap.exists) {
     const existing = deviceSnap.data()!;
     if (existing.userId !== uid) {
@@ -3458,8 +3553,8 @@ export const registerDevice = onCall({ maxInstances: 10 }, async (request) => {
       // deshacer esa decisión reintentando el registro (ver Fase 12).
       throw new HttpsError('permission-denied', 'Este dispositivo fue revocado. Registrá uno nuevo.');
     }
-    await deviceRef.update({ lastSeenAt: FieldValue.serverTimestamp() });
-    return { deviceId, status: 'active' };
+    await deviceRef.update({ lastSeenAt: FieldValue.serverTimestamp(), ...secretFields });
+    return { deviceId, status: 'active', ...(deviceSecret ? { deviceSecret } : {}) };
   }
 
   await deviceRef.set({
@@ -3472,10 +3567,11 @@ export const registerDevice = onCall({ maxInstances: 10 }, async (request) => {
     registeredBy: uid,
     revokedAt: null,
     revokedBy: null,
+    ...secretFields,
   });
 
-  console.log('DEVICE_REGISTERED', { tenantId, userId: uid, deviceId });
-  return { deviceId, status: 'active' };
+  console.log('DEVICE_REGISTERED', { tenantId, userId: uid, deviceId, withSecret: !!deviceSecret });
+  return { deviceId, status: 'active', ...(deviceSecret ? { deviceSecret } : {}) };
 });
 
 /** Renombra un dispositivo — el propio dueño o un Owner/Admin de su tenant. */
