@@ -1,6 +1,20 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-10 — El panel QA tapaba los controles que diagnosticaba
+
+- evidencia fisica: Chrome, no embebido, showPicker disponible. Entorno descartado.
+- fix(bug propio): el panel era un bloque fijo grande con pointer-events normales y
+  los toques de la prueba caian sobre el. Ahora es pointer-events-none; solo una
+  pastilla chica recibe toques y no se registran.
+- feat(QA): <CONTROL>_COVERED_BY — si el dedo cae dentro de la zona de un control
+  (data-media-target) pero el toque lo recibe otro elemento, se registra cual.
+- fix: showPicker() dentro del mismo gesto, con respaldo a la activacion nativa si
+  lanza. Sin nada asincrono antes del selector (test).
+- fix: OnboardingBanner solo para admin — tarjeta fija abajo con z-50 que en movil
+  queda sobre la barra, y cuyos pasos llevaban al vendedor a rutas restringidas.
+- test: 269/269. Deploy hosting:app, commit a025cc9, bundle index-B36aqE_u.js.
+
 ## 2026-09-10 — El dedo toca directamente el input de archivo + panel QA que se activa
 
 - fix(bug propio): ?qa=1 solo se leia dentro del panel; el aterrizaje lo descartaba

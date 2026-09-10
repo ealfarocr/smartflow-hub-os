@@ -1,5 +1,38 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 P0 media — el panel QA tapaba lo que diagnosticaba (2026-09-10)
+
+**Evidencia física**: NAVEGADOR Chrome · EMBEBIDO no · showPicker sí. **Queda
+descartado el entorno.** Al tocar clip/foto/video no aparecía ningún `*_TAP`, y
+los `TOQUE` caían sobre `div.fixed` / `div.text-emerald` — el propio panel.
+
+**Error mío:** el panel era un bloque fijo de hasta 92vw × 55vh con
+pointer-events normales; los toques de la prueba caían sobre él y nunca llegaban
+al control.
+
+### Corregido
+
+- Panel **pointer-events-none** completo; solo una pastilla chica arriba a la
+  izquierda recibe toques, y esos no se registran.
+- **`<CONTROL>_COVERED_BY`**: cada control marca su zona (`data-media-target`); si
+  el dedo cae dentro pero el toque lo recibe otro elemento, se registra cuál.
+- **`showPicker()`** dentro del mismo gesto (onClick del input), con respaldo a la
+  activación nativa si lanza. Sin timers, await ni promesas — hay test.
+- **OnboardingBanner solo para admin**: tarjeta fija de hasta 384px abajo con
+  z-50, que en móvil queda sobre la barra, y cuyos pasos mandaban al vendedor a
+  rutas restringidas. No se declara culpable del clip sin evidencia.
+
+Acceso rápido sigue en 500 ms. 269/269 tests. Commit `a025cc9`, deploy
+`hosting:app`, bundle `index-B36aqE_u.js` verificado.
+
+### Próximo paso exacto
+
+Con el modo QA ya activo en el teléfono (queda recordado), ir a una conversación
+y tocar el clip. Mandar captura. Casos:
+- `CLIP_COVERED_BY {por: ...}` → hay una capa encima; el panel dice cuál.
+- `CLIP_TAP` + `CLIP_DIALOG_REQUESTED` sin `DIALOG_OPENED` → el navegador no abrió.
+- `CLIP_SHOWPICKER_ERROR` → el error exacto de Chrome.
+
 ## 🔶 P0 vendedor — el dedo toca el input + panel QA que ahora sí se activa (2026-09-10)
 
 Reportado: el acceso rápido funciona pero 1 s se siente lento; clip, Tomar foto y
