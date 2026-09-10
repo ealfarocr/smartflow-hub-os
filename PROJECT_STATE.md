@@ -1,5 +1,72 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ RESUELTO — "El botón Entrar con PIN no aparece en producción" (2026-09-10)
+
+**El código SÍ estaba desplegado.** Lo que fallaba era la caché de las rutas de
+la app, y era un defecto que afectaba a **todos** los deploys, no solo a este.
+
+### Auditoría con evidencia (antes de tocar nada)
+
+- Commit del botón: `9894187`, confirmado en `main`.
+- `index.html` que sirve `/login` → `assets/index-DVmho5XI.js`, **el mismo hash
+  del build local**.
+- Strings buscados en el bundle **vivo**: `Acceso del equipo`, `Entrar con PIN`,
+  `Acceso corporativo`, `/acceso`, `Escribí tu usuario y tu PIN` → **los 5
+  presentes**.
+- **No hay service worker**: `sw.js` devuelve `text/html` (es el index por el
+  rewrite `**`); tampoco hay `vite-plugin-pwa` ni registro en el código.
+- El bundle **anterior** (`index-5DrEWglM.js`) ya no existe: devuelve el index
+  como HTML.
+- Navegador limpio contra `https://hub.smartflow-suite.com/login`: el botón
+  existe, es visible, mide 56px de alto, apunta a `/acceso`, y al pulsarlo
+  navega a `/acceso` y muestra el campo Usuario + el teclado de PIN.
+- `hosting:app` → site `paneles-solares-bcs-mx`, que es el que responde en
+  `hub.smartflow-suite.com` (mismo ETag y mismo hash de bundle).
+
+### Causa raíz
+
+La regla de `no-store` estaba escrita para el path **literal** `/index.html`,
+pero todas las rutas de la app (`/login`, `/acceso`, `/usuarios`, …) se sirven
+por el rewrite `**` → `/index.html`, y **Firebase Hosting aplica los headers por
+el path PEDIDO, no por el archivo servido**. Así que cada ruta caía en el
+`max-age=3600` por defecto:
+
+```
+/login       -> Cache-Control: max-age=3600            <-- el problema
+/index.html  -> Cache-Control: no-cache, no-store, must-revalidate
+```
+
+Un navegador que hubiera abierto `/login` antes del deploy se quedaba **hasta
+una hora** con el HTML viejo y con el bundle viejo que ese HTML referencia.
+
+### Fix
+
+- La regla `**` ahora incluye `Cache-Control: no-cache, no-store,
+  must-revalidate` → ninguna ruta de la app se sirve desde caché vieja.
+- Regla nueva `/assets/**` con `max-age=31536000, immutable` — los assets llevan
+  hash en el nombre, así que el rendimiento **mejora** respecto del 3600 previo.
+
+Verificado tras el deploy:
+
+```
+/login /acceso /usuarios /index.html -> no-cache, no-store, must-revalidate
+/assets/index-*.js                   -> public, max-age=31536000, immutable
+```
+
+Y en el navegador, contra producción: las dos secciones presentes, Google +
+correo/contraseña + enlace de invitado intactos, y "Entrar con PIN" llevando a
+`/acceso`.
+
+Commit `2c4bf21` (solo `firebase.json`), ya en `main`. Deploy: `hosting:app`.
+
+### Próximo paso exacto
+
+En la PC de la tienda ya no hace falta ningún truco de caché: la próxima carga
+de `/login` trae el HTML fresco. Sigue pendiente el QA de Eduardo: entrar por
+**Entrar con PIN** con `eduardoadmin` y con `eduardopruebas`, cerrar la app,
+volver y confirmar que dice `Hola <nombre>` pidiendo solo el PIN. **No activar
+vendedoras reales hasta cerrar ese ciclo.**
+
 ## ✅ DESPLEGADO — `/login` deja entrar también al equipo (usuario + PIN) (2026-09-09)
 
 **Problema:** los vendedores y Owners de USADITOS entran con usuario/PIN/

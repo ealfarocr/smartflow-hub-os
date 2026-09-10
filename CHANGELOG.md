@@ -2,6 +2,30 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-10 — Las rutas de la app se cacheaban 1 hora: los deploys tardaban en verse
+
+- auditoría: el bundle vivo SÍ tenía el botón. `/login` servía
+  `assets/index-DVmho5XI.js` (mismo hash que el build de `9894187`, que está en
+  `main`) y los 5 strings buscados estaban presentes. No hay service worker
+  (`sw.js` devuelve `text/html` por el rewrite). Verificado además en un
+  navegador limpio contra producción: botón visible, 56px, lleva a `/acceso`.
+- fix(hosting, causa raíz): la regla de `no-store` estaba escrita para el path
+  literal `/index.html`, pero todas las rutas de la app se sirven por el rewrite
+  `**` -> `/index.html`, y Firebase aplica los headers por el path PEDIDO, no
+  por el archivo servido. Cada ruta caía en el `max-age=3600` por defecto, así
+  que un navegador podía quedarse hasta una hora con el HTML viejo y su bundle
+  viejo. Afectaba a TODOS los deploys, no solo a este.
+- fix: la regla `**` incluye ahora `no-cache, no-store, must-revalidate`, y se
+  agrega `/assets/**` con `max-age=31536000, immutable` (los assets llevan hash,
+  son inmutables — mejor rendimiento que el 3600 anterior).
+- verificación post-deploy: `/login`, `/acceso`, `/usuarios` e `/index.html` con
+  `no-store`; `/assets/index-*.js` con `max-age=31536000, immutable`. En el
+  navegador: "Acceso corporativo" (Google + correo/contraseña + invitado) y
+  "Acceso del equipo" (Entrar con PIN -> /acceso), todo presente.
+- deploy: `hosting:app` únicamente. Commit `2c4bf21`, ya en `main`. Sin cambios
+  de código, Functions ni Rules.
+
+
 ## 2026-09-09 — /login deja entrar también al equipo (usuario + PIN), sin depender del enlace
 
 - feat(UI): `/login` mantiene intacto el acceso corporativo (Google +
