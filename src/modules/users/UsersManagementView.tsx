@@ -9,7 +9,7 @@ import { httpsCallable, getFunctions } from 'firebase/functions';
 import { DeviceManagerModal } from './DeviceManagerModal';
 import { VendorAccessModal } from './VendorAccessModal';
 import type { VendorAccessData } from './vendorAccessHelpers';
-import { buildAccessLink } from './vendorAccessHelpers';
+import { buildAccessLink, displayMemberEmail } from './vendorAccessHelpers';
 import { formatLastSeen } from '@/utils/formatLastSeen';
 
 export const UsersManagementView = () => {
@@ -544,7 +544,7 @@ export const UsersManagementView = () => {
                                 {u.name}
                                 {renderLifecycleBadge(u)}
                               </div>
-                              <div className="text-slate-500 text-xs">{u.email || 'Sin correo aún'}</div>
+                              <div className="text-slate-500 text-xs">{displayMemberEmail(u.email)}</div>
                             </div>
                           </div>
                         </td>
@@ -598,7 +598,7 @@ export const UsersManagementView = () => {
                                   <span className="truncate">{u.name}</span>
                                   {renderLifecycleBadge(u)}
                                 </div>
-                                <div className="text-slate-500 text-xs truncate">{u.email || 'Sin correo aún'}</div>
+                                <div className="text-slate-500 text-xs truncate">{displayMemberEmail(u.email)}</div>
                               </div>
                             </div>
                             <div className="flex flex-col items-center shrink-0">

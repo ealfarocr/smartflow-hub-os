@@ -51,23 +51,30 @@ export const useUserStore = create<UserState>((set) => ({
     set({ isLoading: true });
     
     // 1. Suscribirse a membresías
-    const unsubMembers = UserService.subscribeToTenantMemberships(tenantId, async (memberships) => {
-      const membersPromises = memberships.map(async (m) => {
-        const profile = m.userId ? await UserService.getUserProfile(m.userId) : null;
-        return {
-          id: m.id,
-          userId: m.userId || '',
-          tenantId: m.tenantId,
-          role: m.role,
-          status: m.status, // active, pending, suspended
-          name: profile?.name || m.name || 'Pendiente de acceso',
-          email: profile?.email || m.email || '', // 'prepared' aún no tiene correo
-          isActive: m.status !== 'suspended',
-          allowedTools: m.allowedTools,
-        } as TeamMember;
-      });
-
-      const members = await Promise.all(membersPromises);
+    // FIX URGENTE — Owner local solo veía su propio usuario: esto llamaba
+    // getUserProfile(m.userId) (lee users/{uid}) para CADA compañero de
+    // equipo con userId seteado — pero las Rules de esa colección SOLO
+    // permiten leer el propio perfil o SuperAdmin (endurecido a propósito
+    // para no exponer PII de otros usuarios, ver firestore.rules). Apenas
+    // el tenant tenía más de una persona con userId real (es decir, más de
+    // una ya logueada al menos una vez), la lectura del perfil ajeno tiraba
+    // permission-denied DENTRO de un Promise.all — una sola promesa
+    // rechazada tira TODO el lote, así que teamMembers nunca se volvía a
+    // actualizar después del primer snapshot que sí incluía solo al Owner.
+    // La propia membership YA trae name/email (se escriben al crearla/
+    // migrarla) — no hace falta ni conviene leer users/{uid} de nadie más.
+    const unsubMembers = UserService.subscribeToTenantMemberships(tenantId, (memberships) => {
+      const members = memberships.map((m) => ({
+        id: m.id,
+        userId: m.userId || '',
+        tenantId: m.tenantId,
+        role: m.role,
+        status: m.status, // active, pending, suspended
+        name: m.name || 'Pendiente de acceso',
+        email: m.email || '', // 'prepared' aún no tiene correo
+        isActive: m.status !== 'suspended',
+        allowedTools: m.allowedTools,
+      } as TeamMember));
       set({ teamMembers: members, isLoading: false });
     });
 

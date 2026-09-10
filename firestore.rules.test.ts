@@ -327,3 +327,93 @@ describe('integrations — read (get y list) tras el fix del bug de tipos en ||'
     await assertSucceeds(getDoc(doc(sa, 'integrations', 'intB')));
   });
 });
+
+// FIX URGENTE — Owner local solo veía su propio usuario en /usuarios.
+// Causa raíz real: NO era esta query (list sobre memberships con
+// where('tenantId','==',...)) — esa ya funcionaba bien, confirmado acá
+// abajo con el dataset real de USADITOS (10 memberships, 1 Owner activo +
+// 9 prepared con userId:null). El bug estaba en useUserStore.subscribe,
+// que además llamaba getUserProfile(m.userId) — un getDoc sobre
+// users/{uid} de CADA compañero — y esa colección solo permite leer el
+// propio perfil o SuperAdmin. Un getDoc rechazado adentro de un
+// Promise.all tira TODO el lote, así que teamMembers se quedaba pegado en
+// el primer snapshot (antes de que hubiera un segundo miembro con userId
+// real). El fix fue dejar de leer users/{uid} de otros — este describe
+// cubre los 7 escenarios pedidos, todos contra la query real de
+// memberships, sin ningún getUserProfile de por medio.
+describe('FIX — Owner/Admin local ve el equipo completo de su tenant (no solo a sí mismo)', () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      // Dataset real de USADITOS: 1 Owner activo (ID {uid}_{tenantId}), 1
+      // Admin activo, 1 Asesor activo, varios prepared/pending con
+      // userId:null, y uno suspended con userId real.
+      await setDoc(doc(db, 'memberships', 'ownerA_tenantA'), { tenantId: 'tenantA', userId: 'ownerA', status: 'active', role: 'Owner', name: 'EDUARDO ADMIN' });
+      await setDoc(doc(db, 'memberships', 'adminA_tenantA'), { tenantId: 'tenantA', userId: 'adminA', status: 'active', role: 'Admin', name: 'Admin A' });
+      await setDoc(doc(db, 'memberships', 'vendorA_tenantA'), { tenantId: 'tenantA', userId: 'vendorA', status: 'active', role: 'Asesor Comercial', name: 'Vendedor A' });
+      await setDoc(doc(db, 'memberships', 'prepared1'), { tenantId: 'tenantA', userId: null, status: 'prepared', role: 'Asesor Comercial', name: 'Preparado 1' });
+      await setDoc(doc(db, 'memberships', 'prepared2'), { tenantId: 'tenantA', userId: null, status: 'prepared', role: 'Asesor Comercial', name: 'Preparado 2' });
+      await setDoc(doc(db, 'memberships', 'pending1'), { tenantId: 'tenantA', userId: null, status: 'pending', role: 'Owner', email: 'pendiente@x.com' });
+      await setDoc(doc(db, 'memberships', 'suspendedA_tenantA'), { tenantId: 'tenantA', userId: 'suspendedA', status: 'suspended', role: 'Asesor Comercial', name: 'Suspendido A' });
+      // Tenant B — para el caso de aislamiento cruzado.
+      await setDoc(doc(db, 'memberships', 'ownerB_tenantB'), { tenantId: 'tenantB', userId: 'ownerB', status: 'active', role: 'Owner', name: 'Owner B' });
+      await setDoc(doc(db, 'memberships', 'vendorB_tenantB'), { tenantId: 'tenantB', userId: 'vendorB', status: 'active', role: 'Asesor Comercial', name: 'Vendor B' });
+      await setDoc(doc(db, 'users', 'superadmin1'), { isSuperAdmin: true });
+    });
+  });
+
+  const listTenantMemberships = (db: ReturnType<RulesTestEnvironment['authenticatedContext']>['firestore'] extends () => infer R ? R : never, tenantId: string) =>
+    getDocs(query(collection(db, 'memberships'), where('tenantId', '==', tenantId)));
+
+  it('1. Owner activo ve TODOS los usuarios de su tenant (7 de tenantA, incluidos prepared/pending/suspended)', async () => {
+    const ownerA = testEnv.authenticatedContext('ownerA').firestore();
+    const snap = await assertSucceeds(listTenantMemberships(ownerA, 'tenantA'));
+    expect(snap.size).toBe(7);
+  });
+
+  it('2. Owner de tenantA NO ve usuarios de tenantB', async () => {
+    // No hay membership ownerA_tenantB, así que isTenantAdmin('tenantB') ni
+    // siquiera llega a evaluar false: falla al leer .data de un doc
+    // inexistente, y como ninguna condición previa del OR fue true, la regla
+    // deniega toda la query (no "éxito con 0 resultados" — denegación total,
+    // que es un aislamiento cruzado más fuerte, no más débil).
+    const ownerA = testEnv.authenticatedContext('ownerA').firestore();
+    await assertFails(listTenantMemberships(ownerA, 'tenantB'));
+  });
+
+  it('3. Admin activo ve el equipo completo del tenant (mismo alcance que Owner)', async () => {
+    const adminA = testEnv.authenticatedContext('adminA').firestore();
+    const snap = await assertSucceeds(listTenantMemberships(adminA, 'tenantA'));
+    expect(snap.size).toBe(7);
+  });
+
+  it('4. Asesor Comercial NO obtiene privilegios de administración — la query de lista completa le falla', async () => {
+    const vendorA = testEnv.authenticatedContext('vendorA').firestore();
+    await assertFails(listTenantMemberships(vendorA, 'tenantA'));
+  });
+
+  it('5. prepared/pending con userId:null siguen apareciendo para el Owner', async () => {
+    const ownerA = testEnv.authenticatedContext('ownerA').firestore();
+    const snap = await assertSucceeds(listTenantMemberships(ownerA, 'tenantA'));
+    const ids = snap.docs.map((d) => d.id);
+    expect(ids).toContain('prepared1');
+    expect(ids).toContain('prepared2');
+    expect(ids).toContain('pending1');
+  });
+
+  it('6. suspended/inactive sigue visible para gestión (no desaparece de la lista)', async () => {
+    const ownerA = testEnv.authenticatedContext('ownerA').firestore();
+    const snap = await assertSucceeds(listTenantMemberships(ownerA, 'tenantA'));
+    const suspended = snap.docs.find((d) => d.id === 'suspendedA_tenantA');
+    expect(suspended).toBeDefined();
+    expect(suspended?.data().status).toBe('suspended');
+  });
+
+  it('7. SuperAdmin sigue viendo el equipo completo de cualquier tenant', async () => {
+    const sa = testEnv.authenticatedContext('superadmin1').firestore();
+    const snapA = await assertSucceeds(listTenantMemberships(sa, 'tenantA'));
+    const snapB = await assertSucceeds(listTenantMemberships(sa, 'tenantB'));
+    expect(snapA.size).toBe(7);
+    expect(snapB.size).toBe(2);
+  });
+});

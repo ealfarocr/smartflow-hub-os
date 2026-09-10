@@ -5,14 +5,13 @@ import {
   onSnapshot,
   doc,
   updateDoc,
-  getDoc,
   getDocs,
   addDoc,
   serverTimestamp
 } from 'firebase/firestore';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 import { db } from '@/lib/firebase';
-import { Membership, User } from '@/types';
+import { Membership } from '@/types';
 
 export const UserService = {
   /**
@@ -31,15 +30,6 @@ export const UserService = {
       })) as Membership[];
       callback(memberships);
     });
-  },
-
-  /**
-   * Obtiene el perfil de un usuario por UID.
-   */
-  getUserProfile: async (uid: string): Promise<User | null> => {
-    if (!uid) return null;
-    const snap = await getDoc(doc(db, 'users', uid));
-    return snap.exists() ? (snap.data() as User) : null;
   },
 
   /**

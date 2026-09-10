@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildFullMessage, buildAccessLink } from './vendorAccessHelpers';
+import { buildFullMessage, buildAccessLink, displayMemberEmail, isInternalVendorEmail } from './vendorAccessHelpers';
 
 describe('buildAccessLink — construcción del enlace real de acceso individual', () => {
   it('caso real: eduardo pruebas / t-1788554584458', () => {
@@ -105,5 +105,27 @@ describe('VendorAccessData — AJUSTE UX: usuario sin PIN (pinConfigured:false)'
     expect(notConfigured.loginHandle).toBe('');
     expect(notConfigured.link).toBe('');
     expect(notConfigured.pin).toBeNull();
+  });
+});
+
+describe('displayMemberEmail — la lista de /usuarios no muestra el correo técnico interno', () => {
+  it('caso real de USADITOS: el correo interno de un vendedor PIN no se muestra', () => {
+    expect(displayMemberEmail('vendedor.lsmdecwvmanldy4wedrm@t-1788554584458.usuarios.smartflow.internal'))
+      .toBe('Acceso por PIN (sin correo)');
+  });
+
+  it('detecta el correo interno sin importar mayúsculas', () => {
+    expect(isInternalVendorEmail('VENDEDOR.ABC@T-1.USUARIOS.SMARTFLOW.INTERNAL')).toBe(true);
+  });
+
+  it('un correo real del negocio sí se muestra tal cual', () => {
+    expect(displayMemberEmail('usaditossanpedro1@gmail.com')).toBe('usaditossanpedro1@gmail.com');
+    expect(isInternalVendorEmail('usaditossanpedro1@gmail.com')).toBe(false);
+  });
+
+  it('prepared sin correo sigue mostrando "Sin correo aún"', () => {
+    expect(displayMemberEmail(null)).toBe('Sin correo aún');
+    expect(displayMemberEmail('')).toBe('Sin correo aún');
+    expect(displayMemberEmail(undefined)).toBe('Sin correo aún');
   });
 });

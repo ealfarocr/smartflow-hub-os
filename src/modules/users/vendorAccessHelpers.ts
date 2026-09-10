@@ -90,3 +90,26 @@ export function buildFullMessage(data: Pick<VendorAccessData, 'loginHandle' | 'p
   );
   return lines.join('\n');
 }
+
+// Los vendedores que entran por PIN tienen un correo TÉCNICO interno
+// (`vendedor.<membershipId>@<tenantId>.usuarios.smartflow.internal`, lo arma
+// setVendorPin en functions/src/index.ts) que ellos nunca ven ni usan para
+// entrar: su acceso real es enlace + PIN. Mostrarlo crudo en /usuarios llena
+// la lista de algo que no es el correo de nadie. Antes casi no se notaba
+// porque la lista estaba rota y solo se renderizaba la fila del propio
+// Owner; al arreglarla aparecería en la fila de CADA vendedor.
+const INTERNAL_VENDOR_EMAIL_SUFFIX = '.usuarios.smartflow.internal';
+
+export function isInternalVendorEmail(email: string | null | undefined): boolean {
+  return !!email && email.toLowerCase().endsWith(INTERNAL_VENDOR_EMAIL_SUFFIX);
+}
+
+/**
+ * Qué mostrar en la columna de correo de /usuarios: nunca el correo técnico
+ * interno, y 'Sin correo aún' cuando de verdad no hay ninguno todavía
+ * (prepared).
+ */
+export function displayMemberEmail(email: string | null | undefined): string {
+  if (isInternalVendorEmail(email)) return 'Acceso por PIN (sin correo)';
+  return email || 'Sin correo aún';
+}
