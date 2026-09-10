@@ -4,15 +4,24 @@
 // only-export-components). Todo lo testeable vive acá.
 
 export interface VendorAccessData {
+  membershipId: string;
   name: string;
+  // '' cuando pinConfigured es false — todavía no existe (setVendorPin
+  // nunca se llamó para esta membership).
   loginHandle: string;
-  // null = no se puede/debe mostrar — o porque este modal se abrió para VER
+  // null = no se puede/debe mostrar — porque este modal se abrió para VER
   // el acceso ya existente (vendor_credentials guarda solo el hash, nunca
-  // el PIN en texto plano) o porque nunca se generó uno. Nunca se inventa
-  // ni se muestra un PIN viejo — "Generar nuevo PIN" es una acción aparte,
-  // explícita, que sí lo muestra (una sola vez, recién generado).
+  // el PIN en texto plano) o porque pinConfigured es false. Nunca se
+  // inventa ni se muestra un PIN viejo — "Generar PIN" es una acción
+  // aparte, explícita, que sí lo muestra (una sola vez, recién generado).
   pin: string | null;
+  // '' cuando pinConfigured es false.
   link: string;
+  // AJUSTE UX — usuario sin PIN: false = esta membership nunca tuvo un PIN
+  // generado (vendor_credentials no existe) — el acceso NO está listo,
+  // no hay enlace ni usuario que mostrar/copiar todavía. true = ya existe
+  // (con o sin el PIN visible, según si se acaba de generar).
+  pinConfigured: boolean;
   // Estado real de la membership (active/pending/suspended/...), solo para
   // mostrar contexto — no cambia nada de lo que el modal permite hacer.
   accessStatus?: string;
@@ -70,7 +79,7 @@ export function buildAccessLink(loginHandle: string, tenantId: string, name: str
   return `${ACCESS_BASE_URL}?h=${encodeURIComponent(loginHandle)}&t=${encodeURIComponent(tenantId)}&n=${encodeURIComponent(name)}`;
 }
 
-export function buildFullMessage(data: VendorAccessData): string {
+export function buildFullMessage(data: Pick<VendorAccessData, 'loginHandle' | 'pin' | 'link'>): string {
   const lines = ['Acceso SmartFlow', `Usuario: ${data.loginHandle}`];
   if (data.pin) lines.push(`PIN: ${data.pin}`);
   lines.push(`Enlace: ${data.link}`, '');

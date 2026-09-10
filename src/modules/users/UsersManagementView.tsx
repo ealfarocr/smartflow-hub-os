@@ -109,20 +109,28 @@ export const UsersManagementView = () => {
   // solo cambia cómo llega ahí.
   const [generatingPinId, setGeneratingPinId] = useState<string | null>(null);
   const [vendorAccess, setVendorAccess] = useState<VendorAccessData | null>(null);
+
+  // Checkpoint de seguridad: el backend devuelve loginHandle (usuario
+  // público, ej. "michelle"), nunca el membershipId — es lo único que el
+  // link de enrolamiento y el propio vendedor van a conocer. Compartido por
+  // el botón 🔑 dedicado (handleGeneratePin, con confirm) y por "Generar
+  // PIN" dentro del modal de 🔗 (sin confirm — ya es una acción explícita
+  // e intencional adentro de un modal que se abrió a propósito).
+  const callSetVendorPin = async (id: string, name: string, tenantId: string) => {
+    const setVendorPin = httpsCallable<{ membershipId: string }, { pin: string; tenantId: string; loginHandle: string }>(getFunctions(), 'setVendorPin');
+    const result = await setVendorPin({ membershipId: id });
+    const { pin, loginHandle } = result.data;
+    // FIX UX URGENTE: antes esto era un alert() — texto no seleccionable de
+    // forma práctica, sin botones de copiar. VendorAccessModal deja copiar
+    // enlace/PIN/mensaje completo para mandarlo por WhatsApp.
+    setVendorAccess({ membershipId: id, name, loginHandle, pin, link: buildAccessLink(loginHandle, tenantId, name), pinConfigured: true });
+  };
+
   const handleGeneratePin = async (id: string, name: string, tenantId: string) => {
     if (!window.confirm(`¿Generar PIN de acceso para ${name}?\n\nSi ya tiene uno, se reemplaza por uno nuevo.`)) return;
     setGeneratingPinId(id);
     try {
-      // Checkpoint de seguridad: el backend devuelve loginHandle (usuario
-      // público, ej. "michelle"), nunca el membershipId — es lo único que
-      // el link de enrolamiento y el propio vendedor van a conocer.
-      const setVendorPin = httpsCallable<{ membershipId: string }, { pin: string; tenantId: string; loginHandle: string }>(getFunctions(), 'setVendorPin');
-      const result = await setVendorPin({ membershipId: id });
-      const { pin, loginHandle } = result.data;
-      // FIX UX URGENTE: antes esto era un alert() — texto no seleccionable
-      // de forma práctica, sin botones de copiar. VendorAccessModal deja
-      // copiar enlace/PIN/mensaje completo para mandarlo por WhatsApp.
-      setVendorAccess({ name, loginHandle, pin, link: buildAccessLink(loginHandle, tenantId, name) });
+      await callSetVendorPin(id, name, tenantId);
       addToast('PIN generado', 'success');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al generar el PIN';
@@ -137,25 +145,33 @@ export const UsersManagementView = () => {
   // CUALQUIER usuario que no fuera prepared/draft, en vez de su enlace real
   // de acceso por PIN. Ahora abre el mismo VendorAccessModal, pero en modo
   // "ver" (pin:null — nunca se inventa ni se muestra un PIN viejo; la única
-  // forma de ver un PIN en texto plano es generar uno nuevo con 🔑, que
-  // invalida el anterior).
+  // forma de ver un PIN en texto plano es generar uno nuevo, que invalida
+  // el anterior).
   const [loadingAccessId, setLoadingAccessId] = useState<string | null>(null);
   const handleViewAccess = async (id: string, name: string, tenantId: string) => {
     setLoadingAccessId(id);
     try {
       const getVendorAccessInfo = httpsCallable<{ membershipId: string }, { hasPinAccess: boolean; loginHandle?: string }>(getFunctions(), 'getVendorAccessInfo');
       const result = await getVendorAccessInfo({ membershipId: id });
+      const member = teamMembers.find((m) => m.id === id);
       if (!result.data.hasPinAccess || !result.data.loginHandle) {
-        addToast('Este usuario todavía no tiene un PIN generado', 'info');
+        // AJUSTE UX — usuario sin PIN: antes esto solo mostraba un toast y
+        // no abría nada. Para alguien ya active/pending sin PIN (el ícono
+        // 🔑 dedicado ni siquiera aparece en su fila — solo se muestra para
+        // prepared/draft), este modal es el único lugar desde donde se
+        // puede arrancar el acceso. No se muestra usuario/enlace/mensaje
+        // como si ya estuviera listo — nada de eso existe todavía.
+        setVendorAccess({ membershipId: id, name, loginHandle: '', pin: null, link: '', pinConfigured: false, accessStatus: member?.status });
         return;
       }
       const { loginHandle } = result.data;
-      const member = teamMembers.find((m) => m.id === id);
       setVendorAccess({
+        membershipId: id,
         name,
         loginHandle,
         pin: null,
         link: buildAccessLink(loginHandle, tenantId, name),
+        pinConfigured: true,
         accessStatus: member?.status,
       });
     } catch (err) {
@@ -812,6 +828,18 @@ export const UsersManagementView = () => {
         <VendorAccessModal
           data={vendorAccess}
           onClose={() => setVendorAccess(null)}
+          onGeneratePin={
+            activeMembership?.tenantId
+              ? async () => {
+                  try {
+                    await callSetVendorPin(vendorAccess.membershipId, vendorAccess.name, activeMembership.tenantId);
+                    addToast('PIN generado', 'success');
+                  } catch (err) {
+                    addToast(err instanceof Error ? err.message : 'Error al generar el PIN', 'error');
+                  }
+                }
+              : undefined
+          }
         />
       )}
     </div>

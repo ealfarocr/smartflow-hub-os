@@ -34,7 +34,6 @@ describe('buildAccessLink — construcción del enlace real de acceso individual
 describe('buildFullMessage — mensaje de WhatsApp para acceso de vendedor', () => {
   it('incluye usuario, PIN y enlace en el formato pedido', () => {
     const msg = buildFullMessage({
-      name: 'Michelle',
       loginHandle: 'michelle',
       pin: '482913',
       link: 'https://hub.smartflow-suite.com/acceso?h=michelle&t=t-1&n=Michelle',
@@ -48,7 +47,6 @@ describe('buildFullMessage — mensaje de WhatsApp para acceso de vendedor', () 
 
   it('el orden es Usuario, PIN, Enlace, instrucción — en ese orden', () => {
     const msg = buildFullMessage({
-      name: 'Ana',
       loginHandle: 'ana',
       pin: '000000',
       link: 'https://example.com/x',
@@ -63,22 +61,20 @@ describe('buildFullMessage — mensaje de WhatsApp para acceso de vendedor', () 
     expect(iInstruction).toBeGreaterThan(iLink);
   });
 
-  it('no incluye el nombre propio (solo el loginHandle) en el cuerpo del mensaje', () => {
-    // El nombre completo del vendedor no forma parte del formato pedido —
-    // solo loginHandle/pin/link, para no inflar el mensaje con datos que
-    // no hacen falta para acceder.
+  it('el nombre completo del vendedor no forma parte del formato pedido (buildFullMessage ni siquiera acepta ese campo)', () => {
+    // Antes se pasaba `name` sin usarlo; ahora el tipo de buildFullMessage
+    // (Pick<VendorAccessData, 'loginHandle'|'pin'|'link'>) directamente no
+    // lo acepta — solo loginHandle/pin/link llegan al mensaje.
     const msg = buildFullMessage({
-      name: 'Guimar Viviana Garzón',
       loginHandle: 'guimar',
       pin: '123456',
       link: 'https://example.com/x',
     });
-    expect(msg).not.toContain('Guimar Viviana Garzón');
+    expect(msg).not.toContain('Guimar');
   });
 
   it('pin:null (ver enlace existente) — nunca inventa ni muestra un PIN', () => {
     const msg = buildFullMessage({
-      name: 'Eduardo Pruebas',
       loginHandle: 'eduardopruebas',
       pin: null,
       link: 'https://hub.smartflow-suite.com/acceso?h=eduardopruebas&t=t-1&n=Eduardo%20Pruebas',
@@ -87,5 +83,27 @@ describe('buildFullMessage — mensaje de WhatsApp para acceso de vendedor', () 
     expect(msg).toContain('Usuario: eduardopruebas');
     expect(msg).toContain('Enlace: https://hub.smartflow-suite.com/acceso?h=eduardopruebas&t=t-1&n=Eduardo%20Pruebas');
     expect(msg).toContain('pedile a tu Owner/Admin que te genere uno nuevo');
+  });
+});
+
+describe('VendorAccessData — AJUSTE UX: usuario sin PIN (pinConfigured:false)', () => {
+  it('el estado "no configurado" no incluye datos como si el acceso ya estuviera listo', () => {
+    // No es una función a testear en sí (eso vive en el componente), pero
+    // fija por contrato el shape que UsersManagementView arma para este
+    // caso — pinConfigured:false implica loginHandle/link vacíos, nunca
+    // valores inventados o de una versión anterior.
+    const notConfigured: import('./vendorAccessHelpers').VendorAccessData = {
+      membershipId: 'm1',
+      name: 'Eduardo Pruebas',
+      loginHandle: '',
+      pin: null,
+      link: '',
+      pinConfigured: false,
+      accessStatus: 'active',
+    };
+    expect(notConfigured.pinConfigured).toBe(false);
+    expect(notConfigured.loginHandle).toBe('');
+    expect(notConfigured.link).toBe('');
+    expect(notConfigured.pin).toBeNull();
   });
 });
