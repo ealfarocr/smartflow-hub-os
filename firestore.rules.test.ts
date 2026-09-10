@@ -6,7 +6,7 @@ import {
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
 import { readFileSync } from 'fs';
-import { setDoc, doc, getDoc, collection, query, where, limit, getDocs } from 'firebase/firestore';
+import { setDoc, doc, getDoc, deleteDoc, collection, query, where, limit, getDocs } from 'firebase/firestore';
 
 // LOOP Fase 20, casos 14-16 — aislamiento multi-tenant y privacidad de las
 // 4 colecciones nuevas (vendor_credentials, trusted_devices, work_sessions,
@@ -415,5 +415,60 @@ describe('FIX — Owner/Admin local ve el equipo completo de su tenant (no solo 
     const snapB = await assertSucceeds(listTenantMemberships(sa, 'tenantB'));
     expect(snapA.size).toBe(7);
     expect(snapB.size).toBe(2);
+  });
+});
+
+// AJUSTE FINAL DE PERMISOS — el catálogo es el PRODUCTO MAESTRO del negocio.
+// Antes, create/update/delete pedían solo isTenantMember, así que un Asesor
+// Comercial podía alterar el catálogo saltándose la UI (y ahora que el módulo
+// /catalogo quedó cerrado por rol, la Rule era el único control que faltaba).
+// Leer sigue abierto a cualquier miembro activo: el asesor consulta el catálogo
+// DESDE la conversación para elegir un producto y mandárselo al cliente.
+describe('Catálogo — leer todos, administrar solo Owner/Admin', () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, 'memberships', 'ownerCat_tCat'), { tenantId: 'tCat', userId: 'ownerCat', status: 'active', role: 'Owner' });
+      await setDoc(doc(db, 'memberships', 'adminCat_tCat'), { tenantId: 'tCat', userId: 'adminCat', status: 'active', role: 'Admin' });
+      await setDoc(doc(db, 'memberships', 'asesorCat_tCat'), { tenantId: 'tCat', userId: 'asesorCat', status: 'active', role: 'Asesor Comercial' });
+      await setDoc(doc(db, 'catalog', 'itemCat'), { tenantId: 'tCat', name: 'Cuna de madera', rate: 45000 });
+    });
+  });
+
+  it('el Asesor SÍ puede leer el catálogo (lo necesita desde la conversación)', async () => {
+    const db = testEnv.authenticatedContext('asesorCat').firestore();
+    await assertSucceeds(getDoc(doc(db, 'catalog', 'itemCat')));
+  });
+
+  it('el Asesor NO puede crear un producto maestro', async () => {
+    const db = testEnv.authenticatedContext('asesorCat').firestore();
+    await assertFails(setDoc(doc(db, 'catalog', 'itemNuevo'), { tenantId: 'tCat', name: 'Inventado', rate: 1 }));
+  });
+
+  it('el Asesor NO puede editar un producto maestro', async () => {
+    const db = testEnv.authenticatedContext('asesorCat').firestore();
+    await assertFails(setDoc(doc(db, 'catalog', 'itemCat'), { tenantId: 'tCat', name: 'Precio cambiado', rate: 1 }));
+  });
+
+  it('el Asesor NO puede borrar un producto maestro', async () => {
+    const db = testEnv.authenticatedContext('asesorCat').firestore();
+    await assertFails(deleteDoc(doc(db, 'catalog', 'itemCat')));
+  });
+
+  it('el Owner administra el catálogo con normalidad', async () => {
+    const db = testEnv.authenticatedContext('ownerCat').firestore();
+    await assertSucceeds(setDoc(doc(db, 'catalog', 'itemOwner'), { tenantId: 'tCat', name: 'Coche', rate: 60000 }));
+    await assertSucceeds(setDoc(doc(db, 'catalog', 'itemCat'), { tenantId: 'tCat', name: 'Cuna', rate: 50000 }));
+    await assertSucceeds(deleteDoc(doc(db, 'catalog', 'itemCat')));
+  });
+
+  it('el Admin también', async () => {
+    const db = testEnv.authenticatedContext('adminCat').firestore();
+    await assertSucceeds(setDoc(doc(db, 'catalog', 'itemAdmin'), { tenantId: 'tCat', name: 'Andadera', rate: 20000 }));
+  });
+
+  it('un Owner de OTRO negocio no toca este catálogo', async () => {
+    const db = testEnv.authenticatedContext('ownerAjeno').firestore();
+    await assertFails(setDoc(doc(db, 'catalog', 'itemAjeno'), { tenantId: 'tCat', name: 'Intruso', rate: 1 }));
   });
 });

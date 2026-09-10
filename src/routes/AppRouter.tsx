@@ -101,17 +101,24 @@ export const AppRouter = () => {
                 <Route path="crm" element={<CRMPageView />} />
               </Route>
             </Route>
-            <Route element={<FeatureGuard feature="hasQuotes" />}>
-              <Route element={<ToolGuard tool="cotizaciones" />}>
-                <Route path="cotizaciones" element={<QuotesListView />} />
+            {/* Catálogo, Cotizaciones y Paquetes son ADMINISTRACIÓN comercial:
+                productos maestros, plantillas y paquetes los define Owner/Admin.
+                El asesor no navega acá, pero sigue usando esos recursos DESDE la
+                conversación (elegir un producto, mandar una cotización) — esas
+                acciones no pasan por estos guards. */}
+            <Route element={<RoleGuard allowedRoles={['Admin', 'Owner']} />}>
+              <Route element={<FeatureGuard feature="hasQuotes" />}>
+                <Route element={<ToolGuard tool="cotizaciones" />}>
+                  <Route path="cotizaciones" element={<QuotesListView />} />
+                </Route>
               </Route>
-            </Route>
-            <Route element={<FeatureGuard feature="hasCatalog" />}>
-              <Route element={<ToolGuard tool="catalogo" />}>
-                <Route path="catalogo" element={<CatalogPageView />} />
+              <Route element={<FeatureGuard feature="hasCatalog" />}>
+                <Route element={<ToolGuard tool="catalogo" />}>
+                  <Route path="catalogo" element={<CatalogPageView />} />
+                </Route>
               </Route>
+              <Route path="paquetes" element={<PackagesListView />} />
             </Route>
-            <Route path="paquetes" element={<PackagesListView />} />
             <Route element={<FeatureGuard feature="hasAgenda" />}>
               <Route element={<ToolGuard tool="agenda" />}>
                 <Route path="agenda" element={<AgendaPageView />} />
@@ -141,13 +148,17 @@ export const AppRouter = () => {
                 </Route>
               </Route>
             </Route>
-            <Route element={<FeatureGuard feature="hasPaymentLinks" />}>
-              <Route element={<ToolGuard tool="pagos" />}>
-                <Route path="pagos" element={<PaymentsView />} />
+            <Route element={<RoleGuard allowedRoles={['Admin', 'Owner']} />}>
+              <Route element={<FeatureGuard feature="hasPaymentLinks" />}>
+                <Route element={<ToolGuard tool="pagos" />}>
+                  <Route path="pagos" element={<PaymentsView />} />
+                </Route>
               </Route>
             </Route>
             <Route path="tareas" element={<TasksView />} />
-            <Route path="tienda" element={<MarketplaceView />} />
+            <Route element={<RoleGuard allowedRoles={['Admin', 'Owner']} />}>
+              <Route path="tienda" element={<MarketplaceView />} />
+            </Route>
             {/* Mi Suscripción es administración del negocio (plan, cobros del
                 servicio): antes no tenía NINGÚN guard y cualquier vendedor podía
                 abrirla escribiendo la URL. */}

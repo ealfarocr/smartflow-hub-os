@@ -57,6 +57,14 @@ export const TOOL_LABELS: Record<ToolKey, string> = {
 // paneles.
 export const ADMIN_ONLY_TOOLS: ToolKey[] = [
   'usuarios', 'configuracion', 'integraciones', 'multi-agent', 'ai-agent', 'auditoria',
+  // Catálogo, Cotizaciones y Cobros: sus MÓDULOS son de configuración y
+  // administración comercial (productos maestros, plantillas, cuentas de
+  // cobro). El asesor no navega a esos módulos, pero sigue usando lo que el
+  // Owner/Admin ya creó DESDE la conversación — elegir un producto del
+  // catálogo, mandar una cotización, generar un enlace de pago. Esas acciones
+  // no dependen de estos permisos (ver navigationAccess.test.ts, que verifica
+  // que conversaciones y CRM no importen nada de este archivo).
+  'catalogo', 'cotizaciones', 'pagos',
 ];
 
 // Roles que pueden ver las interfaces administrativas.
@@ -73,14 +81,14 @@ export function isAdminRole(role: Role | undefined | null): boolean {
 // Admin/Owner edite explícitamente a una persona. Mapeado por rol (no un
 // valor fijo) a propósito: es el punto natural para diferenciar defaults por
 // rol más adelante sin tocar getEffectiveTools.
-// Preset del ASESOR COMERCIAL: solo operación comercial. Cobros va INCLUIDO a
-// propósito — el vendedor genera enlaces de pago y se los manda al cliente;
-// lo que no puede tocar es la administración financiera del negocio (cuentas,
-// métodos de pago, parámetros globales), que vive en Configuración y ya está
-// cerrada por rol.
-export const ADVISOR_TOOLS: ToolKey[] = [
-  'crm', 'conversaciones', 'pagos', 'cotizaciones', 'catalogo', 'agenda',
-];
+// Preset FINAL del ASESOR COMERCIAL: atención y ventas, nada de administración.
+// Solo navega Dashboard, Mis Tareas (ninguno restringible), CRM, WhatsApp y
+// Agenda. Que no navegue a Catálogo/Cotizaciones/Cobros NO le quita las
+// acciones comerciales: desde la conversación sigue consultando el catálogo,
+// mandando cotizaciones y generando enlaces de cobro con lo que el Owner/Admin
+// ya configuró. MODULE_ACCESS y COMMERCIAL_ACTION son cosas distintas y este
+// archivo solo decide la primera.
+export const ADVISOR_TOOLS: ToolKey[] = ['crm', 'conversaciones', 'agenda'];
 
 // Fallback por rol para memberships sin allowedTools.
 //
@@ -114,7 +122,7 @@ export function getDefaultToolsForRole(role: Role): ToolKey[] {
 // Auditor IA (que sigue analizando todas las conversaciones del tenant
 // independientemente de quién puede ver su panel).
 export const TOOL_PRESETS: Record<string, ToolKey[]> = {
-  Vendedor: ['crm', 'conversaciones', 'cotizaciones', 'catalogo'],
+  Vendedor: [...ADVISOR_TOOLS],
   Supervisor: ['crm', 'conversaciones', 'multi-agent', 'cotizaciones', 'catalogo', 'agenda', 'auditoria'],
   Admin: [...ALL_TOOL_KEYS],
 };

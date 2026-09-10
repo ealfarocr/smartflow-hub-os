@@ -35,12 +35,20 @@ const menuFor = (role: 'Owner' | 'Admin' | 'Asesor Comercial', allowedTools: str
 describe('Menú del Asesor Comercial (caso real: eduardo pruebas en el teléfono)', () => {
   const menu = menuFor('Asesor Comercial');
 
-  const debeVer = ['Dashboard', 'Mis Tareas', 'CRM', 'WhatsApp', 'Cobros', 'Cotizaciones', 'Catálogo', 'Agenda'];
+  const debeVer = ['Dashboard', 'Mis Tareas', 'CRM', 'WhatsApp', 'Agenda'];
   debeVer.forEach((name) => {
     it(`ve ${name}`, () => expect(menu).toContain(name));
   });
 
-  const noDebeVer = ['Usuarios', 'Mi Suscripción', 'Multi-Agente', 'Agente IA', 'Auditor IA', 'Integraciones', 'Configuración'];
+  it('el menú es EXACTAMENTE ese, sin nada de más', () => {
+    expect([...menu].sort()).toEqual([...debeVer].sort());
+  });
+
+  const noDebeVer = [
+    'Usuarios', 'Mi Suscripción', 'Multi-Agente', 'Agente IA', 'Auditor IA',
+    'Integraciones', 'Configuración', 'Cobros', 'Cotizaciones', 'Catálogo',
+    'Paquetes', 'Tienda Hub',
+  ];
   noDebeVer.forEach((name) => {
     it(`ya NO ve ${name}`, () => expect(menu).not.toContain(name));
   });
@@ -54,16 +62,18 @@ describe('Menú del Asesor Comercial (caso real: eduardo pruebas en el teléfono
       'crm', 'conversaciones', 'multi-agent', 'ai-agent', 'auditoria',
       'pagos', 'cotizaciones', 'catalogo', 'agenda', 'usuarios', 'configuracion', 'integraciones',
     ]);
-    ['Usuarios', 'Multi-Agente', 'Agente IA', 'Auditor IA', 'Integraciones', 'Configuración', 'Mi Suscripción']
+    ['Usuarios', 'Multi-Agente', 'Agente IA', 'Auditor IA', 'Integraciones', 'Configuración',
+     'Mi Suscripción', 'Cobros', 'Cotizaciones', 'Catálogo', 'Paquetes', 'Tienda Hub']
       .forEach((n) => expect(conTodo).not.toContain(n));
-    expect(conTodo).toContain('Cobros');
+    expect(conTodo).toContain('CRM');
   });
 });
 
 describe('Owner y Admin conservan todo', () => {
   it('el Owner ve las herramientas administrativas', () => {
     const menu = menuFor('Owner');
-    ['Usuarios', 'Mi Suscripción', 'Multi-Agente', 'Agente IA', 'Auditor IA', 'Integraciones', 'Configuración', 'Cobros']
+    ['Usuarios', 'Mi Suscripción', 'Multi-Agente', 'Agente IA', 'Auditor IA', 'Integraciones',
+     'Configuración', 'Cobros', 'Cotizaciones', 'Catálogo', 'Paquetes', 'Tienda Hub']
       .forEach((n) => expect(menu).toContain(n));
   });
 
@@ -100,15 +110,15 @@ describe('SuperAdmin sin regresión', () => {
 });
 
 describe('Los feature flags del tenant siguen mandando', () => {
-  it('sin el flag de Cobros, el Asesor no ve Cobros aunque tenga la herramienta', () => {
+  it('sin el flag de Agenda, el Asesor no ve Agenda', () => {
     const menu = filterNavigation(items, {
       isSuperAdmin: false,
       isImpersonating: false,
       role: 'Asesor Comercial',
       effectiveTools: getEffectiveTools({ role: 'Asesor Comercial', allowedTools: null }),
-      features: { ...todasLasFeatures, hasPaymentLinks: false },
+      features: { ...todasLasFeatures, hasAgenda: false },
     }).map((i) => i.name);
-    expect(menu).not.toContain('Cobros');
+    expect(menu).not.toContain('Agenda');
     expect(menu).toContain('CRM');
   });
 });

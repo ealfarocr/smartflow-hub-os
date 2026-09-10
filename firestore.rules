@@ -184,13 +184,19 @@ service cloud.firestore {
       // en el update — la membresía en el tenant RECLAMADO alcanzaba. Ahora
       // update se autoriza solo contra el tenantId real del doc, y ese campo
       // queda inmutable.
+      // El catálogo es el PRODUCTO MAESTRO del negocio: cualquier miembro
+      // activo puede LEERLO (el asesor lo consulta desde la conversación para
+      // elegir un producto y mandárselo al cliente), pero crear, editar o
+      // borrar productos es de Owner/Admin. Antes create/update/delete pedían
+      // solo isTenantMember, así que un asesor podía alterar el catálogo del
+      // negocio saltándose la UI.
       allow read: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
-      allow create: if isSuperAdmin() || isTenantMember(request.resource.data.tenantId);
+      allow create: if isSuperAdmin() || isTenantAdmin(request.resource.data.tenantId);
       allow update: if isSuperAdmin() || (
-        isTenantMember(resource.data.tenantId) &&
+        isTenantAdmin(resource.data.tenantId) &&
         request.resource.data.tenantId == resource.data.tenantId
       );
-      allow delete: if isSuperAdmin() || isTenantMember(resource.data.tenantId);
+      allow delete: if isSuperAdmin() || isTenantAdmin(resource.data.tenantId);
     }
     
     match /agenda_items/{itemId} {

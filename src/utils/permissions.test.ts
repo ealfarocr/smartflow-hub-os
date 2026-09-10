@@ -29,18 +29,23 @@ describe('Preset del Asesor Comercial', () => {
     expect([...tools].sort()).toEqual([...ADVISOR_TOOLS].sort());
   });
 
-  it('Cobros SÍ está incluido: el vendedor genera enlaces de pago para sus clientes', () => {
-    expect(hasTool(asesorSinConfigurar, 'pagos')).toBe(true);
+  it('el preset final es solo atención y ventas', () => {
+    expect([...ADVISOR_TOOLS].sort()).toEqual(['agenda', 'conversaciones', 'crm']);
   });
 
-  const comerciales: ToolKey[] = ['crm', 'conversaciones', 'pagos', 'cotizaciones', 'catalogo', 'agenda'];
+  const comerciales: ToolKey[] = ['crm', 'conversaciones', 'agenda'];
   comerciales.forEach((tool) => {
     it(`mantiene acceso a ${tool}`, () => {
       expect(hasTool(asesorSinConfigurar, tool)).toBe(true);
     });
   });
 
-  const administrativas: ToolKey[] = ['usuarios', 'configuracion', 'integraciones', 'multi-agent', 'ai-agent', 'auditoria'];
+  // Los MÓDULOS de estos quedan cerrados; las acciones comerciales desde la
+  // conversación no pasan por acá (ver navigationAccess.test.ts).
+  const administrativas: ToolKey[] = [
+    'usuarios', 'configuracion', 'integraciones', 'multi-agent', 'ai-agent', 'auditoria',
+    'catalogo', 'cotizaciones', 'pagos',
+  ];
   administrativas.forEach((tool) => {
     it(`ya NO ve ${tool}`, () => {
       expect(hasTool(asesorSinConfigurar, tool)).toBe(false);
@@ -53,9 +58,10 @@ describe('El rol es el techo: allowedTools solo puede estrechar, nunca ampliar',
     const conTodoMarcado = { role: 'Asesor Comercial' as const, allowedTools: [...ALL_TOOL_KEYS] };
     const tools = getEffectiveTools(conTodoMarcado);
     ADMIN_ONLY_TOOLS.forEach((t) => expect(tools).not.toContain(t));
-    // Y conserva lo comercial que sí le corresponde.
+    // Y conserva lo suyo.
     expect(tools).toContain('crm');
-    expect(tools).toContain('pagos');
+    expect(tools).toContain('conversaciones');
+    expect(tools).toContain('agenda');
   });
 
   it('allowedTools sí puede quitarle herramientas comerciales', () => {
