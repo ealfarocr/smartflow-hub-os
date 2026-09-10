@@ -33,6 +33,8 @@ import {
   errorCodeOf, outboundRejectionMessage, SESSION_DEAD_MESSAGE, type SellerErrorLayer,
 } from '@/utils/sellerErrors';
 import { isAdminRole } from '@/utils/permissions';
+import { recordMediaDiag } from '@/utils/mediaDiag';
+import { MediaDiagPanel } from './MediaDiagPanel';
 import { AudioMessagePlayer } from './components/AudioMessagePlayer';
 
 // Hoy: solo hora (como antes). Otro día: día + mes + hora, para no confundir
@@ -61,7 +63,7 @@ export const ConversationsPageView = () => {
     setActiveConversation, subscribeInbox, subscribeMessages,
     sendMessage, markAsRead, assignAgent, claimConversation, toggleBot, isLoadingInbox
   } = useConversationStore();
-  const { activeMembership } = useAuthStore();
+  const { activeMembership, user } = useAuthStore();
   const { whatsappTemplates, templates: quickTemplates, company } = useSettingsStore();
   const { leads } = useLeadStore();
   const [showQuickTemplates, setShowQuickTemplates] = useState(false);
@@ -381,9 +383,11 @@ export const ConversationsPageView = () => {
   // dónde se corta el flujo en un teléfono real. Quitar una vez confirmado en producción.
   const mediaUi = (step: string, data?: Record<string, unknown>) => {
     console.log(`[MEDIA_UI] ${step}`, data ?? '');
+    recordMediaDiag(step, data);
   };
   const voiceLog = (step: string, data?: Record<string, unknown>) => {
     console.log(`[VOICE] ${step}`, data ?? '');
+    recordMediaDiag(`VOICE_${step}`, data);
   };
   const debugAttach = (tag: string, data?: unknown) => {
     console.log(`[ATTACH] ${tag}`, data ?? '');
@@ -620,6 +624,8 @@ export const ConversationsPageView = () => {
 
   return (
     <div className="h-full md:h-[calc(100vh-8rem)] flex overflow-hidden rounded-2xl shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+
+      <MediaDiagPanel isSuperAdmin={!!user?.isSuperAdmin} />
 
       {/* ── Sidebar ── */}
       <div className={`${activeChat ? 'hidden md:flex' : 'flex'} w-full md:w-72 flex-col border-r border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900`}>
@@ -1150,9 +1156,10 @@ ${plantilla}` : plantilla);
                       type="file"
                       accept="image/*"
                       capture="environment"
-                      className="hidden"
+                      id="sf-camera-photo-input"
+                      className="sr-only"
                       onChange={async e => {
-                        mediaUi('photo_change_fired', { filesLength: e.target.files?.length ?? 0 });
+                        mediaUi('PHOTO_CHANGE', { filesLength: e.target.files?.length ?? 0 });
                         const files = e.target.files;
                         if (files?.length) await handleFilesSelected(files, 'PHOTO');
                         e.target.value = '';
@@ -1163,9 +1170,11 @@ ${plantilla}` : plantilla);
                       type="file"
                       accept="video/*"
                       capture="environment"
-                      className="hidden"
+                      id="sf-camera-video-input"
+                      className="sr-only"
                       onChange={async e => {
                         const files = e.target.files;
+                        mediaUi('VIDEO_CHANGE', { filesLength: e.target.files?.length ?? 0 });
                         debugAttach('VIDEO_CHANGE', {
                           filesLength: files?.length ?? 0,
                           files: files ? Array.from(files).map(f => ({ name: f.name, type: f.type, size: f.size })) : [],
@@ -1192,9 +1201,10 @@ ${plantilla}` : plantilla);
                       type="file"
                       multiple
                       accept="image/*,video/*"
-                      className="hidden"
+                      id="sf-gallery-input"
+                      className="sr-only"
                       onChange={async e => {
-                        mediaUi('gallery_change_fired', { filesLength: e.target.files?.length ?? 0 });
+                        mediaUi('CLIP_CHANGE', { filesLength: e.target.files?.length ?? 0 });
                         const files = e.target.files;
                         if (files?.length) await handleFilesSelected(files, 'GALLERY');
                         e.target.value = '';
@@ -1207,54 +1217,42 @@ ${plantilla}` : plantilla);
                           y hace que Android ofrezca el selector de medios en vez del
                           administrador de archivos con 'Recientes'. Ya no hay boton de
                           documentos ni entrada extra de imagen: solo Clip y Camara. */}
-                      <button type="button" onClick={() => { mediaUi('clip_click', { refPresent: !!galleryInputRef.current }); galleryInputRef.current?.click(); mediaUi('gallery_input_click_called'); }}
-                        title="Fotos y videos"
-                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
+                      <label htmlFor="sf-gallery-input"
+                        onClick={() => mediaUi('CLIP_TAP', { inputPresent: !!document.getElementById('sf-gallery-input') })}
+                        title="Fotos y videos" role="button" aria-label="Fotos y videos"
+                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 cursor-pointer ${isRecording ? 'hidden' : ''}`}>
                         <Paperclip className="w-4 h-4" />
-                      </button>
+                      </label>
                       {/* Cámara: toma foto o graba video al momento y lo sube igual que un adjunto.
                           Dos inputs separados (foto/video) porque un solo input con accept
                           mezclado no abre la cámara de forma confiable en Android. */}
                       <div className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
-                        <button type="button" onClick={() => setShowCameraChoice(v => !v)}
+                        <button type="button" onClick={() => { mediaUi('CAMERA_MENU_TAP'); setShowCameraChoice(v => !v); }}
                           title="Cámara"
                           className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors disabled:opacity-40">
                           <Camera className="w-4 h-4" />
                         </button>
                         {showCameraChoice && (
                           <div className="absolute bottom-full left-0 mb-2 w-36 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden">
-                            <button type="button"
+                            <label htmlFor="sf-camera-photo-input" role="button"
                               onClick={() => {
-                                mediaUi('camera_photo_click', { refPresent: !!cameraInputRef.current });
-                                setShowCameraChoice(false);
-                                cameraInputRef.current?.click();
-                                mediaUi('photo_input_click_called');
-                                debugAttach('PHOTO_INPUT_TRIGGERED');
+                                mediaUi('PHOTO_TAP', { inputPresent: !!document.getElementById('sf-camera-photo-input') });
+                                window.addEventListener('focus', () => setShowCameraChoice(false), { once: true });
                               }}
-                              className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2">
+                              className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 cursor-pointer">
                               <Camera className="w-3.5 h-3.5" /> Tomar foto
-                            </button>
-                            <button type="button"
+                            </label>
+                            {/* Grabador propio (VideoRecorderModal) desactivado: en Android el MP4
+                                del MediaRecorder sale sin duracion valida (preview negro, 0:00).
+                                Se usa la camara nativa del telefono, igual que para la foto. */}
+                            <label htmlFor="sf-camera-video-input" role="button"
                               onClick={() => {
-                                debugAttach('VIDEO_CLICK');
-                                setShowCameraChoice(false);
-                                // Grabador propio (VideoRecorderModal) desactivado: dos rondas de
-                                // QA física en Android confirmaron que el MP4 que produce el
-                                // MediaRecorder del navegador no tiene duración/metadata válida
-                                // (preview negro, 0:00) — no es un problema de qué candidato de
-                                // mimeType se pide, es el propio encoder/muxer de Android. El gate
-                                // de reproducibilidad lo bloquearía igual, así que en vez de
-                                // insistir se usa directo el flujo nativo de cámara del teléfono
-                                // (ya valida el límite de 16MB y da preview+enviar vía
-                                // addPendingMedia, igual que cualquier otro adjunto).
-                                debugAttach('VIDEO_RECORDER_FALLBACK_NATIVE', { reason: 'custom_recorder_disabled_unreliable_mp4' });
-                                mediaUi('camera_video_click', { refPresent: !!cameraVideoInputRef.current });
-                                cameraVideoInputRef.current?.click();
-                                mediaUi('video_input_click_called');
+                                mediaUi('VIDEO_TAP', { inputPresent: !!document.getElementById('sf-camera-video-input') });
+                                window.addEventListener('focus', () => setShowCameraChoice(false), { once: true });
                               }}
-                              className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 border-t border-slate-100 dark:border-slate-700">
+                              className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 border-t border-slate-100 dark:border-slate-700 cursor-pointer">
                               <Play className="w-3.5 h-3.5" /> Grabar video
-                            </button>
+                            </label>
                           </div>
                         )}
                       </div>
