@@ -1,5 +1,87 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ P0 GO-LIVE — puesto del vendedor reproducido y cerrado en QA local (2026-09-10)
+
+**Cambio de método:** en vez de micro-pruebas en el teléfono, el puesto completo
+del ASESOR COMERCIAL se reproduce contra los emuladores (Auth, Firestore,
+Functions, Storage) con un Chromium de pantalla táctil Android. Los toques van
+por el pipeline real del navegador y `waitForFileChooser` solo resuelve si el
+selector de archivos realmente iba a abrir.
+
+- `scripts/qa_seller_seed.mjs`: tenant QA con Owner y Asesor vinculado con código
+  vía Functions reales, conversaciones con la ventana de 24 h abierta, catálogo,
+  SINPE/banco, Multi-Agente en Modo Libre y un tenant ajeno.
+- `scripts/qa_seller_workstation.mjs`: 37 verificaciones de A (acceso) a G (Owner).
+  Uso completo en su cabecera; `.env.qalocal` apunta la app a los emuladores.
+
+**Resultado:** 37/37 contra el **build de producción** servido en local, con 5 min
+de uso continuo (14 vueltas: 28 cambios de conversación y 28 adjuntos). Clip,
+foto y video abren el selector con el accept/capture correcto. Cada subida pasa
+FILE_SELECTED → AUTH_OK → TOKEN_REFRESH_OK → UPLOAD_START → UPLOAD_OK →
+DOWNLOAD_URL_OK → ATTACHMENT_READY. La nota de voz graba, genera el blob y sube.
+
+### Bugs reales que encontró el QA local (corregidos en `9722be0`)
+
+1. **Reentrada rápida intermitente**: navegaba a `/` antes de que el store viera la
+   sesión y ProtectedRoute rebotaba a `/acceso`. Ahora `waitForSessionReady`.
+2. **Los avisos tapaban el micrófono y enviar** (abajo a la derecha, 3 s). Ahora en
+   móvil van arriba y dejan pasar los toques; solo la X recibe el dedo.
+3. **`scrollIntoView` del chat** desplazaba ancestros overflow-hidden y corría la
+   cabecera (volver, Tomar). Ahora solo se desplaza la lista de mensajes.
+4. **Layout 100vh → 100dvh** (con respaldo): con la barra de Chrome visible la
+   barra de mensajes quedaba bajo el borde de la pantalla.
+5. **Nota de voz**: si la subida salía bien y fallaba el envío, el aviso decía "No
+   se pudo subir el archivo". Ahora cada etapa tiene su propia capa de error.
+6. **Cobro desde el chat**: mostraba el código técnico crudo y decía "enviadas"
+   aunque Meta rechazara el mensaje. Además, el asesor intentaba escribir la
+   moneda del negocio y fallaba en silencio.
+7. **Toque fantasma**: si fallaba la reentrada, el dedo al soltar escribía un
+   dígito y borraba el mensaje. Ahora el teclado ignora toques por 800 ms.
+8. Con el catálogo vacío, el asesor ya no es enviado a `/catalogo`. El
+   OnboardingBanner no aparece en el chat, tampoco para el Owner. `useTeam` ya no
+   deja un rechazo sin manejar. Un `failed-precondition` al enviar muestra el
+   aviso para el administrador.
+9. Functions `setOperationalStatus`/`tickPresence`/`claimConversation`: FieldValue
+   importado (mismo comportamiento en prod; el emulador no expone el estático).
+
+Hallazgo del propio arnés: el aviso fijo del emulador de Auth tapaba el clip y
+`CLIP_COVERED_BY` lo detectó. Es la misma clase de falla que se buscaba.
+
+### Deploy
+
+Commit `9722be0`. Tests: 275 unitarios, 42 de reglas y 108 de functions.
+Typecheck y build limpios; lint en la línea base. Deploy de
+`functions:claimConversation,setOperationalStatus,tickPresence` y `hosting:app`.
+En producción se verificó el bundle `index-DfQ1cHXN.js` con los cambios, sin
+ganchos de QA, el CSS `@supports (height:100dvh)` y `no-cache`.
+
+### Estado real de USADITOS (lectura, sin cambios)
+
+- Features activas: todas, incluidas hasMultiAgent y hasAgenda (WhatsApp y Agenda
+  en el menú).
+- eduardo pruebas: activo, en Multi-Agente, "Trabajando", con 1 equipo con
+  credencial de dispositivo.
+- **Catálogo con 0 productos**: el Owner tiene que cargarlos para vender desde el
+  chat.
+- Michelle, Ana, Celina, Alondra e Indyra siguen en `prepared`, sin activar. Tras
+  su primer ingreso, el Owner tiene que **sumarlas al equipo de Multi-Agente** (si
+  no, "Tomar" responde "No estás configurado…"). Ellas deben ponerse en
+  "Trabajando".
+- **Meta**: WABA 1659672582339181 BLOCKED (141006 método de pago, 141008 WABA no
+  activa, 141010 verificación). Es externo; la UI muestra "La cuenta de WhatsApp
+  requiere atención del administrador."
+
+### Próximo paso exacto
+
+Validación física final corta, en el teléfono de eduardo pruebas:
+1. Cerrar sesión → "Hola …" → mantener presionado → cae en WhatsApp.
+2. En una conversación: clip → elegir una foto → la miniatura queda sin ícono
+   rojo. Cámara → Tomar foto → lo mismo. Cámara → Grabar video → lo mismo.
+3. Micrófono → hablar 3 s → tocar enviar. Solo debe aparecer el aviso de Meta, no
+   "No se pudo subir".
+
+Si algo falla, el panel QA muestra la etapa exacta (`*_COVERED_BY`, `*_FAILED_AT`).
+
 ## 🔶 P0 media — el panel QA tapaba lo que diagnosticaba (2026-09-10)
 
 **Evidencia física**: NAVEGADOR Chrome · EMBEBIDO no · showPicker sí. **Queda

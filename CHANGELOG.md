@@ -1,6 +1,31 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-10 — Puesto del vendedor reproducido en QA local y cerrado (9722be0)
+
+- feat(QA): scripts/qa_seller_seed.mjs + scripts/qa_seller_workstation.mjs + .env.qalocal
+  — Chromium tactil Android contra emuladores (Auth/Firestore/Functions/Storage),
+  toques por el pipeline real y waitForFileChooser como prueba de apertura.
+  37/37 contra el build de produccion, 5 min de uso continuo.
+- fix: reentrada rapida rebotaba a /acceso (navegaba antes de que el store viera
+  la sesion) — waitForSessionReady en codigo y dispositivo.
+- fix: avisos tapaban microfono/enviar en movil — arriba y sin interceptar toques.
+- fix: scrollIntoView del chat corria la cabecera — solo se desplaza la lista.
+- fix: layout 100vh -> 100dvh con respaldo (barra de Chrome tapaba la barra de mensajes).
+- fix: nota de voz reportaba "No se pudo subir" cuando fallaba el envio — capas separadas.
+- fix: cobro desde el chat — sin codigo tecnico crudo; no dice "enviadas" si Meta
+  rechaza; el asesor no escribe la moneda del negocio.
+- fix: toque fantasma tras reentrada fallida (teclado bloqueado 800 ms).
+- fix: catalogo vacio no manda al asesor a /catalogo; OnboardingBanner fuera del chat;
+  useTeam sin rechazo sin manejar; failed-precondition al enviar = aviso de administrador.
+- feat(QA): panel con etapas de subida (AUTH_OK..ATTACHMENT_READY, FAILED_AT) y voz
+  (VOICE_TAP, MIC_PERMISSION_OK, RECORDER_START/STOP, VOICE_BLOB, VOICE_UPLOAD_*).
+- fix(functions): FieldValue importado en setOperationalStatus/tickPresence/claimConversation.
+- test: 275 unit + 42 rules + 108 functions. Deploy functions (3) + hosting:app,
+  bundle index-DfQ1cHXN.js verificado en produccion.
+- lectura prod: catalogo USADITOS con 0 productos; vendedoras reales en prepared;
+  Meta WABA sigue BLOCKED (externo).
+
 ## 2026-09-10 — El panel QA tapaba los controles que diagnosticaba
 
 - evidencia fisica: Chrome, no embebido, showPicker disponible. Entorno descartado.
