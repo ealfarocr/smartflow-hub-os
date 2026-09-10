@@ -1,5 +1,95 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 EN CURSO — P0 puesto de vendedor USADITOS (2026-09-10)
+
+Loop P0 autónomo. **Avanzado y desplegado lo de mayor impacto; queda pendiente
+verificación física y dos frentes.**
+
+### Causa raíz ÚNICA detrás de los tres síntomas
+
+Auditoría con evidencia, no supuestos:
+
+- **Storage está sano**: bucket existe, facturación OK, escritura con Admin SDK
+  OK. Y **cero archivos** en `chat-attachments` del tenant: ningún upload llegó
+  nunca.
+- **Las Storage Rules NO son la causa**: `scripts/diag_chat_upload_rules.mjs`
+  (nuevo) las ejercita contra el emulador con el shape real —Asesor Comercial con
+  membership `{uid}_{tenantId}`— y pasan **8/8**: imagen, video, audio
+  `webm/opus`, `audio/mp4`, nombre con espacios y paréntesis, `contentType`
+  vacío, más aislamiento cross-tenant y límite de 20MB.
+- **`sendWhatsappMessage` no registra ni una invocación** de USADITOS ni ninguna
+  de hoy: cuando el vendedor toca enviar, la función jamás se ejecuta. El fallo
+  es del cliente, ANTES de la llamada.
+
+**La sesión muere y el teléfono queda en estado zombi.** Cuando un Owner/Admin
+regenera el código de acceso, `setVendorPin` revoca los refresh tokens
+(deliberado). Confirmado en producción: `tokensValidAfterTime` coincide
+**exactamente** con `pinSetAt` en las dos credenciales del tenant. El teléfono
+sigue "abierto" pero no puede renovar su ID token, así que fallan **a la vez** el
+texto (callable → `unauthenticated`), los adjuntos y las notas de voz (Storage →
+`unauthorized`), cada uno con su mensaje genérico. Y al recargar, pide código.
+
+Eso explica P0-1 y P0-2 con una sola causa. **Ojo con el QA: cada vez que se
+regenera el código, ese teléfono queda fuera.** Es correcto por seguridad, pero
+hay que saberlo mientras se prueba.
+
+### Desplegado
+
+- `src/utils/sellerErrors.ts`: traduce por capa y **detecta la sesión caída** —
+  un solo mensaje accionable ("Tu acceso fue actualizado. Entrá otra vez con tu
+  código") y lleva a `/acceso`, en vez de tres errores distintos. Micrófono y
+  cámara denegados dicen **qué hacer**. El detalle técnico sigue en consola para
+  Admin/Auditor.
+- **Rechazos de Meta traducidos en TODOS los envíos** (antes solo en video, y con
+  el texto crudo): "La cuenta de Meta del negocio requiere atención del
+  administrador".
+- **Drawer de venta**: `Cobrar / Enviar pago` pasa a acción **primaria** — verde,
+  grande, primera y a ancho completo en móvil. Antes era el último chip pequeño.
+- **Bug propio corregido**: el botón "Cotizar" del chat navegaba a
+  `/cotizaciones`, que para un Asesor ahora es "Acceso restringido" — le rompía
+  la herramienta desde adentro de la conversación. Ahora le deja la plantilla
+  lista en el mensaje; Owner/Admin sigue navegando al módulo.
+
+228/228 tests (22 nuevos) + 8/8 del diagnóstico de Rules. Commits `036ff3b` y
+`9b356a5`. Deploy: `hosting:app`.
+
+### EXTERNAL_BLOCKER confirmado hoy (solo lectura, sin enviar nada)
+
+```
+número 1354454937743475 -> CONNECTED, verified_name "Usaditos"
+WABA   1659672582339181 -> account_review_status APPROVED
+                           health_status.can_send_message = BLOCKED
+                           141006 error con el método de pago
+                           141008 la WABA no está activa
+                           141010 verificación de negocio pendiente (BUSINESS)
+```
+
+El outbound de texto **no va a funcionar** hasta que el cliente agregue método de
+pago y complete la verificación. No se toca código por esto.
+
+### ⚠️ Lo que NO está cerrado
+
+- **Verificación física**: no puedo autenticarme en la app, así que el ciclo real
+  en el teléfono (reentrada, adjuntar, cámara, nota de voz) lo tiene que
+  confirmar Eduardo.
+- **Cámara y video**: auditados por código y por Rules, **no probados físicamente**.
+- **P0-3 (recursos comerciales desde el chat)**: el catálogo, el modal de cobro y
+  la plantilla de cotización siguen en la conversación y no dependen de permisos
+  de navegación (hay un test que lo bloquea), pero el ciclo completo
+  producto→cotización→cobro no está probado de punta a punta.
+
+### Próximo paso exacto
+
+1. **Antes de probar, NO regenerar el código** (invalida la sesión del teléfono).
+2. Entrar una vez con el código; cerrar la app; reabrir → no debería pedir código.
+3. En una conversación: adjuntar imagen de galería, foto de cámara, video corto y
+   nota de voz. Si algo falla, **anotar el mensaje exacto** — ahora son
+   específicos por capa y eso dice dónde está el problema.
+4. El texto va a seguir fallando hasta que Meta se desbloquee; debe mostrar el
+   mensaje del administrador, no un error técnico.
+5. Confirmar que `Cobrar / Enviar pago` aparece verde y primero en el drawer.
+
+
 ## ✅ DESPLEGADO — La sesión no persistía: por eso pedía el código en cada apertura (2026-09-10)
 
 **Reportado:** el vendedor ya está vinculado al teléfono pero SmartFlow le pide

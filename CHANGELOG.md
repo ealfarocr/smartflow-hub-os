@@ -1,6 +1,38 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-10 — P0 puesto de vendedor: una sesion muerta rompia texto, adjuntos y notas de voz
+
+- auditoria: Storage sano (bucket, facturacion y escritura con Admin SDK OK) y CERO
+  archivos subidos en chat-attachments del tenant. Las Storage Rules NO son la causa:
+  scripts/diag_chat_upload_rules.mjs las ejercita con el shape real (Asesor con
+  membership {uid}_{tenantId}) y pasan 8/8 — imagen, video, audio webm/opus, audio/mp4,
+  nombre con espacios, contentType vacio, aislamiento cross-tenant y limite de 20MB.
+  Y sendWhatsappMessage no registra NI UNA invocacion del tenant ni de hoy: al tocar
+  enviar, la funcion nunca se ejecuta.
+- causa raiz unica: al regenerar el codigo de acceso, setVendorPin revoca los refresh
+  tokens (deliberado). Confirmado en produccion: tokensValidAfterTime coincide EXACTO
+  con pinSetAt en las dos credenciales. El telefono queda 'abierto' pero sin poder
+  renovar el token, y fallan A LA VEZ el texto (callable unauthenticated), los adjuntos
+  y las notas de voz (storage unauthorized). Al recargar, pide codigo.
+- fix: src/utils/sellerErrors.ts traduce por capa y detecta la sesion caida — un solo
+  mensaje accionable y vuelta a /acceso, en vez de tres errores genericos distintos.
+  Microfono y camara denegados dicen QUE HACER. El detalle tecnico sigue en consola.
+- fix: los rechazos de Meta se traducen en TODOS los envios (antes solo en video, con
+  el texto crudo 'An unknown error has occurred').
+- ux: en el drawer de venta, 'Cobrar / Enviar pago' pasa a accion primaria — verde,
+  grande, primera y a ancho completo en movil. Antes era el ultimo chip pequeno.
+- fix(bug propio): el boton 'Cotizar' del chat navegaba a /cotizaciones, que para un
+  Asesor ahora es 'Acceso restringido'. Ahora le deja la plantilla lista en el mensaje;
+  Owner/Admin sigue abriendo el modulo.
+- EXTERNAL_BLOCKER confirmado hoy (solo lectura): WABA 1659672582339181 con
+  can_send_message=BLOCKED — 141006 metodo de pago, 141008 WABA no activa, 141010
+  verificacion de negocio pendiente. El outbound no depende de SmartFlow.
+- test: 228/228 (22 nuevos) + 8/8 del diagnostico de Rules. Deploy: hosting:app.
+  Commits 036ff3b y 9b356a5.
+- pendiente: verificacion fisica en el telefono (reentrada, adjuntos, camara, nota de
+  voz) y el ciclo producto->cotizacion->cobro de punta a punta.
+
 
 ## 2026-09-10 — La sesión no persistía: por eso pedía el código en cada apertura
 
