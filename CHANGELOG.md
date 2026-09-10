@@ -2,6 +2,47 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — FIX URGENTE: un PIN recién generado no dejaba entrar (regresión de `2c106ca`)
+
+- fix(regresión propia, no el bug original): `repointLoginHandle` dejaba
+  `login_handles.membershipId` en el ID actual de la membership, pero
+  `setVendorPin` escribía el PIN nuevo en el doc de credencial donde ya estaba
+  (un ID viejo), y `loginWithPin` derivaba el doc de credencial de ese mismo
+  campo del índice: buscaba `vendor_credentials/{idActual}`, no existía, y
+  cortaba con el error genérico ANTES de comparar ningún hash. Las dos mitades
+  del par apuntaban a lados opuestos. Afectaba a los DOS usuarios con PIN del
+  tenant, incluido EDUARDO ADMIN.
+- auditoría (solo lectura, sin regenerar ni migrar): `pinHash`/`pinSalt` estaban
+  bien escritos en ambas credenciales y `failedAttempts` era 0 — nunca se
+  llegaba a la verificación. No hizo falta manipular el PIN en texto plano.
+- fix: `setVendorPin` mueve la credencial a su lugar canónico
+  (`vendor_credentials/{membershipId}`) en un batch atómico ANTES de escribir el
+  PIN nuevo, y sincroniza el índice DESPUÉS — nunca al revés.
+- fix: `login_handles` guarda `credDocId` (dónde está la credencial) y `authUid`
+  (el único identificador que no cambia nunca).
+- fix: `loginWithPin` resuelve la credencial en cadena —  `credDocId` → lugar
+  canónico → por `loginHandle` dentro del tenant → por `authUid`. Con el índice
+  desfasado el login entra igual en vez de mentir "PIN incorrecto", y el filtro
+  por tenant se aplica en cada paso (la red de seguridad no cruza negocios).
+- fix: `acceptTenantInvite` escribe `credDocId`/`authUid` en el MISMO batch en
+  que mueve la credencial.
+- test: el hueco era que el E2E verificaba que regenerar sobre una credencial
+  desubicada fuera ALLOW, pero nunca intentaba entrar con el PIN nuevo.
+  Secciones 12 y 13: login con el PIN recién generado (el caso reportado, falla
+  con el código anterior), PIN viejo DENY, credencial canónica y la vieja
+  borrada, índice con `credDocId`/`authUid`, login repetido (recarga / volver a
+  entrar), índice roto a propósito recuperándose solo, y sin cruzar tenants.
+  53/53 E2E (antes 44) + 134/134 unitarios + 35/35 Rules.
+- verificación post-deploy en producción (solo lectura): ambos usuarios
+  resuelven su credencial por la red de seguridad de `loginHandle`, con hash y
+  salt intactos, 0 intentos fallidos, sin bloqueo y membership `active` → login
+  habilitado CON EL PIN QUE YA TIENEN. No hace falta regenerar ni migrar.
+- deploy: `functions:loginWithPin,setVendorPin,acceptTenantInvite`. Commit
+  `7e78e52`, ya en `main`. Sin frontend, sin Rules, sin WhatsApp/Payments/IA.
+- pendiente: prueba real en teléfono con el PIN ya generado. No regenerar antes
+  de probar — regenerar invalida el PIN de la pantalla anterior.
+
+
 ## 2026-09-09 — FIX URGENTE: el ciclo de acceso por PIN estaba roto de punta a punta
 
 - fix(causa raíz única, verificada contra datos de producción):

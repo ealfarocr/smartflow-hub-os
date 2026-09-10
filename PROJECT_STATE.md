@@ -1,5 +1,97 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ FIX DESPLEGADO — Un PIN recién generado no dejaba entrar (regresión de `2c106ca`) (2026-09-09)
+
+**Reportado:** el Owner genera acceso nuevo para `eduardo pruebas`, SmartFlow
+muestra PIN y enlace, en el teléfono se pone EXACTAMENTE ese PIN → `Usuario o
+PIN incorrecto`.
+
+**Esto fue una regresión mía del deploy anterior, no el bug original.**
+
+### Causa raíz
+
+`repointLoginHandle` dejaba `login_handles.membershipId` apuntando al ID
+**actual** de la membership, pero `setVendorPin` escribía el PIN nuevo en el
+doc de credencial **donde ya estaba** (un ID de membership viejo). Y
+`loginWithPin` derivaba el doc de credencial justamente de
+`login_handles.membershipId`: buscaba `vendor_credentials/{idActual}`, no
+existía, y cortaba con el error genérico **antes de comparar ningún hash**. Las
+dos mitades del par quedaron apuntando a lados opuestos. Antes de `2c106ca` el
+índice apuntaba donde sí estaba la credencial (y fallaba más adelante, al leer
+la membership).
+
+### Auditoría de producción (solo lectura, sin tocar datos ni regenerar)
+
+```
+login_handles/t-..._eduardopruebas -> nqjp..._t-...   credencial ahí: NO EXISTE
+login_handles/t-..._eduardoadmin   -> Bw4G..._t-...   credencial ahí: NO EXISTE
+vendor_credentials/lSmdEcwVMAnLDy4WeDrm  pinHash+pinSalt OK, authUid OK
+vendor_credentials/yOQ1y5DnkAqUSloR9Nyu  pinHash+pinSalt OK, authUid OK
+failedAttempts = 0 en ambas (nunca se llegó a comparar el PIN)
+```
+
+El hash y la salt estaban bien escritos; nunca se llegaban a comparar. **No
+hizo falta manipular el PIN en texto plano** para confirmarlo — el corte es
+anterior a la verificación. Afectaba a **los dos** usuarios con PIN del tenant,
+incluido `EDUARDO ADMIN`.
+
+### Fix — una sola fuente de verdad
+
+`loginHandle -> credencial -> authUid -> membership`, sin depender de ningún ID
+mutable:
+
+- `setVendorPin` **mueve** la credencial a su lugar canónico
+  (`vendor_credentials/{membershipId}`) en un batch atómico **antes** de
+  escribir el PIN nuevo, y recién **después** sincroniza el índice — nunca al
+  revés.
+- `login_handles` guarda además `credDocId` (dónde está la credencial) y
+  `authUid` (el único identificador que no cambia nunca).
+- `loginWithPin` resuelve la credencial en cadena: `credDocId` → lugar canónico
+  → búsqueda por `loginHandle` dentro del tenant → búsqueda por `authUid`. Si el
+  índice queda desfasado por cualquier motivo, el login **entra igual** en vez
+  de mentir "PIN incorrecto". El filtro por tenant se aplica en cada paso: la
+  red de seguridad **no cruza negocios** (hay test).
+- `acceptTenantInvite` escribe `credDocId`/`authUid` en el MISMO batch en que
+  mueve la credencial.
+
+### El hueco del E2E que dejó pasar esto
+
+La sección 10 verificaba que regenerar sobre una credencial desubicada fuera
+ALLOW y que el índice quedara repuntado, **pero nunca intentaba entrar con el
+PIN nuevo** — justo lo único que le importa al vendedor. Secciones 12 y 13
+nuevas: login con el PIN recién generado (el caso exacto reportado, que falla
+con el código anterior), PIN viejo denegado, credencial en su lugar canónico y
+la vieja borrada, índice con `credDocId`/`authUid` correctos, login repetido
+(recargar página / volver a entrar tras cerrar sesión), índice roto a propósito
+recuperándose solo, y esa recuperación no cruzando tenants.
+
+**53/53** E2E contra emuladores reales (antes 44) + **134/134** unitarios +
+**35/35** de Rules. Typecheck y build limpios. Lint sin cambios (99 problemas
+preexistentes en `index.ts`, idénticos en el `HEAD` anterior).
+
+### Estado verificado en producción después del deploy
+
+Replicando la cadena del `loginWithPin` desplegado contra los datos reales
+(solo lectura): ambos usuarios resuelven su credencial **por la red de
+seguridad de `loginHandle`**, con `pinHash`/`pinSalt` intactos, 0 intentos
+fallidos, sin bloqueo, y membership canónica `active` →
+**LOGIN HABILITADO con el PIN que ya tienen.**
+
+**No hay que regenerar ningún PIN ni migrar datos.**
+
+- Commit `7e78e52`, ya en `main`.
+- Deploy: `functions:loginWithPin,setVendorPin,acceptTenantInvite`. Sin
+  frontend, sin Rules, sin WhatsApp/Payments/Multi-Agent.
+
+### Próximo paso exacto
+
+Eduardo prueba en el teléfono con el **PIN que ya generó** (el último, de las
+04:27 UTC para `eduardo pruebas`) en
+`https://hub.smartflow-suite.com/acceso?h=eduardopruebas&t=t-1788554584458`.
+No regenerar antes de probar: si se regenera, el PIN de la pantalla anterior
+deja de servir. Si ese login entra, seguir con el resto del ciclo de QA y
+recién después generar el acceso de las vendedoras reales.
+
 ## ✅ FIX DESPLEGADO — El ciclo de acceso de usuarios (PIN) estaba roto de punta a punta (2026-09-09)
 
 **Reportado:** `eduardo pruebas` con membership visible, `ACCESO ACTIVO`, `EN
