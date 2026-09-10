@@ -228,6 +228,46 @@ const TB = 't-e2e-otro-negocio';
   const samePhoneNewUser = await callFn('registerDevice', { deviceId: 'telefono-corporativo-1-reasignado', tenantId: TA, label: 'Moto G Bodeguita' }, asesorToken);
   check('el MISMO telefono queda usable por otra persona con identidad nueva', samePhoneNewUser.result?.status === 'active', JSON.stringify(samePhoneNewUser.error || {}));
 
+  // --- 12. EL HUECO QUE DEJO PASAR LA REGRESION ----------------------
+  // La seccion 10 verificaba que regenerar sobre una credencial desubicada
+  // fuera ALLOW y que el indice quedara repuntado... pero NUNCA intentaba
+  // entrar con el PIN nuevo. Justo ahi estaba el bug: el indice apuntaba a la
+  // membership actual y la credencial seguia en el doc viejo, asi que el login
+  // no la encontraba y respondia "Usuario o PIN incorrecto" con un PIN recien
+  // generado. Este bloque entra DESPUES de regenerar, que es lo que de verdad
+  // le importa al vendedor.
+  console.log('\n=== 12. Login con el PIN RECIEN generado sobre una credencial desubicada ===');
+  const pinStale = staleGen.result?.pin;
+  const loginAfterStaleRegen = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pinStale });
+  check('el PIN recien generado ENTRA (regresion del PIN nuevo que no servia)', !!loginAfterStaleRegen.result?.customToken, JSON.stringify(loginAfterStaleRegen.error || {}));
+  const pin3AfterStale = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pin3 });
+  check('el PIN anterior quedo invalidado', !!pin3AfterStale.error && !pin3AfterStale.result);
+
+  // La credencial tiene que haber quedado en su lugar canonico y el indice
+  // apuntando ahi mismo: una sola fuente de verdad, no dos mitades que se
+  // contradicen.
+  const canonCred = await db.collection('vendor_credentials').doc(newId).get();
+  check('la credencial quedo en su lugar canonico (vendor_credentials/{membershipId})', canonCred.exists);
+  check('la credencial vieja se borro (no quedan dos)', !(await db.collection('vendor_credentials').doc('StaleMembershipId123').get()).exists);
+  const idxDoc = await db.collection('login_handles').doc(`${TA}_${handle}`).get();
+  check('el indice guarda credDocId apuntando a la credencial real', idxDoc.data()?.credDocId === newId, `credDocId=${idxDoc.data()?.credDocId}`);
+  check('el indice guarda authUid (el unico id que no cambia)', idxDoc.data()?.authUid === vendorUid, `authUid=${idxDoc.data()?.authUid}`);
+
+  // Entrar dos veces mas seguidas = recargar la pagina / volver a entrar tras
+  // cerrar sesion. No debe degradarse.
+  const reload1 = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pinStale });
+  const reload2 = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pinStale });
+  check('login repetido (recargar pagina / volver a entrar) sigue funcionando', !!reload1.result?.customToken && !!reload2.result?.customToken);
+
+  // Y si el indice vuelve a quedar roto por cualquier motivo, el login se
+  // recupera por loginHandle/authUid en vez de decir "PIN incorrecto".
+  console.log('\n=== 13. Indice roto a proposito: el login se recupera solo ===');
+  await db.collection('login_handles').doc(`${TA}_${handle}`).set({ tenantId: TA, membershipId: 'IdQueNoExiste999', credDocId: 'TampocoExiste999' }, { merge: true });
+  const recovered = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pinStale });
+  check('con el indice apuntando a la nada, el login igual entra (red de seguridad)', !!recovered.result?.customToken, JSON.stringify(recovered.error || {}));
+  const wrongTenant = await callFn('loginWithPin', { tenantId: TB, loginHandle: handle, pin: pinStale });
+  check('esa red de seguridad NO cruza tenants', !!wrongTenant.error && !wrongTenant.result, JSON.stringify(wrongTenant.result || {}));
+
   console.log(`\n=== RESULTADO: ${pass} OK, ${failures.length} fallos ===`);
   if (failures.length) {
     failures.forEach((f) => console.log(`  FALLO: ${f}`));

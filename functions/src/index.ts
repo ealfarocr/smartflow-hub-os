@@ -2595,7 +2595,16 @@ export const acceptTenantInvite = onCall({ maxInstances: 10 }, async (request) =
         if (credData.loginHandle) {
           batch.set(
             db.collection('login_handles').doc(`${tenantId}_${credData.loginHandle}`),
-            { tenantId, membershipId: targetId, repointedAt: FieldValue.serverTimestamp() },
+            {
+              tenantId,
+              membershipId: targetId,
+              // credDocId y authUid van en el MISMO batch que mueve la
+              // credencial: el índice nunca puede quedar apuntando a un doc
+              // que no existe (ver syncAccessIndex / loginWithPin).
+              credDocId: targetId,
+              authUid: uid,
+              repointedAt: FieldValue.serverTimestamp(),
+            },
             { merge: true },
           );
         }
@@ -2732,17 +2741,117 @@ async function claimLoginHandle(tenantId: string, rawName: string | undefined, m
  * membership se re-indexó después de generar el PIN, esto corrige el índice
  * en el momento en que un Admin vuelve a tocar el acceso de esa persona.
  */
-async function repointLoginHandle(tenantId: string, loginHandle: string, membershipId: string): Promise<void> {
+async function syncAccessIndex(opts: {
+  tenantId: string;
+  loginHandle: string;
+  membershipId: string;
+  authUid: string;
+  credDocId: string;
+}): Promise<void> {
+  const { tenantId, loginHandle, membershipId, authUid, credDocId } = opts;
   const handleRef = db.collection('login_handles').doc(`${tenantId}_${loginHandle}`);
   const snap = await handleRef.get();
-  if (!snap.exists) {
-    await handleRef.set({ tenantId, membershipId, createdAt: FieldValue.serverTimestamp() });
-    return;
+  const payload = {
+    tenantId,
+    membershipId,
+    // REGRESIÓN CORREGIDA: la versión anterior de este helper solo repuntaba
+    // `membershipId`, y loginWithPin derivaba el doc de credencial DE ESE
+    // campo. Al repuntarlo a la membership actual sin mover la credencial, el
+    // login quedaba buscando vendor_credentials/{idActual}, que no existía, y
+    // respondía "Usuario o PIN incorrecto" con un PIN recién generado. Ahora
+    // el índice guarda explícitamente DÓNDE está la credencial (credDocId) y
+    // a QUÉ cuenta de Auth pertenece (authUid, el único identificador que no
+    // cambia nunca), así el login no depende de ningún ID mutable.
+    authUid,
+    credDocId,
+    updatedAt: FieldValue.serverTimestamp(),
+    ...(snap.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
+  };
+  await handleRef.set(payload, { merge: true });
+  if (snap.exists && (snap.data()!.membershipId !== membershipId || snap.data()!.credDocId !== credDocId)) {
+    console.log('ACCESS_INDEX_SYNCED', { tenantId, loginHandle, membershipId, credDocId });
   }
-  if (snap.data()!.membershipId !== membershipId) {
-    await handleRef.update({ membershipId, repointedAt: FieldValue.serverTimestamp() });
-    console.log('LOGIN_HANDLE_REPOINTED', { tenantId, loginHandle, membershipId });
+}
+
+/**
+ * Resuelve DÓNDE está la credencial de un loginHandle, sin depender de
+ * ningún ID que pueda cambiar.
+ *
+ * Orden: (1) el puntero explícito que guarda el índice (credDocId), (2) el
+ * lugar canónico = ID actual de la membership, (3) búsqueda por loginHandle
+ * dentro del tenant, (4) búsqueda por authUid. Los pasos 3 y 4 son la red de
+ * seguridad: si el índice quedó desfasado, el login NO debe fallar como si el
+ * PIN estuviera mal — eso fue exactamente el bug del PIN recién generado que
+ * no dejaba entrar.
+ *
+ * La consulta usa un solo campo de igualdad (sin índice compuesto) y el
+ * tenantId se verifica en memoria: loginHandle es único POR TENANT, no
+ * globalmente, así que filtrar por tenant es obligatorio para no cruzar
+ * negocios.
+ */
+async function resolveCredRefForLogin(
+  tenantId: string,
+  loginHandle: string,
+  handleData: admin.firestore.DocumentData,
+): Promise<admin.firestore.DocumentReference | null> {
+  const candidates = [handleData.credDocId, handleData.membershipId].filter(
+    (id): id is string => typeof id === 'string' && id.length > 0,
+  );
+  for (const id of candidates) {
+    const ref = db.collection('vendor_credentials').doc(id);
+    if ((await ref.get()).exists) return ref;
   }
+
+  const pickInTenant = (snap: admin.firestore.QuerySnapshot) =>
+    snap.docs.find((d) => d.data().tenantId === tenantId);
+
+  const byHandle = pickInTenant(
+    await db.collection('vendor_credentials').where('loginHandle', '==', loginHandle).limit(10).get(),
+  );
+  if (byHandle) {
+    console.warn('VENDOR_CRED_RECOVERED_BY_HANDLE', { tenantId, loginHandle, credDocId: byHandle.id });
+    return byHandle.ref;
+  }
+
+  if (typeof handleData.authUid === 'string' && handleData.authUid) {
+    const byUid = pickInTenant(
+      await db.collection('vendor_credentials').where('authUid', '==', handleData.authUid).limit(10).get(),
+    );
+    if (byUid) {
+      console.warn('VENDOR_CRED_RECOVERED_BY_AUTHUID', { tenantId, loginHandle, credDocId: byUid.id });
+      return byUid.ref;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Deja la credencial viviendo en su lugar CANÓNICO: vendor_credentials/{id
+ * actual de la membership}. Si estaba bajo un ID viejo (porque
+ * acceptTenantInvite re-indexó la membership después de generar el PIN), la
+ * mueve en un batch atómico — nunca quedan dos credenciales activas ni cero.
+ * Devuelve el ref donde hay que escribir el PIN nuevo.
+ */
+async function normalizeCredentialLocation(
+  existingRef: admin.firestore.DocumentReference,
+  existingData: admin.firestore.DocumentData,
+  membershipId: string,
+): Promise<admin.firestore.DocumentReference> {
+  if (existingRef.id === membershipId) return existingRef;
+
+  const canonicalRef = db.collection('vendor_credentials').doc(membershipId);
+  const batch = db.batch();
+  batch.set(canonicalRef, {
+    ...existingData,
+    membershipId,
+    remappedFrom: existingRef.id,
+    remappedAt: FieldValue.serverTimestamp(),
+  });
+  batch.delete(existingRef);
+  await batch.commit();
+  console.log('VENDOR_CRED_RELOCATED', { from: existingRef.id, to: membershipId });
+  return canonicalRef;
 }
 
 /**
@@ -2828,12 +2937,14 @@ export const setVendorPin = onCall({ maxInstances: 10 }, async (request) => {
   if (transition.mode === 'regenerate') {
     // La cuenta técnica y el loginHandle ya existen: solo cambia el PIN. El
     // doc de credencial puede estar guardado bajo un ID de membership viejo
-    // (ver resolveVendorCredential) — se reusa ESE ref y se repunta el
-    // índice al ID actual, así el desfase se cura al primer uso.
-    credRef = existingCred!.ref;
+    // (ver resolveVendorCredential); se MUEVE a su lugar canónico antes de
+    // escribir el PIN nuevo. La versión anterior repuntaba solo el índice y
+    // dejaba la credencial donde estaba: el login quedaba buscándola en el ID
+    // nuevo, no la encontraba, y un PIN recién generado daba "Usuario o PIN
+    // incorrecto".
     authUid = existingCred!.data.authUid;
     loginHandle = existingCred!.data.loginHandle;
-    await repointLoginHandle(tenantId, loginHandle, membershipId);
+    credRef = await normalizeCredentialLocation(existingCred!.ref, existingCred!.data, membershipId);
   } else if (transition.mode === 'attach') {
     // Ya hay un uid real de Firebase Auth (esta persona entró alguna vez)
     // pero no hay credencial de PIN: se le engancha una credencial nueva a
@@ -2908,6 +3019,12 @@ export const setVendorPin = onCall({ maxInstances: 10 }, async (request) => {
     failedAttempts: 0,
     lockedUntil: null,
   }, { merge: true });
+
+  // El índice se sincroniza DESPUÉS de que la credencial ya está escrita en su
+  // lugar canónico, nunca antes: así nunca queda apuntando a un doc que no
+  // existe (exactamente la regresión que dejó sin acceso a los dos usuarios de
+  // USADITOS con un PIN recién generado).
+  await syncAccessIndex({ tenantId, loginHandle, membershipId, authUid, credDocId: credRef.id });
 
   // Al REGENERAR, el PIN anterior ya quedó inválido (se sobreescribió el
   // hash/salt). Además se cortan las sesiones ya abiertas de esa cuenta: si
@@ -3109,8 +3226,22 @@ export const loginWithPin = onCall({ maxInstances: 10 }, async (request) => {
     verifyPinHash(pin, DUMMY_PIN_SALT, DUMMY_PIN_HASH);
     throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
   }
-  const membershipId = handleSnap.data()!.membershipId as string;
-  const credRef = db.collection('vendor_credentials').doc(membershipId);
+  const handleData = handleSnap.data()!;
+  const membershipId = handleData.membershipId as string;
+
+  // ÚNICA FUENTE DE VERDAD: loginHandle -> credencial -> authUid -> membership.
+  // Ya NO se deriva el doc de credencial del ID de la membership, que es
+  // mutable (acceptTenantInvite lo cambia en el primer acceso). Se intenta, en
+  // orden: el puntero explícito del índice (credDocId), el lugar canónico
+  // (= ID actual de la membership), y por último una búsqueda por loginHandle
+  // dentro del tenant — así el login funciona aunque el índice haya quedado
+  // viejo por cualquier motivo, en vez de responder "Usuario o PIN incorrecto"
+  // sobre una credencial que sí existe.
+  const credRef = await resolveCredRefForLogin(tenantId, handle, handleData);
+  if (!credRef) {
+    verifyPinHash(pin, DUMMY_PIN_SALT, DUMMY_PIN_HASH);
+    throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
+  }
 
   const result = await db.runTransaction(async (tx) => {
     const credSnap = await tx.get(credRef);
