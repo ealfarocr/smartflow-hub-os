@@ -1,15 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useUserStore } from '@/stores/userStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { User, Role } from '@/types';
-import { Plus, Edit2, UserX, UserCheck, Search, Filter, Loader2, Link as LinkIcon, Send, Mail, Crown, ShieldCheck, Wrench, Eye, KeyRound, Smartphone, type LucideIcon } from 'lucide-react';
+import { Plus, Edit2, UserX, UserCheck, Search, Filter, Loader2, Send, Mail, Crown, ShieldCheck, Wrench, Eye, KeyRound, Smartphone, type LucideIcon } from 'lucide-react';
 import { ALL_TOOL_KEYS, TOOL_LABELS, ADMIN_ONLY_TOOLS, TOOL_PRESETS, getEffectiveTools, getDefaultToolsForRole, ToolKey } from '@/utils/permissions';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 import { DeviceManagerModal } from './DeviceManagerModal';
 import { VendorAccessModal } from './VendorAccessModal';
 import type { VendorAccessData } from './vendorAccessHelpers';
 import { buildAccessLink, displayMemberEmail } from './vendorAccessHelpers';
+import { primaryActionMeta, accessStateLabel, hasResolvedAccess, type TenantAccessEntry } from './accessActions';
 import { formatLastSeen } from '@/utils/formatLastSeen';
 
 export const UsersManagementView = () => {
@@ -23,6 +24,55 @@ export const UsersManagementView = () => {
       return () => unsubscribe();
     }
   }, [activeMembership?.tenantId, subscribe]);
+
+  // CICLO DE ACCESO — estado REAL de cada persona, resuelto por el backend
+  // (getTenantAccessOverview) con la misma máquina de estados que aplica
+  // setVendorPin. Vive acá y no se calcula en el cliente a propósito: el
+  // estado depende de vendor_credentials, que las Rules no dejan leer desde
+  // el cliente ("allow read, write: if false"), y porque duplicar las reglas
+  // acá es exactamente lo que producía botones que el backend rechazaba.
+  const [accessMap, setAccessMap] = useState<Record<string, TenantAccessEntry>>({});
+  const [accessLoaded, setAccessLoaded] = useState(false);
+
+  // Fetch puro, sin setState adentro: así el efecto de abajo solo escribe
+  // estado DESPUÉS del await (y solo si el componente sigue montado), en vez
+  // de disparar el lint react-hooks/set-state-in-effect con renders en
+  // cascada. Si falla, devuelve {} — sin overview no se inventan acciones:
+  // las filas quedan sin botón de acceso (ver hasResolvedAccess) en vez de
+  // ofrecer algo que el backend podría rechazar.
+  const fetchAccessOverview = useCallback(async (tenantId: string): Promise<Record<string, TenantAccessEntry>> => {
+    try {
+      const fn = httpsCallable<{ tenantId: string }, { tenantId: string; access: Record<string, TenantAccessEntry> }>(getFunctions(), 'getTenantAccessOverview');
+      const res = await fn({ tenantId });
+      return res.data.access || {};
+    } catch {
+      return {};
+    }
+  }, []);
+
+  useEffect(() => {
+    const tenantId = activeMembership?.tenantId;
+    if (!tenantId) return;
+    let alive = true;
+    (async () => {
+      const access = await fetchAccessOverview(tenantId);
+      if (!alive) return;
+      setAccessMap(access);
+      setAccessLoaded(true);
+    })();
+    return () => { alive = false; };
+  }, [activeMembership?.tenantId, fetchAccessOverview]);
+
+  // Se llama después de cada acción de acceso (generar/regenerar/reactivar)
+  // para que la fila muestre inmediatamente el estado nuevo y no una acción
+  // que ya no corresponde.
+  const refreshAccess = async () => {
+    const tenantId = activeMembership?.tenantId;
+    if (!tenantId) return;
+    const access = await fetchAccessOverview(tenantId);
+    setAccessMap(access);
+    setAccessLoaded(true);
+  };
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [deviceModalUser, setDeviceModalUser] = useState<{ userId: string; name: string } | null>(null);
@@ -113,7 +163,7 @@ export const UsersManagementView = () => {
   // Checkpoint de seguridad: el backend devuelve loginHandle (usuario
   // público, ej. "michelle"), nunca el membershipId — es lo único que el
   // link de enrolamiento y el propio vendedor van a conocer. Compartido por
-  // el botón 🔑 dedicado (handleGeneratePin, con confirm) y por "Generar
+  // la acción principal de la fila y por "Generar
   // PIN" dentro del modal de 🔗 (sin confirm — ya es una acción explícita
   // e intencional adentro de un modal que se abrió a propósito).
   const callSetVendorPin = async (id: string, name: string, tenantId: string) => {
@@ -124,20 +174,6 @@ export const UsersManagementView = () => {
     // forma práctica, sin botones de copiar. VendorAccessModal deja copiar
     // enlace/PIN/mensaje completo para mandarlo por WhatsApp.
     setVendorAccess({ membershipId: id, name, loginHandle, pin, link: buildAccessLink(loginHandle, tenantId, name), pinConfigured: true });
-  };
-
-  const handleGeneratePin = async (id: string, name: string, tenantId: string) => {
-    if (!window.confirm(`¿Generar PIN de acceso para ${name}?\n\nSi ya tiene uno, se reemplaza por uno nuevo.`)) return;
-    setGeneratingPinId(id);
-    try {
-      await callSetVendorPin(id, name, tenantId);
-      addToast('PIN generado', 'success');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Error al generar el PIN';
-      addToast(message, 'error');
-    } finally {
-      setGeneratingPinId(null);
-    }
   };
 
   // FIX URGENTE — el ícono 🔗 copiaba un link genérico
@@ -361,11 +397,18 @@ export const UsersManagementView = () => {
           ? 'bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400'
           : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
       }`}>
-        {u.status === 'active' ? 'Acceso Activo' : u.status === 'pending' ? 'Pendiente' : u.status === 'draft' ? 'Borrador' : u.status === 'prepared' ? 'Preparado' : 'Suspendido'}
+        {accessLoaded && accessMap[u.id] ? accessStateLabel(accessMap[u.id].state) : (u.status === 'active' ? 'Acceso Activo' : u.status === 'pending' ? 'Pendiente' : u.status === 'draft' ? 'Borrador' : u.status === 'prepared' ? 'Preparado' : 'Suspendido')}
       </span>
       {presenceMap[u.userId] && (
         <span className="text-[10px] text-slate-400 font-medium ml-1">
-          Vía: {presenceMap[u.userId].authProvider === 'google.com' ? 'Google SSO' : 'Email/Password'}
+          {/* "Vía: Email/Password" era engañoso para los vendedores por PIN:
+              su cuenta técnica interna usa un password aleatorio que NADIE
+              conoce ni puede usar (lo genera setVendorPin). Lo que realmente
+              usan para entrar es enlace + PIN + dispositivo reconocido, y eso
+              es lo único que un Owner necesita leer acá. */}
+          Vía: {accessMap[u.id]?.hasPinAccess
+            ? 'PIN + dispositivo'
+            : presenceMap[u.userId].authProvider === 'google.com' ? 'Google SSO' : 'Correo y contraseña'}
         </span>
       )}
     </div>
@@ -388,65 +431,182 @@ export const UsersManagementView = () => {
     );
   };
 
-  const renderActions = (u: Row) => (
-    <div className="flex justify-end gap-1">
-      {u.status === 'prepared' ? (
-        <button
-          onClick={() => handleAddEmail(u.id, u.name)}
-          disabled={convertingId === u.id}
-          className="text-slate-400 hover:text-violet-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
-          title="Agregar email"
-        >
-          {convertingId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+  // ACCIONES DEL CICLO DE ACCESO — una sola acción PRINCIPAL por fila, la
+  // que el backend ya dijo que corresponde (accessMap[u.id].primaryAction).
+  // Antes esta fila mezclaba hasta 5 íconos con significados solapados (🔗
+  // "ver enlace", 🔑 "generar PIN" solo visible en prepared/draft, ✉️, ➤,
+  // activar/desactivar) y el Owner tenía que adivinar cuál aplicaba — y en el
+  // caso reportado el único ícono disponible abría un modal que decía "PIN no
+  // configurado" y cuyo botón el backend rechazaba.
+  const handlePrimaryAction = async (u: Row) => {
+    const entry = accessMap[u.id];
+    if (!hasResolvedAccess(entry) || !activeMembership?.tenantId) return;
+    const tenantId = activeMembership.tenantId;
+
+    switch (entry.primaryAction) {
+      case 'copy':
+        await handleViewAccess(u.id, u.name, tenantId);
+        return;
+
+      case 'generate': {
+        if (!window.confirm(`¿Generar el acceso de ${u.name}?\n\nSe crea su usuario y un PIN nuevo para que entre desde su teléfono.`)) return;
+        setGeneratingPinId(u.id);
+        try {
+          await callSetVendorPin(u.id, u.name, tenantId);
+          addToast('Acceso generado', 'success');
+          await refreshAccess();
+        } catch (err) {
+          addToast(err instanceof Error ? err.message : 'No se pudo generar el acceso', 'error');
+        } finally {
+          setGeneratingPinId(null);
+        }
+        return;
+      }
+
+      case 'reactivate': {
+        if (!window.confirm(`¿Reactivar a ${u.name}?\n\nVuelve a poder entrar con el acceso que ya tenía. Su historial se conserva.`)) return;
+        setGeneratingPinId(u.id);
+        try {
+          await updateMemberStatus(u.id, true);
+          addToast('Usuario reactivado', 'success');
+          await refreshAccess();
+        } catch (err) {
+          addToast(err instanceof Error ? err.message : 'No se pudo reactivar', 'error');
+        } finally {
+          setGeneratingPinId(null);
+        }
+        return;
+      }
+
+      case 'reactivate-and-generate': {
+        // Reactivar a alguien que no tiene acceso lo dejaría activo y sin
+        // forma de entrar — los dos pasos van juntos, en ese orden (el
+        // backend rechaza generar sobre un suspendido, a propósito).
+        if (!window.confirm(`¿Reactivar a ${u.name} y generarle un acceso nuevo?`)) return;
+        setGeneratingPinId(u.id);
+        try {
+          await updateMemberStatus(u.id, true);
+          await callSetVendorPin(u.id, u.name, tenantId);
+          addToast('Usuario reactivado con acceso nuevo', 'success');
+          await refreshAccess();
+        } catch (err) {
+          addToast(err instanceof Error ? err.message : 'No se pudo completar la reactivación', 'error');
+        } finally {
+          setGeneratingPinId(null);
+        }
+        return;
+      }
+
+      case 'review':
+      default:
+        handleOpenModal(u);
+        return;
+    }
+  };
+
+  const handleRegenerateAccess = async (u: Row) => {
+    if (!activeMembership?.tenantId) return;
+    if (!window.confirm(`¿Generar un acceso NUEVO para ${u.name}?\n\nEl PIN anterior deja de funcionar y, si tenía la sesión abierta, se cierra: tendrá que entrar otra vez con el PIN nuevo.`)) return;
+    setGeneratingPinId(u.id);
+    try {
+      await callSetVendorPin(u.id, u.name, activeMembership.tenantId);
+      addToast('Acceso regenerado — el PIN anterior ya no sirve', 'success');
+      await refreshAccess();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'No se pudo regenerar el acceso', 'error');
+    } finally {
+      setGeneratingPinId(null);
+    }
+  };
+
+  const PRIMARY_TONE_CLASS: Record<string, string> = {
+    primary: 'bg-[#1877F2] text-white hover:bg-[#1568d8]',
+    neutral: 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600',
+    warning: 'bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300',
+  };
+
+  const renderActions = (u: Row) => {
+    const entry = accessMap[u.id];
+    const busy = generatingPinId === u.id || loadingAccessId === u.id;
+    const meta = hasResolvedAccess(entry) ? primaryActionMeta(entry.primaryAction) : null;
+    // El toggle de desactivar/reactivar NO se repite cuando reactivar ya es la
+    // acción principal — era una de las duplicidades que confundían.
+    const showStatusToggle = u.status !== 'draft' && u.status !== 'prepared'
+      && entry?.primaryAction !== 'reactivate' && entry?.primaryAction !== 'reactivate-and-generate';
+
+    return (
+      <div className="flex justify-end items-center gap-1 flex-wrap">
+        {meta && (
+          <button
+            onClick={() => handlePrimaryAction(u)}
+            disabled={busy}
+            title={meta.hint}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-40 inline-flex items-center gap-1.5 ${PRIMARY_TONE_CLASS[meta.tone]}`}
+          >
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+            {meta.label}
+          </button>
+        )}
+
+        {hasResolvedAccess(entry) && entry.canRegenerate && (
+          <button
+            onClick={() => handleRegenerateAccess(u)}
+            disabled={busy}
+            className="text-slate-400 hover:text-amber-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
+            title="Regenerar acceso (el PIN anterior deja de funcionar)"
+          >
+            <KeyRound className="w-4 h-4" />
+          </button>
+        )}
+
+        {u.status === 'prepared' && (
+          <button
+            onClick={() => handleAddEmail(u.id, u.name)}
+            disabled={convertingId === u.id}
+            className="text-slate-400 hover:text-violet-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
+            title="Agregar correo (para invitarlo por email en vez de PIN)"
+          >
+            {convertingId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+          </button>
+        )}
+
+        {u.status === 'draft' && (
+          <button
+            onClick={() => handleSendInvitation(u.id, u.email)}
+            disabled={sendingInviteId === u.id}
+            className="text-slate-400 hover:text-emerald-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
+            title="Enviar invitación por correo"
+          >
+            {sendingInviteId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          </button>
+        )}
+
+        {showStatusToggle && (
+          <button
+            onClick={() => toggleStatus(u.id, u.isActive, u.name)}
+            className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"
+            title={u.isActive ? 'Desactivar usuario (conserva su historial)' : 'Reactivar usuario'}
+          >
+            {u.isActive ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+          </button>
+        )}
+
+        {u.userId && (
+          <button
+            onClick={() => setDeviceModalUser({ userId: u.userId, name: u.name })}
+            className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"
+            title="Ver dispositivos / liberar teléfono"
+          >
+            <Smartphone className="w-4 h-4" />
+          </button>
+        )}
+
+        <button onClick={() => handleOpenModal(u)} className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title="Editar">
+          <Edit2 className="w-4 h-4" />
         </button>
-      ) : u.status === 'draft' ? (
-        <button
-          onClick={() => handleSendInvitation(u.id, u.email)}
-          disabled={sendingInviteId === u.id}
-          className="text-slate-400 hover:text-emerald-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
-          title="Enviar invitación"
-        >
-          {sendingInviteId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-        </button>
-      ) : activeMembership?.tenantId ? (
-        <button
-          onClick={() => handleViewAccess(u.id, u.name, activeMembership.tenantId)}
-          disabled={loadingAccessId === u.id}
-          className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
-          title="Ver enlace de acceso"
-        >
-          {loadingAccessId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <LinkIcon className="w-4 h-4" />}
-        </button>
-      ) : null}
-      {(u.status === 'prepared' || u.status === 'draft') && activeMembership?.tenantId && (
-        <button
-          onClick={() => handleGeneratePin(u.id, u.name, activeMembership.tenantId)}
-          disabled={generatingPinId === u.id}
-          className="text-slate-400 hover:text-amber-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
-          title="Generar PIN de acceso (sin email)"
-        >
-          {generatingPinId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-        </button>
-      )}
-      {u.status !== 'draft' && u.status !== 'prepared' && (
-        <button onClick={() => toggleStatus(u.id, u.isActive, u.name)} className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title={u.isActive ? 'Desactivar / Suspender' : 'Reactivar'}>
-          {u.isActive ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
-        </button>
-      )}
-      {u.status === 'active' && u.userId && (
-        <button
-          onClick={() => setDeviceModalUser({ userId: u.userId, name: u.name })}
-          className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50"
-          title="Ver dispositivos"
-        >
-          <Smartphone className="w-4 h-4" />
-        </button>
-      )}
-      <button onClick={() => handleOpenModal(u)} className="text-slate-400 hover:text-[#1877F2] p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50" title="Editar">
-        <Edit2 className="w-4 h-4" />
-      </button>
-    </div>
-  );
+      </div>
+    );
+  };
 
   const renderGroupHeaderLabel = (group: { title: string; members: Row[] }) => (
     <div className="flex items-center gap-2">
@@ -833,7 +993,10 @@ export const UsersManagementView = () => {
               ? async () => {
                   try {
                     await callSetVendorPin(vendorAccess.membershipId, vendorAccess.name, activeMembership.tenantId);
-                    addToast('PIN generado', 'success');
+                    addToast('Acceso generado', 'success');
+                    // La fila tiene que reflejar el estado nuevo al cerrar el
+                    // modal, no la acción que correspondía antes de generarlo.
+                    await refreshAccess();
                   } catch (err) {
                     addToast(err instanceof Error ? err.message : 'Error al generar el PIN', 'error');
                   }

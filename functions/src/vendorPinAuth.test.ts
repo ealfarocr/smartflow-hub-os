@@ -103,12 +103,35 @@ describe('checkPinLoginAllowed — reutilización de teléfonos corporativos (lo
     expect(result.reason).toBe('not-active');
   });
 
-  it('membership en cualquier otro estado no-activo (prepared/draft/pending) -> DENY', () => {
-    for (const status of ['prepared', 'draft', 'pending']) {
+  it('prepared/draft -> DENY (no tienen método de acceso configurado)', () => {
+    for (const status of ['prepared', 'draft']) {
       const result = checkPinLoginAllowed({ membershipExists: true, membershipStatus: status });
       expect(result.allowed).toBe(false);
       expect(result.reason).toBe('not-active');
     }
+  });
+
+  // Este test antes afirmaba lo contrario ('pending' -> DENY) y con eso
+  // codificaba un bug real: setVendorPin deja la membership en 'pending' a
+  // propósito, porque es el PRIMER signInWithCustomToken el que dispara
+  // acceptTenantInvite y la activa. Exigir 'active' en el login hacía que ese
+  // primer acceso se denegara y la membership nunca llegara a 'active' —
+  // ningún vendedor nuevo podía entrar jamás.
+  it('pending SIN userId -> ALLOW: es el primer acceso, el que activa la membership', () => {
+    const result = checkPinLoginAllowed({ membershipExists: true, membershipStatus: 'pending', membershipUserId: null });
+    expect(result.allowed).toBe(true);
+  });
+
+  it('pending CON userId -> DENY: ya fue activada alguna vez, este estado no es un primer acceso', () => {
+    const result = checkPinLoginAllowed({ membershipExists: true, membershipStatus: 'pending', membershipUserId: 'uid-1' });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('not-active');
+  });
+
+  it('suspendido CON userId -> DENY (desactivar conserva el userId, así que no se cuela por la puerta de pending)', () => {
+    const result = checkPinLoginAllowed({ membershipExists: true, membershipStatus: 'suspended', membershipUserId: 'uid-1' });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('not-active');
   });
 
   it('membership inexistente -> DENY con motivo distinto (no-membership, no not-active)', () => {

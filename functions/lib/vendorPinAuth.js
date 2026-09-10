@@ -43,12 +43,26 @@ function checkVendorPinAuth(input) {
  * puntuales después (sendWhatsappMessage, claimConversation, etc. ya exigen
  * status==='active'), pero nunca el login en sí. Esta es la única pieza que
  * realmente le corta el acceso desde la puerta.
+ *
+ * FIX 2026-09-09 — el chequeo anterior exigía status==='active' a secas, y
+ * eso rompía el PRIMER acceso de todo vendedor nuevo: setVendorPin deja la
+ * membership en 'pending' a propósito (con el email interno), porque es el
+ * primer signInWithCustomToken el que dispara acceptTenantInvite y la
+ * activa. Con la regla vieja ese primer login se denegaba y la membership
+ * nunca llegaba a 'active' — nadie nuevo podía entrar nunca.
+ *
+ * 'pending' se acepta SOLO mientras la membership no tenga userId, o sea
+ * mientras nadie la haya activado nunca. Desactivar NO produce ese estado
+ * (setMembershipActive escribe 'suspended' y conserva el userId), así que
+ * esto no reabre el agujero que cerró el chequeo original.
  */
 function checkPinLoginAllowed(input) {
     if (!input.membershipExists)
         return { allowed: false, reason: 'no-membership' };
-    if (input.membershipStatus !== 'active')
-        return { allowed: false, reason: 'not-active' };
-    return { allowed: true };
+    if (input.membershipStatus === 'active')
+        return { allowed: true };
+    if (input.membershipStatus === 'pending' && !input.membershipUserId)
+        return { allowed: true };
+    return { allowed: false, reason: 'not-active' };
 }
 //# sourceMappingURL=vendorPinAuth.js.map

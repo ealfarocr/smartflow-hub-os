@@ -36,13 +36,21 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.loginWithPin = exports.getVendorAccessInfo = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
+exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.loginWithPin = exports.getTenantAccessOverview = exports.getVendorAccessInfo = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const crypto = __importStar(require("crypto"));
+// FieldValue/Timestamp desde el entry point moderno de firebase-admin. Misma
+// clase y mismo comportamiento que admin.firestore.FieldValue en producción,
+// pero el stub de firebase-admin del EMULADOR de Functions no expone los
+// estáticos sobre admin.firestore (le rompe igual a código preexistente e
+// intacto como registerDevice) — y sin esto el ciclo de acceso no se puede
+// probar de punta a punta contra emuladores. Acotado a las funciones del
+// ciclo de acceso: el resto del archivo queda como estaba.
+const firestore_1 = require("firebase-admin/firestore");
 const Busboy = __importStar(require("busboy"));
 const https_1 = require("firebase-functions/v2/https");
-const firestore_1 = require("firebase-functions/v2/firestore");
+const firestore_2 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const mail_1 = __importDefault(require("@sendgrid/mail"));
 const axios_1 = __importDefault(require("axios"));
@@ -51,6 +59,7 @@ const sendMessageAuth_1 = require("./sendMessageAuth");
 const vendorPinAuth_1 = require("./vendorPinAuth");
 const messageStatusUpdate_1 = require("./messageStatusUpdate");
 const tenantAdminAuth_1 = require("./tenantAdminAuth");
+const accessLifecycle_1 = require("./accessLifecycle");
 admin.initializeApp();
 const db = admin.firestore();
 /**
@@ -2367,8 +2376,8 @@ exports.acceptTenantInvite = (0, https_1.onCall)({ maxInstances: 10 }, async (re
                 userId: uid,
                 status: data.status === 'suspended' ? 'suspended' : 'active', // Respetar suspensión si existe
                 authProvider: request.auth.token.firebase?.sign_in_provider || 'unknown',
-                linkedAt: admin.firestore.FieldValue.serverTimestamp(),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                linkedAt: firestore_1.FieldValue.serverTimestamp(),
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
             });
             // Eliminar el documento de invitación original (ID aleatorio)
             batch.delete(doc.ref);
@@ -2388,10 +2397,36 @@ exports.acceptTenantInvite = (0, https_1.onCall)({ maxInstances: 10 }, async (re
                     const migratedIds = Array.from(new Set(includedUserIds.map((id) => (id === doc.id ? uid : id))));
                     batch.update(settingsRef, {
                         'multiAgentConfig.includedUserIds': migratedIds,
-                        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        updatedAt: firestore_1.FieldValue.serverTimestamp(),
                     });
                     console.log(`[Invites] Multi-Agente: migrado ID ${doc.id} -> ${uid} en tenant ${tenantId}`);
                 }
+            }
+            // FIX URGENTE 2026-09-09 — acá estaba el origen del desfase. Este
+            // bloque re-indexa la membership de {docId} a {uid}_{tenantId} y borra
+            // el doc original, pero vendor_credentials se guarda CON EL ID DE LA
+            // MEMBERSHIP como doc id y login_handles guarda ese mismo ID: ninguno
+            // de los dos se movía. Desde el primer acceso de cada vendedor,
+            // setVendorPin/getVendorAccessInfo no encontraban la credencial por ID
+            // (estado muerto: "PIN no configurado" + "ya tiene un método de acceso
+            // configurado") y loginWithPin leía una membership borrada y denegaba
+            // todo acceso posterior. Se mueven en el MISMO batch que la membership,
+            // así no puede volver a quedar a medias.
+            const oldCredRef = db.collection('vendor_credentials').doc(doc.id);
+            const oldCredSnap = await oldCredRef.get();
+            if (oldCredSnap.exists) {
+                const credData = oldCredSnap.data();
+                batch.set(db.collection('vendor_credentials').doc(targetId), {
+                    ...credData,
+                    membershipId: targetId,
+                    remappedFrom: doc.id,
+                    remappedAt: firestore_1.FieldValue.serverTimestamp(),
+                });
+                batch.delete(oldCredRef);
+                if (credData.loginHandle) {
+                    batch.set(db.collection('login_handles').doc(`${tenantId}_${credData.loginHandle}`), { tenantId, membershipId: targetId, repointedAt: firestore_1.FieldValue.serverTimestamp() }, { merge: true });
+                }
+                console.log('[Invites] Acceso por PIN re-indexado', { from: doc.id, to: targetId, tenantId });
             }
         }
         else {
@@ -2399,7 +2434,7 @@ exports.acceptTenantInvite = (0, https_1.onCall)({ maxInstances: 10 }, async (re
             batch.update(targetRef, {
                 userId: uid,
                 status: data.status === 'suspended' ? 'suspended' : 'active',
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                updatedAt: firestore_1.FieldValue.serverTimestamp()
             });
         }
         linkedCount++;
@@ -2436,6 +2471,95 @@ async function assertCallerIsTenantAdmin(callerUid, tenantId) {
     const isAdminRole = m?.status === 'active' && (m.role === 'Owner' || m.role === 'Admin');
     if (!isAdminRole) {
         throw new https_1.HttpsError('permission-denied', 'Solo un Owner/Admin activo de este negocio puede hacer esto.');
+    }
+}
+/**
+ * FIX URGENTE 2026-09-09 — la credencial de PIN se guardaba (y el
+ * login_handle apuntaba) con el ID que tenía la membership EN EL MOMENTO de
+ * generar el PIN. Pero acceptTenantInvite re-indexa la membership de
+ * {docIdAleatorio} a {uid}_{tenantId} y BORRA el doc original en el primer
+ * acceso — sin mover vendor_credentials ni repuntar login_handles. Desde
+ * ese momento nada volvía a encontrarse por ID:
+ *   - getVendorAccessInfo(idActual) -> "PIN no configurado"
+ *   - setVendorPin(idActual) -> no veía credencial, caía en el guard de
+ *     prepared/draft y rechazaba: estado muerto reportado en producción.
+ *   - loginWithPin -> leía memberships/{idViejo} (borrado) y denegaba el
+ *     acceso a CUALQUIER vendedor que ya hubiera entrado una vez.
+ *
+ * La identidad estable de un acceso no es el ID de la membership (cambia)
+ * sino el uid de Firebase Auth (`authUid`, nunca cambia). Este resolvedor
+ * busca primero por ID (camino rápido, datos nuevos ya coherentes) y si no
+ * está, por authUid dentro del mismo tenant — así los datos ya desfasados
+ * en producción se resuelven solos, sin migración destructiva, y cualquier
+ * re-indexado futuro tampoco vuelve a crear un callejón sin salida.
+ */
+async function resolveVendorCredential(membershipId, membership) {
+    const directRef = db.collection('vendor_credentials').doc(membershipId);
+    const directSnap = await directRef.get();
+    if (directSnap.exists)
+        return { ref: directRef, data: directSnap.data() };
+    const authUid = membership.userId;
+    if (!authUid)
+        return null;
+    // Consulta por un solo campo de igualdad a propósito (sin índice
+    // compuesto): el email técnico incluye el tenantId, así que un authUid
+    // pertenece a un único tenant, y de todos modos se verifica acá.
+    const byUid = await db.collection('vendor_credentials').where('authUid', '==', authUid).limit(5).get();
+    const match = byUid.docs.find((d) => d.data().tenantId === membership.tenantId);
+    if (!match)
+        return null;
+    console.log('VENDOR_CRED_RESOLVED_BY_AUTHUID', {
+        membershipId, credDocId: match.id, tenantId: membership.tenantId,
+    });
+    return { ref: match.ref, data: match.data() };
+}
+/**
+ * Reserva un loginHandle libre DENTRO del tenant y lo deja apuntando a esta
+ * membership. Único por tenant, no global: "michelle" en dos negocios
+ * distintos no choca (ver login_handles/{tenantId}_{handle}). Si hay choque
+ * real dentro del mismo negocio (dos "Michelle"), agrega un sufijo numérico
+ * en vez de fallar; si la fila que choca ya es de ESTA misma membership, se
+ * reusa tal cual (idempotente — importa porque ahora setVendorPin puede
+ * llamarse varias veces sobre la misma persona).
+ */
+async function claimLoginHandle(tenantId, rawName, membershipId) {
+    const baseHandle = (0, pinAuth_1.normalizeLoginHandle)(rawName || 'vendedor');
+    if (!baseHandle)
+        throw new https_1.HttpsError('invalid-argument', 'No se pudo derivar un usuario de acceso válido del nombre.');
+    let handle = baseHandle;
+    let suffix = 1;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+        const ref = db.collection('login_handles').doc(`${tenantId}_${handle}`);
+        const snap = await ref.get();
+        if (!snap.exists) {
+            await ref.set({ tenantId, membershipId, createdAt: firestore_1.FieldValue.serverTimestamp() });
+            return handle;
+        }
+        if (snap.data().membershipId === membershipId)
+            return handle;
+        suffix += 1;
+        handle = `${baseHandle}${suffix}`;
+        if (suffix > 50)
+            throw new https_1.HttpsError('internal', 'No se pudo asignar un usuario de acceso único.');
+    }
+}
+/**
+ * Deja login_handles/{tenantId}_{handle} apuntando al ID ACTUAL de la
+ * membership. Es idempotente y se llama desde setVendorPin: si la
+ * membership se re-indexó después de generar el PIN, esto corrige el índice
+ * en el momento en que un Admin vuelve a tocar el acceso de esa persona.
+ */
+async function repointLoginHandle(tenantId, loginHandle, membershipId) {
+    const handleRef = db.collection('login_handles').doc(`${tenantId}_${loginHandle}`);
+    const snap = await handleRef.get();
+    if (!snap.exists) {
+        await handleRef.set({ tenantId, membershipId, createdAt: firestore_1.FieldValue.serverTimestamp() });
+        return;
+    }
+    if (snap.data().membershipId !== membershipId) {
+        await handleRef.update({ membershipId, repointedAt: firestore_1.FieldValue.serverTimestamp() });
+        console.log('LOGIN_HANDLE_REPOINTED', { tenantId, loginHandle, membershipId });
     }
 }
 /**
@@ -2492,38 +2616,48 @@ exports.setVendorPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
     if (!pinAuth.allowed) {
         throw new https_1.HttpsError('permission-denied', 'Solo un Owner/Admin activo de este negocio puede hacer esto.');
     }
-    const credRef = db.collection('vendor_credentials').doc(membershipId);
-    const credSnap = await credRef.get();
+    // FIX URGENTE — estado muerto real: una membership 'active' SIN credencial
+    // resoluble no podía generar PIN (el guard viejo exigía prepared/draft), y
+    // la UI ya sabía que no tenía PIN. Ahora la transición la decide la máquina
+    // de estados de accessLifecycle.ts, que es la MISMA que la UI consulta
+    // (getTenantAccessOverview) — así no se puede ofrecer un botón que esto
+    // vaya a rechazar.
+    const existingCred = await resolveVendorCredential(membershipId, membership);
+    const transition = (0, accessLifecycle_1.checkSetVendorPinTransition)({
+        status: membership.status,
+        userId: membership.userId,
+        hasCredential: !!existingCred,
+    });
+    if (!transition.allowed) {
+        throw new https_1.HttpsError('failed-precondition', transition.reason === 'suspended'
+            ? accessLifecycle_1.SUSPENDED_PIN_ERROR
+            : 'El estado de acceso de esta persona no permite generar un PIN todavía. Revisá su ficha.');
+    }
+    let credRef;
     let authUid;
     let loginHandle;
-    if (credSnap.exists) {
-        // Regeneración: la cuenta técnica y el loginHandle ya existen, solo se cambia el PIN.
-        authUid = credSnap.data().authUid;
-        loginHandle = credSnap.data().loginHandle;
+    if (transition.mode === 'regenerate') {
+        // La cuenta técnica y el loginHandle ya existen: solo cambia el PIN. El
+        // doc de credencial puede estar guardado bajo un ID de membership viejo
+        // (ver resolveVendorCredential) — se reusa ESE ref y se repunta el
+        // índice al ID actual, así el desfase se cura al primer uso.
+        credRef = existingCred.ref;
+        authUid = existingCred.data.authUid;
+        loginHandle = existingCred.data.loginHandle;
+        await repointLoginHandle(tenantId, loginHandle, membershipId);
+    }
+    else if (transition.mode === 'attach') {
+        // Ya hay un uid real de Firebase Auth (esta persona entró alguna vez)
+        // pero no hay credencial de PIN: se le engancha una credencial nueva a
+        // ESA cuenta. Nunca se crea un usuario de Auth nuevo acá — eso
+        // duplicaría la identidad y dejaría su historial colgado del uid viejo.
+        authUid = membership.userId;
+        loginHandle = await claimLoginHandle(tenantId, requestedHandle || membership.name, membershipId);
+        credRef = db.collection('vendor_credentials').doc(membershipId);
     }
     else {
-        if (membership.status !== 'prepared' && membership.status !== 'draft') {
-            throw new https_1.HttpsError('failed-precondition', 'Esta membresía ya tiene un método de acceso configurado (no es prepared/draft).');
-        }
-        // loginHandle único DENTRO del tenant — si hay choque (dos "Michelle" en
-        // el mismo negocio), se resuelve agregando un sufijo numérico
-        // determinístico en vez de fallar; el Owner puede pasar uno explícito
-        // (requestedHandle) si prefiere elegirlo a mano.
-        const baseHandle = (0, pinAuth_1.normalizeLoginHandle)(requestedHandle || membership.name || 'vendedor');
-        if (!baseHandle)
-            throw new https_1.HttpsError('invalid-argument', 'No se pudo derivar un usuario de acceso válido del nombre.');
-        loginHandle = baseHandle;
-        let suffix = 1;
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            const handleSnap = await db.collection('login_handles').doc(`${tenantId}_${loginHandle}`).get();
-            if (!handleSnap.exists)
-                break;
-            suffix += 1;
-            loginHandle = `${baseHandle}${suffix}`;
-            if (suffix > 50)
-                throw new https_1.HttpsError('internal', 'No se pudo asignar un usuario de acceso único.');
-        }
+        loginHandle = await claimLoginHandle(tenantId, requestedHandle || membership.name, membershipId);
+        credRef = db.collection('vendor_credentials').doc(membershipId);
         // toLowerCase() es obligatorio acá: membershipId es un ID auto-generado
         // de Firestore (mayúsculas/minúsculas mixtas), pero Firebase Auth
         // normaliza el email a minúsculas al crear el usuario — sin esto, el
@@ -2550,20 +2684,22 @@ exports.setVendorPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
             name: membership.name || 'Vendedor',
             email: internalEmail,
             isActive: true,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        await db.collection('login_handles').doc(`${tenantId}_${loginHandle}`).set({
-            tenantId,
-            membershipId,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
         // Mismo estado que deja sendInvitation() para el flujo por correo — el
         // primer signInWithCustomToken dispara acceptTenantInvite, que migra
         // {docId} -> {uid}_{tenantId} e includedUserIds sin lógica duplicada acá.
+        // El correo humano previo (si lo había: una invitación por email que
+        // nadie aceptó) se preserva en invitedEmail — `email` tiene que quedar
+        // con el interno porque es lo que acepta/matchea acceptTenantInvite, pero
+        // el dato del negocio no se pierde.
         await membershipRef.update({
             email: internalEmail,
+            ...(membership.email && membership.email !== internalEmail
+                ? { invitedEmail: membership.email }
+                : {}),
             status: 'pending',
-            invitedAt: admin.firestore.FieldValue.serverTimestamp(),
+            invitedAt: firestore_1.FieldValue.serverTimestamp(),
             accessMethod: 'pin',
         });
     }
@@ -2576,13 +2712,28 @@ exports.setVendorPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
         loginHandle,
         pinHash: (0, pinAuth_1.hashPin)(pin, salt),
         pinSalt: salt,
-        pinSetAt: admin.firestore.FieldValue.serverTimestamp(),
+        pinSetAt: firestore_1.FieldValue.serverTimestamp(),
         pinSetBy: request.auth.uid,
         failedAttempts: 0,
         lockedUntil: null,
     }, { merge: true });
-    console.log('VENDOR_PIN_SET', { tenantId, membershipId, setBy: request.auth.uid, regenerated: credSnap.exists });
-    return { pin, tenantId, loginHandle };
+    // Al REGENERAR, el PIN anterior ya quedó inválido (se sobreescribió el
+    // hash/salt). Además se cortan las sesiones ya abiertas de esa cuenta: si
+    // el motivo de regenerar fue un PIN filtrado o un teléfono perdido, dejar
+    // viva la sesión existente haría que el PIN nuevo no sirviera de nada. La
+    // persona vuelve a entrar con el PIN nuevo. No aplica a bootstrap/attach
+    // (no hay sesión previa que cortar en un acceso que recién se crea).
+    if (transition.mode === 'regenerate') {
+        try {
+            await admin.auth().revokeRefreshTokens(authUid);
+        }
+        catch (err) {
+            // No invalida la regeneración en sí: el PIN viejo ya no sirve igual.
+            console.warn('VENDOR_PIN_REGEN_REVOKE_TOKENS_FAILED', { membershipId, error: err.message });
+        }
+    }
+    console.log('VENDOR_PIN_SET', { tenantId, membershipId, setBy: request.auth.uid, mode: transition.mode });
+    return { pin, tenantId, loginHandle, mode: transition.mode };
 });
 /**
  * FIX URGENTE — el ícono 🔗 de "acceso" copiaba un link genérico
@@ -2624,11 +2775,99 @@ exports.getVendorAccessInfo = (0, https_1.onCall)({ maxInstances: 10 }, async (r
     if (!auth.allowed) {
         throw new https_1.HttpsError('permission-denied', 'Solo un Owner/Admin activo de este negocio puede hacer esto.');
     }
-    const credSnap = await db.collection('vendor_credentials').doc(membershipId).get();
-    if (!credSnap.exists) {
-        return { hasPinAccess: false };
+    // Resuelve también las credenciales guardadas bajo un ID de membership
+    // viejo (ver resolveVendorCredential) — antes esto devolvía
+    // hasPinAccess:false para cualquier vendedor que ya hubiera entrado una
+    // vez, y la UI mostraba "PIN no configurado" sobre alguien que sí tenía
+    // acceso y estaba trabajando.
+    const cred = await resolveVendorCredential(membershipId, membership);
+    const state = (0, accessLifecycle_1.resolveAccessState)({
+        status: membership.status,
+        userId: membership.userId,
+        hasCredential: !!cred,
+    });
+    const actions = (0, accessLifecycle_1.resolveAccessActionsFor)({
+        status: membership.status,
+        userId: membership.userId,
+        hasCredential: !!cred,
+    });
+    if (!cred) {
+        return { hasPinAccess: false, state, primaryAction: actions.primary, canRegenerate: false };
     }
-    return { hasPinAccess: true, loginHandle: credSnap.data().loginHandle };
+    return {
+        hasPinAccess: true,
+        loginHandle: cred.data.loginHandle,
+        state,
+        primaryAction: actions.primary,
+        canRegenerate: actions.canRegenerate,
+    };
+});
+/**
+ * REGLA UX del ciclo de acceso: "nunca mostrar un botón que el backend va a
+ * rechazar por una condición que la propia UI conoce". Para cumplirla, la
+ * lista de Usuarios necesita el estado de acceso REAL de cada persona antes
+ * de renderizar acciones — y ese estado depende de vendor_credentials, que
+ * el cliente no puede leer (Rules: "allow read, write: if false").
+ *
+ * Esta función lo resuelve en UNA sola llamada por tenant (no N, una por
+ * fila) y devuelve exactamente lo que la UI necesita: el estado y la acción
+ * principal que corresponde, calculados con la MISMA máquina de estados que
+ * aplica setVendorPin. Nunca devuelve pinHash/pinSalt ni el PIN.
+ */
+exports.getTenantAccessOverview = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    const { tenantId } = request.data;
+    if (!tenantId)
+        throw new https_1.HttpsError('invalid-argument', 'Falta tenantId');
+    const callerUid = request.auth.uid;
+    const [callerUserSnap, callerMembershipSnap] = await Promise.all([
+        db.collection('users').doc(callerUid).get(),
+        db.collection('memberships').doc(`${callerUid}_${tenantId}`).get(),
+    ]);
+    const isSuperAdminCaller = callerUserSnap.exists && callerUserSnap.data()?.isSuperAdmin === true;
+    const callerMembershipData = callerMembershipSnap.data();
+    // Mismo guard que el resto del ciclo de acceso: Owner/Admin activo DE ESTE
+    // tenant (el lookup ya viene scoped por tenantId, así que una membership
+    // activa en otro negocio nunca autoriza acá) o SuperAdmin.
+    const auth = (0, tenantAdminAuth_1.checkTenantAdminAuth)({
+        isSuperAdmin: isSuperAdminCaller,
+        callerMembership: callerMembershipSnap.exists && callerMembershipData
+            ? { status: callerMembershipData.status, role: callerMembershipData.role }
+            : null,
+    });
+    if (!auth.allowed) {
+        throw new https_1.HttpsError('permission-denied', 'Solo un Owner/Admin activo de este negocio puede hacer esto.');
+    }
+    const [membershipsSnap, credsSnap] = await Promise.all([
+        db.collection('memberships').where('tenantId', '==', tenantId).get(),
+        db.collection('vendor_credentials').where('tenantId', '==', tenantId).get(),
+    ]);
+    // Índice por ID de doc y por authUid — cubre las credenciales coherentes y
+    // las guardadas bajo un ID de membership ya re-indexado, sin una lectura
+    // extra por fila.
+    const credByDocId = new Map();
+    const credByAuthUid = new Map();
+    credsSnap.docs.forEach((d) => {
+        credByDocId.set(d.id, d.data());
+        if (d.data().authUid)
+            credByAuthUid.set(d.data().authUid, d.data());
+    });
+    const access = {};
+    membershipsSnap.docs.forEach((d) => {
+        const m = d.data();
+        const cred = credByDocId.get(d.id) || (m.userId ? credByAuthUid.get(m.userId) : undefined);
+        const input = { status: m.status, userId: m.userId, hasCredential: !!cred };
+        const actions = (0, accessLifecycle_1.resolveAccessActionsFor)(input);
+        access[d.id] = {
+            state: (0, accessLifecycle_1.resolveAccessState)(input),
+            primaryAction: actions.primary,
+            canRegenerate: actions.canRegenerate,
+            hasPinAccess: !!cred,
+            loginHandle: cred?.loginHandle || null,
+        };
+    });
+    return { tenantId, access };
 });
 /**
  * Acceso por PIN — el vendedor SOLO ve su nombre/usuario + PIN, nunca un
@@ -2665,13 +2904,26 @@ exports.loginWithPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
     const membershipId = handleSnap.data().membershipId;
     const credRef = db.collection('vendor_credentials').doc(membershipId);
     const result = await db.runTransaction(async (tx) => {
-        const [credSnap, membershipSnap] = await Promise.all([
-            tx.get(credRef),
-            tx.get(db.collection('memberships').doc(membershipId)),
-        ]);
+        const credSnap = await tx.get(credRef);
         if (!credSnap.exists)
             throw new https_1.HttpsError('permission-denied', pinAuth_1.PIN_LOGIN_GENERIC_ERROR);
         const cred = credSnap.data();
+        // FIX URGENTE — antes esto leía memberships/{membershipId} con el ID que
+        // guardó login_handles AL GENERAR el PIN. acceptTenantInvite re-indexa la
+        // membership a {uid}_{tenantId} y borra el doc original en el primer
+        // acceso, así que a partir de ahí ese read daba "no existe" y
+        // checkPinLoginAllowed denegaba: CUALQUIER vendedor que ya hubiera
+        // entrado una vez quedaba sin poder volver a entrar, con el mismo mensaje
+        // genérico que un PIN incorrecto (imposible de diagnosticar desde la UI).
+        // La identidad estable es authUid, así que el ID canónico de la
+        // membership es {authUid}_{tenantId}; el ID viejo se consulta solo como
+        // fallback, que es el caso del PRIMER acceso (la membership todavía está
+        // bajo su doc id original, en 'pending').
+        const canonicalRef = db.collection('memberships').doc(`${cred.authUid}_${cred.tenantId}`);
+        let membershipSnap = await tx.get(canonicalRef);
+        if (!membershipSnap.exists) {
+            membershipSnap = await tx.get(db.collection('memberships').doc(membershipId));
+        }
         const lockedUntil = cred.lockedUntil?.toMillis?.() ?? 0;
         if (lockedUntil > Date.now()) {
             throw new https_1.HttpsError('resource-exhausted', 'Demasiados intentos fallidos. Probá de nuevo en unos minutos.');
@@ -2682,7 +2934,7 @@ exports.loginWithPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
             const update = { failedAttempts: attempts };
             if (attempts >= pinAuth_1.PIN_MAX_ATTEMPTS) {
                 update.failedAttempts = 0;
-                update.lockedUntil = admin.firestore.Timestamp.fromMillis(Date.now() + pinAuth_1.PIN_LOCKOUT_MS);
+                update.lockedUntil = firestore_1.Timestamp.fromMillis(Date.now() + pinAuth_1.PIN_LOCKOUT_MS);
                 console.warn('VENDOR_PIN_LOCKED', { membershipId, tenantId: cred.tenantId });
             }
             tx.update(credRef, update);
@@ -2698,11 +2950,12 @@ exports.loginWithPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
         const pinLoginAuth = (0, vendorPinAuth_1.checkPinLoginAllowed)({
             membershipExists: membershipSnap.exists,
             membershipStatus: membershipSnap.data()?.status,
+            membershipUserId: membershipSnap.data()?.userId,
         });
         if (!pinLoginAuth.allowed) {
             throw new https_1.HttpsError('permission-denied', pinAuth_1.PIN_LOGIN_GENERIC_ERROR);
         }
-        tx.update(credRef, { failedAttempts: 0, lockedUntil: null, lastLoginAt: admin.firestore.FieldValue.serverTimestamp() });
+        tx.update(credRef, { failedAttempts: 0, lockedUntil: null, lastLoginAt: firestore_1.FieldValue.serverTimestamp() });
         return { authUid: cred.authUid, tenantId: cred.tenantId };
     });
     const customToken = await admin.auth().createCustomToken(result.authUid, { pinLogin: true });
@@ -2743,7 +2996,7 @@ exports.registerDevice = (0, https_1.onCall)({ maxInstances: 10 }, async (reques
             // deshacer esa decisión reintentando el registro (ver Fase 12).
             throw new https_1.HttpsError('permission-denied', 'Este dispositivo fue revocado. Registrá uno nuevo.');
         }
-        await deviceRef.update({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() });
+        await deviceRef.update({ lastSeenAt: firestore_1.FieldValue.serverTimestamp() });
         return { deviceId, status: 'active' };
     }
     await deviceRef.set({
@@ -2751,8 +3004,8 @@ exports.registerDevice = (0, https_1.onCall)({ maxInstances: 10 }, async (reques
         userId: uid,
         label: label || 'Dispositivo sin nombre',
         status: 'active',
-        registeredAt: admin.firestore.FieldValue.serverTimestamp(),
-        lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+        registeredAt: firestore_1.FieldValue.serverTimestamp(),
+        lastSeenAt: firestore_1.FieldValue.serverTimestamp(),
         registeredBy: uid,
         revokedAt: null,
         revokedBy: null,
@@ -2794,7 +3047,7 @@ exports.revokeDevice = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
     await assertCallerIsTenantAdmin(request.auth.uid, device.tenantId);
     await deviceRef.update({
         status: 'revoked',
-        revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+        revokedAt: firestore_1.FieldValue.serverTimestamp(),
         revokedBy: request.auth.uid,
     });
     console.log('DEVICE_REVOKED', { deviceId, tenantId: device.tenantId, revokedBy: request.auth.uid });
@@ -2856,8 +3109,8 @@ exports.setMembershipActive = (0, https_1.onCall)({ maxInstances: 10 }, async (r
     await membershipRef.update({
         status: isActive ? 'active' : 'suspended',
         ...(isActive
-            ? { reactivatedAt: admin.firestore.FieldValue.serverTimestamp(), reactivatedBy: callerUid }
-            : { deactivatedAt: admin.firestore.FieldValue.serverTimestamp(), deactivatedBy: callerUid }),
+            ? { reactivatedAt: firestore_1.FieldValue.serverTimestamp(), reactivatedBy: callerUid }
+            : { deactivatedAt: firestore_1.FieldValue.serverTimestamp(), deactivatedBy: callerUid }),
     });
     if (!isActive && membership.userId) {
         try {
@@ -3364,7 +3617,7 @@ exports.inboundEmailV2 = (0, https_2.onRequest)({
 /**
  * Trigger para enviar correos salientes vía SendGrid
  */
-exports.processOutboundEmail = (0, firestore_1.onDocumentCreated)({
+exports.processOutboundEmail = (0, firestore_2.onDocumentCreated)({
     document: 'admin_emails/{emailId}',
     memory: '512MiB'
 }, async (event) => {
@@ -3431,7 +3684,7 @@ exports.processOutboundEmail = (0, firestore_1.onDocumentCreated)({
  * TRIGGER DE AUTOMATIZACIÓN: Al registrar un nuevo negocio (Tenant)
  * Envía correo de bienvenida premium, factura real desglosada y programa el seguimiento.
  */
-exports.onTenantCreatedAutomation = (0, firestore_1.onDocumentCreated)({
+exports.onTenantCreatedAutomation = (0, firestore_2.onDocumentCreated)({
     document: 'tenants/{tenantId}',
     memory: '256MiB'
 }, async (event) => {
