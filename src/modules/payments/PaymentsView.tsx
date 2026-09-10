@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { isAdminRole } from '@/utils/permissions';
 import {
   Plus, Search, Receipt, Copy,
   ExternalLink, TrendingUp, Wallet, DollarSign,
@@ -154,10 +155,14 @@ export const PaymentsView = () => {
   const [showLocal, setShowLocal]         = useState(!savedSinpePhone && !savedBankAccounts);
   const [markPaidLink, setMarkPaidLink]   = useState<any | null>(null);
 
-  // Solo Owner/Admin pueden confirmar pagos manuales — la regla real vive en
-  // firestore.rules (isTenantAdmin), esto solo evita mostrar la acción a
-  // quien no puede usarla.
-  const canMarkAsPaid = activeMembership?.role === 'Owner' || activeMembership?.role === 'Admin';
+  // Operación comercial vs administración financiera. El Asesor Comercial SÍ
+  // trabaja acá —crea cobros, genera el enlace y se lo manda al cliente—, pero
+  // la configuración del dinero del negocio (cuenta de PayPal, SINPE, cuentas
+  // bancarias) y la confirmación de pagos son de Owner/Admin. Las reglas reales
+  // viven en firestore.rules (isTenantAdmin exige rol para escribir settings);
+  // esto evita además mostrar lo que esa persona no va a poder guardar.
+  const canAdministerFinance = isAdminRole(activeMembership?.role);
+  const canMarkAsPaid = canAdministerFinance;
 
   const fetchLinks = async () => {
     if (!activeMembership?.tenantId) return;
@@ -261,7 +266,8 @@ export const PaymentsView = () => {
         </div>
       </div>
 
-      {/* ── Config Cards Row ── */}
+      {/* ── Config Cards Row — solo administración ── */}
+      {canAdministerFinance && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
         {/* PayPal */}
@@ -426,6 +432,7 @@ export const PaymentsView = () => {
           )}
         </div>
       </div>
+      )}
 
       {/* ── Links Table ── */}
       <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">

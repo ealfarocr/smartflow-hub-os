@@ -16,8 +16,9 @@ import SupportAgent from '../support/SupportAgent'
 import { OnboardingBanner } from '../onboarding/OnboardingBanner'
 import { NotificationBell } from './NotificationBell'
 import { getEffectiveTools, ToolKey } from '@/utils/permissions'
+import { filterNavigation } from './navigationAccess'
 
-const allNavItems = [
+export const allNavItems = [
   // --- CORE SECTION ---
   // Dashboard/Mis Tareas sin toolKey a propósito: son el aterrizaje post-login,
   // nunca se restringen por herramienta (ver src/utils/permissions.ts).
@@ -27,7 +28,7 @@ const allNavItems = [
   { name: 'CRM',             href: '/crm',             icon: Users,              feature: null, toolKey: 'crm' as ToolKey },
   { name: 'Paquetes',        href: '/paquetes',        icon: FolderOpen,         feature: null },
   { name: 'Tienda Hub',      href: '/tienda',          icon: ShoppingBag,        feature: null },
-  { name: 'Mi Suscripción', href: '/suscripcion',     icon: BadgeCheck,         feature: null },
+  { name: 'Mi Suscripción', href: '/suscripcion',     icon: BadgeCheck,         feature: null, adminOnly: true },
   { name: 'Usuarios',        href: '/usuarios',        icon: Users,              feature: null, toolKey: 'usuarios' as ToolKey },
   { name: 'Configuración',   href: '/configuracion',   icon: Settings,           feature: null, toolKey: 'configuracion' as ToolKey },
   { name: 'Academia',        href: '/academia',        icon: GraduationCap,      feature: null, superAdminOnly: true },
@@ -64,19 +65,14 @@ export const MainLayout = () => {
   const isSuperAdmin = !!user?.isSuperAdmin;
   const effectiveTools = getEffectiveTools(activeMembership);
 
-  // Filtrar nav según feature flags, herramientas por usuario y rol
-  const navigation = allNavItems.filter(item => {
-    // Inbox Admin solo visible en el Hub Master (SuperAdmin sin impersonación)
-    if ((item as any).superAdminOnly) {
-      return isSuperAdmin && !impersonatedName;
-    }
-    // Si es SuperAdmin y NO está suplantando, ve todo (Hub Maestro) — el
-    // sidebar nunca fue la capa de seguridad real, pero igual se mantiene
-    // consistente con lo que las rutas (ToolGuard/FeatureGuard) ya permiten.
-    if (isSuperAdmin && !impersonatedName) return true;
-    if ('toolKey' in item && item.toolKey && !effectiveTools.includes(item.toolKey)) return false;
-    if (!item.feature) return true;
-    return !!features?.[item.feature];
+  // Filtrado del menú: ver src/components/layout/navigationAccess.ts (extraído
+  // para poder probarlo — el mismo <aside> sirve escritorio y móvil).
+  const navigation = filterNavigation(allNavItems, {
+    isSuperAdmin,
+    isImpersonating: !!impersonatedName,
+    role: activeMembership?.role,
+    effectiveTools,
+    features,
   });
 
   const [openGroups, setOpenGroups] = useState<{ [key: string]: boolean }>({

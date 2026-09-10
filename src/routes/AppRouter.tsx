@@ -117,19 +117,28 @@ export const AppRouter = () => {
                 <Route path="agenda" element={<AgendaPageView />} />
               </Route>
             </Route>
-            <Route element={<FeatureGuard feature="hasAiAgent" />}>
-              <Route element={<ToolGuard tool="ai-agent" />}>
-                <Route path="ai-agent" element={<AIAgentView />} />
+            {/* Multi-Agente / Agente IA / Auditor IA: sus PANELES son
+                administrativos, así que además del ToolGuard llevan RoleGuard —
+                defensa en profundidad, para que escribir la URL a mano tampoco
+                sirva aunque alguien marque la herramienta por error en la ficha
+                del usuario. Los procesos de fondo no se tocan: el Auditor sigue
+                analizando todo el tenant, el Agente IA sigue respondiendo y el
+                asesor sigue siendo elegible para los leads del Multi-Agente. */}
+            <Route element={<RoleGuard allowedRoles={['Admin', 'Owner']} />}>
+              <Route element={<FeatureGuard feature="hasAiAgent" />}>
+                <Route element={<ToolGuard tool="ai-agent" />}>
+                  <Route path="ai-agent" element={<AIAgentView />} />
+                </Route>
               </Route>
-            </Route>
-            <Route element={<FeatureGuard feature="hasMultiAgentPanel" />}>
-              <Route element={<ToolGuard tool="multi-agent" />}>
-                <Route path="multi-agent" element={<MultiAgentView />} />
+              <Route element={<FeatureGuard feature="hasMultiAgentPanel" />}>
+                <Route element={<ToolGuard tool="multi-agent" />}>
+                  <Route path="multi-agent" element={<MultiAgentView />} />
+                </Route>
               </Route>
-            </Route>
-            <Route element={<FeatureGuard feature="hasQualityAuditor" />}>
-              <Route element={<ToolGuard tool="auditoria" />}>
-                <Route path="auditoria" element={<QualityAuditorView />} />
+              <Route element={<FeatureGuard feature="hasQualityAuditor" />}>
+                <Route element={<ToolGuard tool="auditoria" />}>
+                  <Route path="auditoria" element={<QualityAuditorView />} />
+                </Route>
               </Route>
             </Route>
             <Route element={<FeatureGuard feature="hasPaymentLinks" />}>
@@ -139,7 +148,12 @@ export const AppRouter = () => {
             </Route>
             <Route path="tareas" element={<TasksView />} />
             <Route path="tienda" element={<MarketplaceView />} />
-            <Route path="suscripcion" element={<SubscriptionView />} />
+            {/* Mi Suscripción es administración del negocio (plan, cobros del
+                servicio): antes no tenía NINGÚN guard y cualquier vendedor podía
+                abrirla escribiendo la URL. */}
+            <Route element={<RoleGuard allowedRoles={['Admin', 'Owner']} />}>
+              <Route path="suscripcion" element={<SubscriptionView />} />
+            </Route>
             <Route path="academia" element={<AcademiaView />} />
             <Route path="partners" element={<PartnersView />} />
 
