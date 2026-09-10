@@ -2,6 +2,49 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — /login deja entrar también al equipo (usuario + PIN), sin depender del enlace
+
+- feat(UI): `/login` mantiene intacto el acceso corporativo (Google +
+  correo/contraseña) y suma abajo el bloque "Acceso del equipo" con el botón
+  "Entrar con PIN" -> `/acceso`. Antes, un vendedor con la sesión cerrada caía
+  en `/login` sin ninguna vía para volver: dependía de conservar el enlace de
+  WhatsApp, porque su cuenta técnica usa un password aleatorio que nadie conoce.
+- feat(UI): `/acceso` con dos modos — dispositivo reconocido ("Hola <nombre>" +
+  solo PIN + "Cambiar de usuario") y dispositivo nuevo (campo Usuario + PIN).
+  Antes, sin el enlace de alta mostraba "Este enlace no es válido".
+- fix(UI): "Cambiar de usuario" borra identidad Y deviceId — si solo borrara la
+  identidad, la persona siguiente heredaría la confianza del equipo anterior.
+- feat(backend): `tenantId` pasa a ser OPCIONAL en `loginWithPin`. Sin él, el
+  negocio se resuelve internamente por `loginHandle`; nunca se le pide al
+  vendedor un tenantId ni otro dato técnico. Como `loginHandle` es único por
+  tenant y no globalmente, puede haber varios candidatos: el PIN desambigua y
+  cada intento fallido cuenta en su propia credencial.
+- feat(backend): la respuesta suma `tenantId`/`loginHandle`/`displayName`
+  DESPUÉS de autenticar (lo que el cliente necesita para registrar el
+  dispositivo y recordar quién es). `displayName` sale de la membership, nunca
+  del correo técnico interno; no se devuelve `authUid` ni ids de credencial.
+- fix(seguridad): el cupo de rate limit se cuenta por usuario (`pin:<handle>`)
+  en vez de tenant+usuario — con `tenantId` opcional, la clave anterior se podía
+  esquivar alternando entre mandarlo y no mandarlo.
+- fix: el registro del dispositivo dejó de poder bloquear el login. Si el equipo
+  fue revocado por un Admin, se pide una vinculación nueva (deviceId nuevo) de
+  forma transparente. La persona ya está autenticada por PIN; el device trust es
+  confianza, no la puerta de acceso.
+- test: 65/65 E2E contra emuladores reales (antes 53) — usuario+PIN sin
+  tenantId, PIN incorrecto DENY, usuario inexistente con el MISMO error
+  genérico, no entra declarando otro tenant, desactivado DENY por esta puerta,
+  reactivado vuelve a entrar, dispositivo reconocido solo con PIN, la respuesta
+  no filtra authUid/ids/correo interno, y el rate limit bloquea. El E2E ahora
+  espera y reintenta cuando satura su propia ventana de rate limit (el script
+  hace muchos más logins seguidos que una persona real).
+- test(UI): verificado en navegador a 375x812 y 1440x900 — las dos secciones,
+  botón de 56px dentro del viewport, sin scroll horizontal, los dos modos de
+  `/acceso` y "Cambiar de usuario" limpiando identidad y deviceId.
+- deploy: `functions:loginWithPin` + `hosting:app`. Commit `9894187`, ya en
+  `main`. Bundle verificado en producción (`index-DVmho5XI.js`). Sin tocar
+  WhatsApp, Payments, Multi-Agent, IA ni el acceso con Google.
+
+
 ## 2026-09-09 — FIX URGENTE: un PIN recién generado no dejaba entrar (regresión de `2c106ca`)
 
 - fix(regresión propia, no el bug original): `repointLoginHandle` dejaba

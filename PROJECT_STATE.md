@@ -1,5 +1,93 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ DESPLEGADO — `/login` deja entrar también al equipo (usuario + PIN) (2026-09-09)
+
+**Problema:** los vendedores y Owners de USADITOS entran con usuario/PIN/
+dispositivo. Cuando se les cierra la sesión caen en `/login`, que solo ofrecía
+Google y correo/contraseña — y `/acceso` sin el enlace de alta respondía "Este
+enlace no es válido". Volver a entrar dependía de **conservar el mensaje de
+WhatsApp**. Su cuenta técnica interna usa un password aleatorio que nadie
+conoce, así que el formulario corporativo nunca fue una salida para ellos.
+
+### UI — se amplía, no se reemplaza nada
+
+- `/login` mantiene **intacto** el acceso corporativo (Google + correo/
+  contraseña) y suma abajo un bloque **ACCESO DEL EQUIPO** con el botón
+  **Entrar con PIN** → `/acceso`.
+- `/acceso` ahora tiene dos modos:
+  - **dispositivo reconocido** → `Hola <nombre>` + teclado de PIN + **Cambiar
+    de usuario**. No vuelve a pedir el usuario.
+  - **dispositivo nuevo** → campo **Usuario** + teclado de PIN.
+- "Cambiar de usuario" borra identidad **y** deviceId: si solo borrara la
+  identidad, la persona siguiente heredaría la confianza del equipo anterior.
+- El enlace `/acceso?h=&t=&n=` **sigue sirviendo** para el alta y para
+  compartir el acceso; simplemente dejó de ser la única puerta.
+
+### Backend — `tenantId` pasa a ser OPCIONAL en `loginWithPin`
+
+- Viene cuando ya se conoce (enlace de alta o dispositivo reconocido); **no
+  viene** cuando el vendedor vuelve desde `/login` escribiendo solo su usuario:
+  el negocio se resuelve internamente por `loginHandle`. **Nunca se le pide un
+  tenantId ni ningún dato técnico.**
+- `loginHandle` es único **por tenant**, no globalmente, así que puede haber más
+  de un candidato; el PIN desambigua (se prueba contra cada uno) y cada intento
+  fallido cuenta en **su propia** credencial.
+- La respuesta suma `tenantId`/`loginHandle`/`displayName` **después** de
+  autenticar — lo que el cliente necesita para registrar el dispositivo y
+  recordar quién es. `displayName` sale de la membership, **nunca** del correo
+  técnico interno. No se devuelve `authUid` ni ids de credencial (hay test).
+- El cupo de rate limit pasa a contarse **por usuario** (`pin:<handle>`) en vez
+  de tenant+usuario: con `tenantId` opcional, la clave anterior se podía
+  esquivar alternando entre mandarlo y no mandarlo.
+- Se mantiene todo lo demás: hash scrypt, bloqueo temporal tras 5 intentos,
+  límite por IP, chequeo de membership activa, aislamiento por tenant, error
+  genérico **idéntico** para "usuario no existe" y "PIN incorrecto", y la cadena
+  `loginHandle -> credencial -> authUid -> membership` ya corregida.
+- El registro del dispositivo **dejó de poder bloquear el login**: si el equipo
+  fue revocado por un Admin, se pide una vinculación nueva (deviceId nuevo) de
+  forma transparente en vez de dejar a la persona afuera. Ya está autenticada
+  por PIN; el device trust es confianza, no la puerta.
+
+### Pruebas
+
+- **65/65** E2E contra emuladores reales (antes 53): entra con usuario+PIN sin
+  tenantId, PIN incorrecto DENY, usuario inexistente con el **mismo** error
+  genérico, un usuario no entra declarando otro tenant, desactivado DENY también
+  por esta puerta, reactivado vuelve a entrar, dispositivo reconocido sigue
+  entrando solo con PIN, la respuesta no filtra `authUid`/ids/correo interno, y
+  el rate limit efectivamente bloquea.
+- **134/134** unitarios + **35/35** de Rules. Typecheck y build limpios; lint
+  sin cambios respecto de `HEAD` en ambas vistas.
+- UI verificada en navegador a **375x812** y **1440x900**: las dos secciones
+  presentes, botón de 56px de alto dentro del viewport, sin scroll horizontal,
+  los dos modos de `/acceso`, y "Cambiar de usuario" borrando identidad y
+  deviceId (comprobado en `localStorage`).
+
+Nota sobre el E2E: el limitador cuenta 20 intentos por minuto **por IP**, y el
+script hace muchos más logins seguidos que una persona real. Ahora espera y
+reintenta una vez cuando satura su propia ventana; la prueba que verifica el
+rate limit a propósito usa la llamada cruda.
+
+### Estado
+
+- Commit `9894187`, ya en `main`.
+- Deploy: `functions:loginWithPin` + `hosting:app`. Bundle verificado en
+  producción (`index-DVmho5XI.js`, mismo hash del build).
+- Sin tocar WhatsApp, Payments, Multi-Agent, IA ni el acceso con Google.
+
+### Próximo paso exacto
+
+QA de Eduardo, el ciclo completo por esta puerta nueva, con `EDUARDO ADMIN` y
+después con `eduardo pruebas`:
+1. cerrar sesión → caer en `/login`;
+2. **Entrar con PIN** → escribir usuario (`eduardoadmin` / `eduardopruebas`) +
+   PIN → entra;
+3. cerrar la app y volver → debe decir `Hola <nombre>` y pedir **solo** el PIN;
+4. probar **Cambiar de usuario** → vuelve a pedir usuario.
+
+Sigue pendiente confirmar el login real en teléfono (no puedo autenticarme en
+la app). **No activar vendedoras reales hasta cerrar ese ciclo.**
+
 ## ✅ FIX DESPLEGADO — Un PIN recién generado no dejaba entrar (regresión de `2c106ca`) (2026-09-09)
 
 **Reportado:** el Owner genera acceso nuevo para `eduardo pruebas`, SmartFlow
