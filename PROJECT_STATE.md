@@ -1,5 +1,58 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 P0 vendedor — el dedo toca el input + panel QA que ahora sí se activa (2026-09-10)
+
+Reportado: el acceso rápido funciona pero 1 s se siente lento; clip, Tomar foto y
+Grabar video **siguen sin abrir nada** con label + sr-only.
+
+### Bug mío: el panel QA quedaba invisible
+
+`?qa=1` solo se leía dentro del panel, al montarse. Abriendo `/?qa=1`, el
+aterrizaje redirigía a `/conversaciones` descartando el parámetro y el panel
+nunca se activaba. Ahora se captura en `src/app/main.tsx`, antes de cualquier
+redirección. **Verificado en producción**: `/?qa=1` → redirige a `/login` → el
+modo QA queda guardado igual.
+
+### Estrategia D: el dedo toca directamente el input
+
+`FileTapTarget`: un `<input type=file>` transparente cubre toda la superficie del
+botón; el contenido visible lleva `pointer-events-none`. Sin label, sin
+`.click()` programático, sin timers ni `await` antes del selector. Si con esto no
+abre, el problema es el entorno y no la activación.
+
+**Auditoría de captura de gestos, sin hallazgos:** el único `preventDefault` es el
+del submit del formulario; no hay pointer capture ni handlers de touch. La
+instrumentación previa `attachLifecycleDebug.ts` solo registra — y su nota dice
+que en una sesión anterior la cámara y la galería **sí abrían** en este teléfono.
+
+### Panel MEDIA_DIAG ampliado
+
+- **NAVEGADOR / EMBEBIDO**: detecta si corre dentro del navegador de otra app
+  (Facebook, Instagram, Messenger, WhatsApp, TikTok, WebView `; wv)`). Ahí los
+  selectores de archivo solo abren si esa app los implementa.
+- userAgent, táctil, puntos táctiles, soporte de `showPicker`.
+- **TOQUE**: qué elemento recibió cada toque (captura global de `pointerdown`).
+- Por control: `*_TAP`, `*_DIALOG_OPENED` (la página perdió foco u quedó oculta),
+  `*_CANCEL` (evento nativo), `*_CHANGE`.
+
+### Acceso rápido: 1000 ms → **500 ms**
+
+Anillo, cancelación, vibración, sonido y `verifyDeviceSession` sin cambios.
+
+262/262 tests. Commit `c499add`. Deploy `hosting:app`, bundle `index-CsmpP0DY.js`
+verificado en producción.
+
+### ⚠️ Sin verificar físicamente
+
+Clip, foto y video no se pudieron probar: requieren sesión real en el teléfono.
+El panel ahora da los datos para cerrarlo en una sola ronda.
+
+### Próximo paso exacto
+
+En el teléfono: abrir `hub.smartflow-suite.com/?qa=1` (una vez), entrar, ir a una
+conversación, tocar clip / Tomar foto / Grabar video, y mandar captura del panel
+MEDIA_DIAG. Lo decisivo: **EMBEBIDO** y el elemento en **TOQUE** al tocar el clip.
+
 ## 🔶 P0 vendedor — código una sola vez + clip/cámara que no abrían (2026-09-10)
 
 ### Clip y cámara: la causa real

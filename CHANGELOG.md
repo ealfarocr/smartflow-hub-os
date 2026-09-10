@@ -1,6 +1,21 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-10 — El dedo toca directamente el input de archivo + panel QA que se activa
+
+- fix(bug propio): ?qa=1 solo se leia dentro del panel; el aterrizaje lo descartaba
+  al redirigir y el panel nunca aparecia. Se captura en src/app/main.tsx antes de
+  cualquier redireccion (verificado en produccion).
+- fix: FileTapTarget — input type=file transparente cubriendo todo el boton, contenido
+  con pointer-events-none. Sin label, sin click programatico, sin timers.
+- auditoria: sin captura de gestos en la vista (unico preventDefault = submit del form).
+- feat(QA): panel con navegador, deteccion de navegador embebido/WebView, userAgent,
+  soporte tactil y de showPicker, el elemento que recibe cada toque, y por control
+  TAP / DIALOG_OPENED / CANCEL / CHANGE.
+- ux: acceso rapido de 1000 ms a 500 ms; seguridad sin cambios.
+- test: 262/262. Deploy hosting:app, commit c499add, bundle index-CsmpP0DY.js.
+- pendiente: prueba fisica de clip/foto/video con el panel activo.
+
 ## 2026-09-10 — Codigo de acceso una sola vez + clip/camara que no abrian en Android
 
 - fix(causa raiz): los tres input type=file tenian className="hidden" (display:none).
