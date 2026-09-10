@@ -2,6 +2,73 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — FIX URGENTE: el ciclo de acceso por PIN estaba roto de punta a punta
+
+- fix(causa raíz única, verificada contra datos de producción):
+  `vendor_credentials` usa el ID de la membership como doc id y `login_handles`
+  guarda ese mismo ID, pero `acceptTenantInvite` re-indexa la membership a
+  `{uid}_{tenantId}` y borra el doc original en el primer acceso, sin mover la
+  credencial ni repuntar el índice. Las 2 credenciales de USADITOS apuntaban a
+  IDs de membership inexistentes.
+- fix(1): `getVendorAccessInfo` decía "PIN no configurado" sobre alguien que sí
+  tenía acceso.
+- fix(2): `setVendorPin` caía en el guard de prepared/draft y rechazaba — el
+  estado muerto reportado ("ya tiene un método de acceso configurado").
+- fix(3, NO reportado y más grave): `loginWithPin` leía `memberships/{idViejo}`
+  (borrado) y denegaba el acceso a cualquier vendedor que ya hubiera entrado
+  una vez, con el mismo mensaje que un PIN incorrecto. Seguían trabajando solo
+  porque su sesión de Firebase ya estaba abierta.
+- fix(4): el chequeo `status==='active'` de `c43549b` rompía también el PRIMER
+  acceso (`setVendorPin` deja la membership en `pending` a propósito, porque es
+  el primer `signInWithCustomToken` el que dispara `acceptTenantInvite`): ningún
+  vendedor nuevo podía entrar. Ahora `pending` se acepta solo mientras la
+  membership no tenga `userId` (desactivar escribe `suspended` y conserva el
+  `userId`, así que no se reabre el agujero que ese chequeo cerró). El test que
+  afirmaba `pending -> DENY` codificaba el bug y se corrigió con el motivo.
+- feat: `functions/src/accessLifecycle.ts` — máquina de estados explícita del
+  acceso (`no-access`, `pending-first-login`, `active-with-access`,
+  `active-without-access`, `suspended`) y la acción de negocio de cada uno.
+  Ningún estado sin acción: el suspendido sin PIN ofrece "Reactivar y generar
+  acceso" en un solo paso.
+- feat: `setVendorPin` con modos `bootstrap`/`attach`/`regenerate`. `attach` es
+  el camino que faltaba: engancha una credencial nueva al uid de Auth que ya
+  existe, sin crear identidad nueva ni perder historial.
+- fix: la credencial se resuelve por `authUid` cuando no está bajo el ID actual
+  (los datos ya desfasados se curan solos, sin migración destructiva);
+  `acceptTenantInvite` mueve credencial + índice en el MISMO batch que la
+  membership; `loginWithPin` lee la membership canónica `{authUid}_{tenantId}`.
+- fix(seguridad): regenerar invalida siempre el PIN anterior y ahora además
+  revoca los refresh tokens — con un PIN filtrado o un teléfono perdido, dejar
+  viva la sesión anterior hacía inútil el PIN nuevo.
+- feat(UI): `getTenantAccessOverview` (una llamada por tenant) da el estado real
+  de cada fila con la MISMA máquina de estados del backend, y la lista muestra
+  UNA acción principal en lenguaje de negocio: Generar acceso / Copiar acceso /
+  Reactivar / Reactivar y generar acceso. Las reglas no se duplican en el
+  cliente — eso es lo que producía botones que el backend rechazaba. Antes la
+  fila mezclaba hasta 5 íconos con significados solapados.
+- fix(UI): la columna de estado mostraba "Vía: Email/Password" para vendedores
+  por PIN, cuya cuenta técnica usa un password aleatorio que nadie conoce ni
+  puede usar. Ahora dice "Vía: PIN + dispositivo".
+- chore: `FieldValue`/`Timestamp` desde `firebase-admin/firestore` SOLO en las
+  funciones del ciclo de acceso — el stub del emulador de Functions no expone
+  esos estáticos en `admin.firestore` (le rompe igual a `registerDevice`,
+  preexistente) y sin eso el ciclo no se puede probar de punta a punta. Misma
+  clase y comportamiento en producción.
+- test: 134/134 unitarios (31 nuevos) + 35/35 de Rules (intactas) + 44/44 del
+  E2E nuevo `scripts/e2e_access_cycle.mjs` contra emuladores reales de
+  Functions + Firestore + Auth (ciclo completo, autorización, cross-tenant y la
+  credencial huérfana exacta de producción).
+- deploy: `functions:acceptTenantInvite,setVendorPin,getVendorAccessInfo,`
+  `getTenantAccessOverview,loginWithPin,registerDevice,revokeDevice,`
+  `setMembershipActive` + `hosting:app`. Commit `2c106ca`, ya en `main`. Bundle
+  verificado en producción (`index-5DrEWglM.js`).
+- verificación: estado de acceso real de USADITOS recalculado con la lógica
+  desplegada — 0 callejones sin salida; los 2 usuarios con PIN resuelven por
+  `authUid` y las 8 filas restantes ofrecen "Generar acceso".
+- pendiente: E2E de producto con teléfono real (no puedo autenticarme en la
+  app). No activar vendedoras reales hasta que Eduardo cierre ese ciclo.
+
+
 ## 2026-09-09 — FIX URGENTE: el Owner local solo veía su propio usuario en /usuarios
 
 - fix(causa raíz del cliente, NO de las Rules): `useUserStore.subscribe` hacía

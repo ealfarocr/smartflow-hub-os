@@ -1,5 +1,164 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ FIX DESPLEGADO — El ciclo de acceso de usuarios (PIN) estaba roto de punta a punta (2026-09-09)
+
+**Reportado:** `eduardo pruebas` con membership visible, `ACCESO ACTIVO`, `EN
+LÍNEA`, `Trabajando` — pero el modal decía `PIN no configurado` y al pulsar
+`Generar PIN` el backend respondía *"Esta membresía ya tiene un método de
+acceso configurado (no es prepared/draft)"*. Un estado imposible.
+
+### Causa raíz — UNA sola, verificada contra los datos de producción
+
+`vendor_credentials` usa **el ID de la membership como doc id**, y
+`login_handles` guarda ese mismo ID. Pero `acceptTenantInvite` re-indexa la
+membership de `{docIdAleatorio}` a `{uid}_{tenantId}` y **borra el doc
+original** en el primer acceso, sin mover la credencial ni repuntar el índice.
+
+Confirmado con un script de solo lectura sobre el tenant real: las **2**
+credenciales de USADITOS (`lSmdEcwVMAnLDy4WeDrm` → eduardopruebas,
+`yOQ1y5DnkAqUSloR9Nyu` → eduardoadmin) apuntaban a IDs de membership que ya
+no existen.
+
+### Eran cuatro fallas, no una
+
+1. `getVendorAccessInfo(idActual)` no encontraba la credencial → "PIN no
+   configurado" sobre alguien que sí tenía acceso.
+2. `setVendorPin(idActual)` no veía credencial, caía en el guard de
+   `prepared/draft` y rechazaba → **el estado muerto reportado**.
+3. **No reportada y peor:** `loginWithPin` leía `memberships/{idViejo}`
+   (borrado), `checkPinLoginAllowed` devolvía `no-membership` y **denegaba el
+   acceso a cualquier vendedor que ya hubiera entrado una vez**, con el mismo
+   mensaje genérico que un PIN incorrecto (imposible de diagnosticar desde la
+   UI). EDUARDO ADMIN y `eduardo pruebas` seguían trabajando **solo porque su
+   sesión de Firebase ya estaba abierta**; al cerrarla no podían volver.
+4. El chequeo de estado que agregó `c43549b` exigía `status==='active'`, pero
+   `setVendorPin` deja la membership en `pending` a propósito (el primer
+   `signInWithCustomToken` es el que dispara `acceptTenantInvite` y la
+   activa). Ese **primer acceso se denegaba**, así que **ningún vendedor nuevo
+   podía entrar** — exactamente lo que bloqueaba activar a Michelle y al
+   resto. El test que afirmaba `pending -> DENY` codificaba el bug.
+
+### Máquina de estados explícita
+
+`functions/src/accessLifecycle.ts` (módulo puro, testeable sin Firestore):
+`no-access` / `pending-first-login` / `active-with-access` /
+`active-without-access` / `suspended`, con la acción de negocio de cada uno.
+**Ningún estado queda sin acción:** `active-without-access` (el que estaba
+muerto) ofrece "Generar acceso", y un suspendido sin PIN ofrece "Reactivar y
+generar acceso" en un solo paso, en vez de dejarlo activo y sin forma de
+entrar.
+
+`setVendorPin` aplica esa misma máquina con tres modos:
+- `bootstrap` — no hay cuenta técnica todavía (prepared/draft): la crea.
+- `attach` — **el camino que faltaba**: ya hay un uid real de Firebase Auth,
+  se le engancha una credencial nueva a ESA cuenta, sin crear una identidad
+  nueva ni perder historial.
+- `regenerate` — solo reemplaza el PIN.
+
+`suspended` se rechaza con un mensaje accionable ("reactivalo primero"), y la
+UI ofrece la acción combinada para que el Owner no tenga que saberlo.
+
+### Identidad estable en vez de posición
+
+La identidad de un acceso **no es el ID de la membership** (cambia) sino el
+`authUid` de Firebase Auth (nunca cambia):
+- la credencial se resuelve por `authUid` cuando no está bajo el ID actual →
+  **los datos ya desfasados en producción se curan solos, sin migración
+  destructiva**;
+- `acceptTenantInvite` ahora mueve credencial + índice en el **MISMO batch**
+  que la membership (el desfase no puede volver a crearse);
+- `loginWithPin` lee la membership canónica `{authUid}_{tenantId}`, con el ID
+  viejo solo como fallback para el primer acceso;
+- `setVendorPin` repunta `login_handles` al ID actual cuando lo toca.
+
+Regenerar **siempre** invalida el PIN anterior y ahora además revoca los
+refresh tokens: si el motivo fue un PIN filtrado o un teléfono perdido, dejar
+viva la sesión anterior haría inútil el PIN nuevo. El aviso de la UI lo dice.
+
+### UI — una sola acción principal, sin jerga
+
+Regla aplicada: **nunca mostrar un botón que el backend va a rechazar por una
+condición que la UI ya conoce.** Para cumplirla de verdad, el estado NO se
+recalcula en el cliente (duplicar las reglas es lo que producía botones
+inválidos): la lista pide el estado real a `getTenantAccessOverview` (nuevo,
+**una** llamada por tenant, misma máquina de estados que aplica el backend) y
+muestra **una** acción principal con nombre de negocio: `Generar acceso` /
+`Copiar acceso` / `Reactivar` / `Reactivar y generar acceso`. `Regenerar
+acceso` solo aparece cuando de verdad hay un PIN que reemplazar, y el toggle
+de reactivar ya no se duplica con la acción principal. Antes la fila mezclaba
+hasta 5 íconos con significados solapados.
+
+También se corrigió algo que el propio pedido señaló: la columna de estado
+mostraba **`Vía: Email/Password`** para los vendedores por PIN. Esa cuenta
+técnica usa un password aleatorio que **nadie conoce ni puede usar** (lo
+genera `setVendorPin`); ahora dice `Vía: PIN + dispositivo`.
+
+### Pruebas
+
+- **134/134** unitarios (31 nuevos: máquina de estados + etiquetas de la UI).
+- **35/35** de Firestore Rules — **las Rules no se tocaron**.
+- **44/44** del E2E nuevo `scripts/e2e_access_cycle.mjs` contra los
+  emuladores **reales** de Functions + Firestore + Auth (config de puertos
+  alternos en `firebase.e2e.json`, para no pisar un emulador ya corriendo):
+  `prepared` → generar → primer acceso → re-indexado → estado real en la UI →
+  re-login → regenerar → PIN viejo DENY / PIN nuevo ALLOW → desactivar →
+  login DENY → reactivar → acceso nuevo → login ALLOW → liberar dispositivo →
+  mismo teléfono con otra persona. Más: Asesor DENY, Owner de otro tenant
+  DENY (generar, leer acceso y leer overview), sin sesión DENY, y **la
+  credencial huérfana exacta de producción resolviéndose sola**.
+
+  Para correrlo:
+
+      npx firebase-tools emulators:exec --config firebase.e2e.json \
+        --only functions,firestore,auth --project smartflow-e2e \
+        "node scripts/e2e_access_cycle.mjs"
+
+- Typecheck y build limpios (frontend y functions). Lint: los 3 errores de
+  `UsersManagementView.tsx` son preexistentes, ninguno en lo tocado.
+
+### Nota técnica sobre `FieldValue`
+
+`FieldValue`/`Timestamp` pasan a importarse de `firebase-admin/firestore`
+**solo en las funciones del ciclo de acceso**: el stub de `firebase-admin` del
+emulador de Functions no expone esos estáticos en `admin.firestore` — le rompe
+igual a código preexistente e intacto (se comprobó con `registerDevice`) — y
+sin ese cambio el ciclo no se puede probar de punta a punta. Misma clase y
+mismo comportamiento en producción. El resto del archivo quedó como estaba.
+
+### Estado y verificación
+
+- Commit `2c106ca`, ya en `main`.
+- Deploy: `functions:acceptTenantInvite,setVendorPin,getVendorAccessInfo,`
+  `getTenantAccessOverview,loginWithPin,registerDevice,revokeDevice,`
+  `setMembershipActive` + `hosting:app`. **Sin tocar** WhatsApp, Payments,
+  Multi-Agent, IA, el login de Google ni las Rules.
+- Bundle en producción verificado (`index-5DrEWglM.js`, mismo hash del build,
+  contiene las etiquetas nuevas y la llamada a `getTenantAccessOverview`).
+- Estado de acceso real de USADITOS recalculado con la lógica desplegada
+  (script de solo lectura): `EDUARDO ADMIN` y `eduardo pruebas` →
+  `active-with-access` → **Copiar acceso** (ambas credenciales resueltas por
+  `authUid`, o sea el caso huérfano funcionando); las 8 restantes →
+  `no-access` → **Generar acceso**. **Callejones sin salida: 0.**
+
+### ⚠️ Lo que NO pude probar yo
+
+El E2E de producto con teléfono real. No puedo autenticarme en la app, así
+que el ciclo visual (la UI que ve el Owner + el vendedor entrando desde el
+teléfono) lo tiene que confirmar Eduardo. Todo lo demás está verificado arriba.
+
+### Próximo paso exacto
+
+QA de Eduardo en `/usuarios` con recarga forzada (Ctrl+Shift+R):
+1. `eduardo pruebas` debe mostrar **Acceso activo** y la acción **Copiar
+   acceso** (ya no "PIN no configurado").
+2. **Regenerar acceso** (🔑) → confirmar que el PIN nuevo entra y el viejo no
+   (ojo: regenerar cierra su sesión abierta, es a propósito).
+3. Probar el ciclo de baja: desactivar → el PIN deja de entrar → reactivar →
+   entrar de nuevo.
+4. **Recién con eso en verde**, generar el acceso de las vendedoras reales
+   (Michelle, Ana, Celina, Alondra, Indyra, y los Owners preparados) con el
+   botón **Generar acceso** de cada fila.
+
 ## ✅ FIX DESPLEGADO — El Owner local solo veía su propio usuario en /usuarios (2026-09-09)
 
 **Síntoma:** con sesión `EDUARDO ADMIN` (rol OWNER / SOCIO PRINCIPAL, tenant
