@@ -13,7 +13,7 @@ import {
   MessageSquareText, Loader2, CheckCheck, Check, AlertCircle,
   LayoutTemplate, ArrowLeft, Zap, CreditCard,
   Camera, Globe, Sparkles, UserPlus, Package,
-  FileText, Download, X, Bot, Settings2, Paperclip, Mic, Play, Trash2, Image, RotateCcw,
+  FileText, Download, X, Bot, Settings2, Paperclip, Mic, Play, Trash2, RotateCcw,
 } from 'lucide-react';
 import { VoiceRecorder } from '@/utils/audioRecorder';
 import { useTeam } from '@/hooks/useTeam';
@@ -124,7 +124,6 @@ export const ConversationsPageView = () => {
   const [pendingMedia, setPendingMedia] = useState<PendingMediaItem[]>([]);
   const pendingMediaRef = useRef<PendingMediaItem[]>([]);
   useEffect(() => { pendingMediaRef.current = pendingMedia; }, [pendingMedia]);
-  const fileInputRef                              = useRef<HTMLInputElement>(null);
   const cameraInputRef                            = useRef<HTMLInputElement>(null);
   const cameraVideoInputRef                       = useRef<HTMLInputElement>(null);
   const galleryInputRef                           = useRef<HTMLInputElement>(null);
@@ -1123,18 +1122,6 @@ ${plantilla}` : plantilla);
                         </button>
                       </div>
                     )}
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-                      className="hidden"
-                      onChange={async e => {
-                        const files = e.target.files;
-                        if (files?.length) await handleFilesSelected(files, 'ATTACH');
-                        e.target.value = '';
-                      }}
-                    />
                     {/* capture="environment" abre la camara directo en celular, no la galeria.
                         accept mezclado "image/*,video/*" no abre la camara en varios navegadores
                         de Android — un solo tipo por input es lo confiable. Sin "multiple": una
@@ -1196,20 +1183,15 @@ ${plantilla}` : plantilla);
                     />
                     <div className="flex items-center gap-2">
                       {/* Adjuntar (oculto mientras se graba) */}
-                      {/* GALERIA — una sola entrada de 'Fotos y videos'. Sin capture, para
-                          que abra el selector de medios y NO la camara. */}
+                      {/* UN SOLO CLIP, y abre fotos y videos. accept="image/*,video/*"
+                          sin capture: eso es lo mas especifico que la web permite pedir,
+                          y hace que Android ofrezca el selector de medios en vez del
+                          administrador de archivos con 'Recientes'. Ya no hay boton de
+                          documentos ni entrada extra de imagen: solo Clip y Camara. */}
                       <button type="button" onClick={() => { debugAttach('GALLERY_CLICK'); galleryInputRef.current?.click(); }} disabled={isUploading}
                         title="Fotos y videos"
                         className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
-                        {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Image className="w-4 h-4" />}
-                      </button>
-                      {/* Documentos (PDF de cotizacion, etc.) aparte: su accept ya no
-                          incluye imagen/video/audio, asi que Android abre el selector de
-                          archivos en vez del menu con cuatro camaras. */}
-                      <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}
-                        title="Adjuntar documento"
-                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
-                        <Paperclip className="w-4 h-4" />
+                        {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
                       </button>
                       {/* Cámara: toma foto o graba video al momento y lo sube igual que un adjunto.
                           Dos inputs separados (foto/video) porque un solo input con accept

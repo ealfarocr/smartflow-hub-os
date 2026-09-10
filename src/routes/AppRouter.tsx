@@ -35,6 +35,7 @@ import { AuthLoadingGate } from '@/components/guards/AuthLoadingGate'
 import { ProtectedRoute } from '@/components/guards/ProtectedRoute'
 import { TenantResolvedGuard } from '@/components/guards/TenantResolvedGuard'
 import { RoleGuard } from '@/components/guards/RoleGuard'
+import { LandingRedirect } from '@/components/guards/LandingRedirect'
 import { FeatureGuard } from '@/components/guards/FeatureGuard'
 import { ToolGuard } from '@/components/guards/ToolGuard'
 
@@ -79,7 +80,9 @@ export const AppRouter = () => {
                </ProtectedRoute>
              }
           >
-            <Route index element={<Navigate to="/dashboard" replace />} />
+            {/* El Asesor Comercial aterriza en las conversaciones; Owner/Admin/
+                SuperAdmin conservan el Dashboard. Ver LandingRedirect. */}
+            <Route index element={<LandingRedirect />} />
             <Route path="dashboard" element={<DashboardPageView />} />
             {/* WhatsApp: antes sin ningún guard — es el techo, ToolGuard es
                 puramente aditivo (fallback = todos, ver getDefaultToolsForRole). */}

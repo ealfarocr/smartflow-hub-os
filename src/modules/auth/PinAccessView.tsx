@@ -107,7 +107,7 @@ export const PinAccessView = () => {
       }
 
       playAccessFeedback();
-      navigate('/mi-turno', { replace: true });
+      navigate('/', { replace: true });
     } catch {
       setError('No se pudo entrar. Probá con tu código de acceso.');
       setForceCode(true);
@@ -170,7 +170,7 @@ export const PinAccessView = () => {
 
       rememberVendorIdentity(confirmed);
       playAccessFeedback();
-      navigate('/mi-turno', { replace: true });
+      navigate('/', { replace: true });
     } catch (err: unknown) {
       setPin('');
       const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
@@ -196,7 +196,7 @@ export const PinAccessView = () => {
   // Con sesión viva pero SIN identidad recordada no hay a quién saludar (es el
   // caso de alguien corporativo que llegó acá de rebote): se lo manda adentro.
   useEffect(() => {
-    if (hasLiveSession && !identity) navigate('/mi-turno', { replace: true });
+    if (hasLiveSession && !identity) navigate('/', { replace: true });
   }, [hasLiveSession, identity, navigate]);
 
   const keypadDisabled = isProcessing || (!identity && !handleInput.trim());
