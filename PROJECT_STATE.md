@@ -1,5 +1,78 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 P0 vendedor — código una sola vez + clip/cámara que no abrían (2026-09-10)
+
+### Clip y cámara: la causa real
+
+Los tres `<input type="file">` tenían `className="hidden"`, o sea
+**`display:none`**. En Chrome para Android un input de archivo con `display:none`
+**no abre el selector** cuando se le hace `.click()` programático; en Chrome de
+escritorio sí. Por eso nunca falló probando en la PC, y por eso el fix anterior
+de `isUploading` no cambió nada en el teléfono: el problema no era el estado, era
+cómo se escondía el input.
+
+Fix, con el mecanismo más nativo disponible:
+- inputs ocultos con `sr-only` (invisibles pero en el render);
+- clip y las dos opciones de cámara pasan a ser **`<label htmlFor>`** asociados
+  por id — activación nativa del navegador, sin click programático;
+- el menú de cámara ya no se desmonta en el mismo toque que activa el input; se
+  cierra al volver el foco a la ventana. Sin timers.
+
+Candado: `mediaInputs.test.ts` falla si un input vuelve a `display:none`.
+
+**Panel MEDIA_DIAG visible en el teléfono** — se activa con `?qa=1` en la URL
+(queda recordado; `?qa=0` lo apaga) o para SuperAdmin. Muestra `CLIP_TAP`,
+`CLIP_CHANGE`, `PHOTO_TAP`, `PHOTO_CHANGE`, `VIDEO_TAP`, `VIDEO_CHANGE` y los
+pasos `VOICE_*`. Si sale `*_TAP` pero no `*_CHANGE`, el toque llegó y el
+selector no abrió.
+
+Commit `85e7ad8`.
+
+### Código una sola vez: credencial de dispositivo
+
+Al cerrar sesión, Firebase destruye el refresh token, y la única forma de emitir
+un token nuevo era el código. La identidad sí sobrevivía al logout; lo que no
+había era con qué volver a entrar. El `deviceId` no sirve: no es un secreto.
+
+**Credencial de dispositivo** (`functions/src/deviceSecret.ts`): 256 bits
+generados en el servidor, entregados al teléfono UNA vez al vincularse con el
+código. En Firestore solo queda el hash con sal. `registerDevice` la emite solo
+si la sesión salió de un login con código (claim `pinLogin`). `loginWithDevice`
+(Function nueva) revalida todo en cada uso y ante cualquier rechazo devuelve el
+mismo error genérico. **Regenerar el código invalida las credenciales** de esa
+persona (recuperación: teléfono perdido).
+
+| Acción | Efecto |
+|---|---|
+| Cerrar sesión | sale de Firebase; conserva identidad, equipo y credencial → vuelve con long press |
+| Cambiar de usuario | borra identidad, deviceId y credencial del teléfono |
+| Revocar dispositivo | el Owner/Admin invalida el equipo → vuelve a pedir código |
+
+Commit `bd128ea`. Deploy: `functions:registerDevice,loginWithDevice,setVendorPin`
++ `hosting:app`. Bundle `index-CoP4cktI.js` verificado en producción.
+
+**Pruebas:** 260/260 unitarios + 42/42 Rules + **86/86 E2E** contra emuladores
+reales (13 nuevos de la reentrada).
+
+### ⚠️ IMPORTANTE para la próxima prueba
+
+El teléfono de `eduardo pruebas` se vinculó **antes** de este deploy, así que
+**todavía no tiene credencial de dispositivo**. Hace falta **entrar UNA vez más
+con el código** para recibirla. A partir de ahí, cerrar sesión ya no pide
+código. Eso no es una recaída: es la vinculación.
+
+### Próximo paso exacto
+
+En el teléfono:
+1. entrar **una vez** con el código (recibe la credencial);
+2. **cerrar sesión** → debe mostrar `Hola eduardo pruebas` + botón, **no** el
+   teclado;
+3. mantener 1 s → entra a WhatsApp;
+4. abrir la app con `?qa=1` al final de la URL una vez, para ver el panel;
+5. tocar clip, Tomar foto y Grabar video — el panel muestra hasta dónde llega
+   cada toque.
+
+
 ## 🔶 P0 vendedor — controles multimedia sin responder (2026-09-10)
 
 Confirmado por Eduardo: cerrar/reabrir OK, reentrada OK, aterriza directo en

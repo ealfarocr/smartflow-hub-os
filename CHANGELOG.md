@@ -1,6 +1,35 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-10 — Codigo de acceso una sola vez + clip/camara que no abrian en Android
+
+- fix(causa raiz): los tres input type=file tenian className="hidden" (display:none).
+  En Chrome Android un input de archivo con display:none NO abre el selector con
+  .click() programatico; en escritorio si, por eso nunca fallo en la PC y el fix
+  anterior de isUploading no cambio nada en el telefono.
+- fix: inputs con sr-only + clip y opciones de camara como <label htmlFor> (activacion
+  nativa, sin click programatico). El menu de camara ya no se desmonta en el mismo
+  toque; se cierra al volver el foco. Candado en mediaInputs.test.ts.
+- feat(QA): panel MEDIA_DIAG visible en el telefono con ?qa=1 (o SuperAdmin), sin
+  depender de chrome://inspect. Registra solo pasos y metadatos no sensibles.
+- feat: credencial de dispositivo (functions/src/deviceSecret.ts). 256 bits generados
+  en el servidor, entregados una vez al vincularse con el codigo; en Firestore solo el
+  hash. registerDevice la emite solo si la sesion salio de un login con codigo;
+  loginWithDevice permite volver a entrar sin codigo tras cerrar sesion, revalidando
+  todo en cada uso y con error generico ante cualquier rechazo.
+- seguridad: regenerar el codigo invalida las credenciales de dispositivo de esa
+  persona (recuperacion). Revocar el equipo tambien las anula. El deviceId sigue sin
+  ser un factor de autenticacion.
+- ux: cerrar sesion conserva identidad, equipo y credencial (vuelve con long press);
+  cambiar de usuario los borra; revocar dispositivo los anula desde el servidor.
+- fix: LandingRedirect ya no decide con el rol vacio (habria mandado a un Owner a las
+  conversaciones justo despues de entrar).
+- test: 260/260 unitarios + 42/42 Rules + 86/86 E2E (13 nuevos de la reentrada).
+- deploy: functions:registerDevice,loginWithDevice,setVendorPin + hosting:app.
+  Commits 85e7ad8 y bd128ea. Bundle index-CoP4cktI.js verificado.
+- nota: el telefono de prueba se vinculo ANTES de este deploy y no tiene credencial:
+  necesita entrar UNA vez mas con el codigo para recibirla.
+
 ## 2026-09-10 — Clip y camara morian junto con la nota de voz
 
 - fix(causa mas probable): isUploading lo pone SOLO el envio de la nota de voz pero
