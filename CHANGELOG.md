@@ -2,6 +2,35 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-10 — La sesión no persistía: por eso pedía el código en cada apertura
+
+- fix(causa raíz): `src/lib/firebase.ts` hacía `getAuth(app)` a secas. El SDK
+  elige el default y, si IndexedDB no está disponible (móviles con
+  almacenamiento restringido, modo ahorro, ajustes de privacidad), cae a
+  persistencia EN MEMORIA sin avisar: la sesión moría al cerrar la app y el
+  vendedor tenía que escribir su código otra vez. Ahora se declara la cadena
+  explícita `indexedDBLocalPersistence` + `browserLocalPersistence`.
+- fix: `browserPopupRedirectResolver` explícito — `initializeAuth` NO lo incluye
+  solo (a diferencia de `getAuth`) y sin él `signInWithPopup`, o sea el login con
+  Google, dejaría de funcionar. Verificado en navegador que Google, correo y
+  contraseña siguen ahí y que la app monta sin errores de consola. try/catch con
+  `getAuth` de respaldo porque `initializeAuth` lanza con el recambio en caliente.
+- fix(ruteo): `ProtectedRoute` mandaba a `/login` a cualquiera sin sesión,
+  incluido un vendedor con identidad recordada — aterrizaba en la pantalla
+  corporativa, que no le sirve. Ahora, si este equipo ya fue usado, va derecho a
+  `/acceso`, que decide solo: entrada rápida si la sesión sigue viva, o código si
+  hace falta. No cambia nada de seguridad: ambas exigen lo mismo.
+- ux: el código queda como mecanismo de alta y recuperación (equipo nuevo,
+  revocado, cambio de usuario, código regenerado, sesión inválida) y deja de ser
+  un peaje diario.
+- qa: verificado a 375x812 local y en producción — sin identidad → `/login`; con
+  identidad → `/acceso` saludando por nombre. 206/206 tests, build limpio.
+- deploy: `hosting:app`. Commit `162c605`. Bundle `index-OrtWLMSS.js`.
+- pendiente: que la sesión sobreviva de verdad al cerrar y reabrir la app en el
+  teléfono, y la sensación física del long press. Requieren cuenta real.
+
+
+
 ## 2026-09-10 — /login prioriza el acceso del equipo sobre el corporativo
 
 - ux: el bloque "Acceso del equipo" pasa arriba, con el botón principal grande

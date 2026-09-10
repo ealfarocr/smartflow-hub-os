@@ -1,5 +1,78 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ DESPLEGADO — La sesión no persistía: por eso pedía el código en cada apertura (2026-09-10)
+
+**Reportado:** el vendedor ya está vinculado al teléfono pero SmartFlow le pide
+el código demasiado seguido, y al abrir ve "Entrar con código de acceso" como
+acción principal en vez de la entrada rápida.
+
+### Causa raíz — no era la UI, era la persistencia de la sesión
+
+`src/lib/firebase.ts` hacía **`getAuth(app)` a secas**. El SDK elige el default
+y, si IndexedDB no está disponible (navegadores móviles con almacenamiento
+restringido, modo ahorro, ciertos ajustes de privacidad), cae a persistencia
+**en memoria sin avisar**: la sesión muere al cerrar la app y el vendedor tiene
+que escribir su código otra vez.
+
+Ahora se declara la cadena explícita — `indexedDBLocalPersistence` y
+`browserLocalPersistence` como respaldo — y el SDK usa la primera que funcione.
+
+`browserPopupRedirectResolver` va explícito porque **`initializeAuth` NO lo
+incluye solo**, a diferencia de `getAuth`: sin él, `signInWithPopup` (el login
+con Google) dejaría de funcionar. La llamada va envuelta en try/catch con
+`getAuth` de respaldo, porque `initializeAuth` lanza si el app ya fue
+inicializado (pasa con el recambio en caliente del dev server).
+
+### Segundo motivo del CTA de código
+
+`ProtectedRoute` mandaba a `/login` a **cualquiera** sin sesión, incluido un
+vendedor con identidad recordada. Aterrizaba en la pantalla corporativa —Google
+y correo/contraseña, que no le sirven: su cuenta técnica usa un password
+aleatorio que nadie conoce— y tenía que buscar el acceso del equipo.
+
+Ahora, si este equipo ya fue usado, va derecho a `/acceso`, que decide solo qué
+mostrarle: **entrada rápida con el botón de mantener presionado si su sesión
+sigue viva**, o el código si de verdad hace falta. No cambia nada de seguridad:
+las dos pantallas exigen exactamente lo mismo para entrar.
+
+### Cuándo se sigue pidiendo el código
+
+Equipo nuevo, equipo revocado, cambio de usuario, código regenerado (revoca los
+refresh tokens a propósito) y sesión realmente inválida. Deja de ser un peaje
+diario y pasa a ser mecanismo de alta y recuperación.
+
+### Verificado
+
+- En navegador a 375x812, **local y en producción**: sin identidad recordada →
+  `/login`; con identidad recordada → `/acceso` saludando `Hola eduardo pruebas`.
+- Google, correo y contraseña siguen presentes en `/login`; la app monta **sin un
+  solo error de consola** con la nueva inicialización.
+- 206/206 tests, typecheck y build limpios.
+
+Commit `162c605`. Deploy: `hosting:app`. Bundle en producción `index-OrtWLMSS.js`.
+
+### ⚠️ Lo que no puedo verificar yo
+
+Que la sesión **sobreviva de verdad** al cerrar y reabrir la app en el teléfono
+de Eduardo: hace falta entrar con una cuenta real. La corrección ataca la causa
+(persistencia declarada con respaldo), pero la confirmación es suya.
+
+Tampoco puedo confirmar la sensación física del long press (los 2 segundos, la
+vibración y el sonido).
+
+### Próximo paso exacto
+
+En el teléfono con `eduardo pruebas`:
+1. entrar una vez con el código;
+2. **cerrar la app por completo y volver a abrirla** → no debería pedir código:
+   o entra directo, o muestra `Hola eduardo pruebas` con el botón de mantener
+   presionado;
+3. mantener 2 segundos → debe vibrar, sonar y entrar;
+4. desde Usuarios, liberar el dispositivo → la próxima apertura **sí** debe
+   pedir código;
+5. regenerar el código → la sesión anterior debe quedar inválida.
+
+
 ## ✅ DESPLEGADO — /login prioriza el acceso del equipo (2026-09-10)
 
 SmartFlow es una herramienta operativa: la mayoría de las aperturas son de
