@@ -78,3 +78,53 @@ describe('El panel QA reconoce el navegador del teléfono', () => {
     expect(describeEnvironment('Mozilla/5.0 (Linux; Android 14) Chrome/128 Mobile Safari/537.36 OPR/84.0').browser).toBe('Opera');
   });
 });
+
+const panel = Object.values(
+  import.meta.glob('/src/modules/conversations/MediaDiagPanel.tsx', { query: '?raw', import: 'default', eager: true }),
+)[0] as string;
+const layout = Object.values(
+  import.meta.glob('/src/components/layout/MainLayout.tsx', { query: '?raw', import: 'default', eager: true }),
+)[0] as string;
+
+// Evidencia física: con el panel QA anterior, los toques de la prueba caían
+// SOBRE EL PANEL (TOQUE registraba div.fixed / div.text-emerald) y nunca
+// llegaban al clip. El diagnóstico se contaminaba a sí mismo.
+describe('El panel QA observa, no participa', () => {
+  it('el contenedor completo es transparente a los toques', () => {
+    const raiz = panel.slice(panel.indexOf('<div className="fixed'), panel.indexOf('>', panel.indexOf('<div className="fixed')));
+    expect(raiz).toContain('pointer-events-none');
+  });
+
+  it('solo la pastilla de control recibe toques, y sus toques no se registran como TOQUE', () => {
+    expect(panel).toContain('pointer-events-auto');
+    expect(panel).toContain('path.includes(pillRef.current)');
+  });
+
+  it('detecta cuando otro elemento tapa un control multimedia', () => {
+    expect(panel).toContain('_COVERED_BY');
+    expect(target).toContain('data-media-target={diag}');
+  });
+});
+
+describe('showPicker se pide dentro del mismo gesto', () => {
+  const onClick = target.slice(target.indexOf('const onClick'), target.indexOf('return (', target.indexOf('const onClick')));
+
+  it('se llama a input.showPicker() cuando existe', () => {
+    expect(onClick).toContain('input.showPicker()');
+  });
+
+  it('no hay nada asíncrono entre el toque y el selector', () => {
+    expect(onClick).not.toMatch(/setTimeout|await |\.then\(|requestAnimationFrame/);
+  });
+
+  it('si showPicker falla, queda la activación nativa como respaldo', () => {
+    expect(onClick).toContain('_SHOWPICKER_ERROR');
+    expect(onClick).toContain('nativeFallbackRef.current = true');
+  });
+});
+
+describe('El banner de onboarding no tapa la barra del vendedor', () => {
+  it('solo lo ve quien administra el negocio', () => {
+    expect(layout).toContain('(isSuperAdmin || isAdminRole(activeMembership?.role)) && <OnboardingBanner />');
+  });
+});

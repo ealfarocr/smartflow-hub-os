@@ -15,7 +15,7 @@ import { CreateTenantModal } from '@/modules/superadmin/CreateTenantModal'
 import SupportAgent from '../support/SupportAgent'
 import { OnboardingBanner } from '../onboarding/OnboardingBanner'
 import { NotificationBell } from './NotificationBell'
-import { getEffectiveTools, ToolKey } from '@/utils/permissions'
+import { getEffectiveTools, ToolKey, isAdminRole } from '@/utils/permissions'
 import { filterNavigation } from './navigationAccess'
 
 export const allNavItems = [
@@ -461,7 +461,12 @@ export const MainLayout = () => {
       {pathname !== '/conversaciones' && <SupportAgent />}
       
       {/* Onboarding Banner */}
-      <OnboardingBanner />
+      {/* Los pasos de onboarding son acciones del DUENO (conectar integraciones,
+          activar herramientas en la Tienda): a un vendedor lo mandaban a rutas que
+          para el son 'Acceso restringido'. Ademas es una tarjeta fija de hasta
+          384px anclada abajo con z-50, que en un telefono queda encima de la barra
+          de mensajes del chat. Solo la ve quien administra. */}
+      {(isSuperAdmin || isAdminRole(activeMembership?.role)) && <OnboardingBanner />}
     </div>
   )
 }
