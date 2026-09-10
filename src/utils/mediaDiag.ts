@@ -30,6 +30,13 @@ export function getMediaDiag(): MediaDiagEvent[] {
   return events;
 }
 
+// Solo en desarrollo o en el build de QA local (--mode qalocal, contra
+// emuladores): el script de QA del puesto del vendedor lee el registro completo,
+// no solo lo que entra en el panel. En el build de producción no existe.
+if ((import.meta.env?.DEV || import.meta.env?.MODE === 'qalocal') && typeof window !== 'undefined') {
+  (window as unknown as { __sfMediaDiag?: () => MediaDiagEvent[] }).__sfMediaDiag = () => events;
+}
+
 export function subscribeMediaDiag(listener: () => void): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };

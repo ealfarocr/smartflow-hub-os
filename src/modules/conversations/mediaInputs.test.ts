@@ -124,7 +124,43 @@ describe('showPicker se pide dentro del mismo gesto', () => {
 });
 
 describe('El banner de onboarding no tapa la barra del vendedor', () => {
-  it('solo lo ve quien administra el negocio', () => {
-    expect(layout).toContain('(isSuperAdmin || isAdminRole(activeMembership?.role)) && <OnboardingBanner />');
+  it('solo lo ve quien administra el negocio, y nunca en el chat', () => {
+    expect(layout).toContain("(isSuperAdmin || isAdminRole(activeMembership?.role)) && pathname !== '/conversaciones' && <OnboardingBanner />");
+  });
+});
+
+const toast = Object.values(
+  import.meta.glob('/src/components/ui/Toast.tsx', { query: '?raw', import: 'default', eager: true }),
+)[0] as string;
+
+// QA local (teléfono Android emulado): el toque del micrófono lo recibía el
+// texto de un aviso, y la cabecera del chat quedaba corrida por scrollIntoView.
+describe('Nada fijo tapa los controles del chat en el teléfono', () => {
+  it('los avisos van arriba en pantallas chicas y dejan pasar los toques', () => {
+    const raiz = toast.slice(toast.indexOf('<div data-toasts'), toast.indexOf('>', toast.indexOf('<div data-toasts')));
+    expect(raiz).toContain('top-[4.5rem]');
+    expect(raiz).toContain('pointer-events-none');
+    expect(raiz).not.toMatch(/(^|\s)bottom-4/);
+  });
+
+  it('el auto-scroll mueve solo la lista de mensajes, no los ancestros', () => {
+    expect(view).not.toContain('.scrollIntoView(');
+    expect(view).toContain('messagesScrollRef');
+  });
+
+  it('el alto del layout usa la pantalla visible (dvh) con respaldo a vh', () => {
+    expect(layout).toContain('supports-[height:100dvh]:h-[100dvh]');
+  });
+});
+
+describe('Cada etapa de subida queda marcada en el panel QA', () => {
+  it('auth, token, subida, URL y adjunto listo', () => {
+    ['_AUTH_OK', '_TOKEN_REFRESH_OK', '_UPLOAD_START', '_UPLOAD_OK', '_DOWNLOAD_URL_OK', '_FAILED_AT', '_ATTACHMENT_READY', '_FILE_SELECTED']
+      .forEach((s) => expect(view).toContain(s));
+  });
+
+  it('la nota de voz separa grabación, subida y envío', () => {
+    ['VOICE_TAP', 'MIC_PERMISSION_OK', 'RECORDER_START', 'RECORDER_STOP', 'VOICE_BLOB', "uploadToStorage(file, 'VOICE')", "etapa = 'send'"]
+      .forEach((s) => expect(view).toContain(s));
   });
 });

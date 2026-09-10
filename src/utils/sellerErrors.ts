@@ -112,6 +112,9 @@ export function sellerErrorMessage(layer: SellerErrorLayer, err: unknown): strin
   }
 
   // layer === 'send'
+  // failed-precondition en el envío = no hay integración de WhatsApp activa o le
+  // faltan tokens: lo resuelve el administrador, no reintentando.
+  if (code.includes('failed-precondition')) return META_BLOCKED_MESSAGE;
   if (code.includes('unavailable') || code.includes('deadline')) {
     return 'Sin conexión estable. El mensaje no salió: probá de nuevo.';
   }
@@ -164,7 +167,7 @@ export function isMetaAccountBlocker(errorMessage: string | null | undefined): b
 }
 
 export const META_BLOCKED_MESSAGE =
-  'WhatsApp no puede enviar en este momento. La cuenta de Meta del negocio requiere atención del administrador.';
+  'WhatsApp no puede enviar en este momento. La cuenta de WhatsApp requiere atención del administrador.';
 
 /** Qué mostrar cuando Meta rechaza un envío. */
 export function outboundRejectionMessage(errorMessage: string | null | undefined): string {

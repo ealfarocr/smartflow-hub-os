@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { signInWithCustomToken, signOut } from 'firebase/auth';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 import { auth } from '@/lib/firebase';
-import { useAuthStore } from '@/stores/authStore';
+import { useAuthStore, waitForSessionReady } from '@/stores/authStore';
 import { AuthService } from '@/services/AuthService';
 import {
   getOrCreateDeviceId,
@@ -34,6 +34,10 @@ import { Loader2, Delete, ArrowLeft, UserRound } from 'lucide-react';
 // El deviceId NUNCA cuenta como factor de autenticación: lo genera el propio
 // cliente y vive en localStorage, así que no es un secreto. Y el código nunca
 // se guarda: solo existe mientras se tipea.
+const KEYPAD_LOCK_MS = 800;
+const lockKeypad = (until: { current: number }) => { until.current = Date.now() + KEYPAD_LOCK_MS; };
+const isKeypadLocked = (until: { current: number }) => Date.now() < until.current;
+
 export const PinAccessView = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -66,7 +70,19 @@ export const PinAccessView = () => {
   const [hasDeviceSecret] = useState(() => !!getDeviceSecret());
   const quickEntryAvailable = !!identity && !forceCode && (hasLiveSession || hasDeviceSecret);
 
+  // Si la entrada rápida falla, el teclado aparece justo debajo del dedo que
+  // mantenía el botón: al soltar, ese toque caía en un dígito, lo escribía solo
+  // y borraba el mensaje que explicaba qué pasó (reproducido en el QA local).
+  // Durante un instante después del cambio de pantalla el teclado no escucha.
+  const keypadLockedUntil = useRef(0);
+  const showCodeAfterQuickEntry = (message: string) => {
+    lockKeypad(keypadLockedUntil);
+    setError(message);
+    setForceCode(true);
+  };
+
   const handleDigit = (d: string) => {
+    if (isKeypadLocked(keypadLockedUntil)) return;
     if (pin.length >= 6) return;
     setError('');
     setPin(pin + d);
@@ -105,9 +121,10 @@ export const PinAccessView = () => {
           { customToken: string; displayName: string }
         >(getFunctions(), 'loginWithDevice');
         const res = await loginWithDevice({ deviceId: getOrCreateDeviceId(), deviceSecret: secret, tenantId: identity.tenantId });
-        await signInWithCustomToken(auth, res.data.customToken);
+        const cred = await signInWithCustomToken(auth, res.data.customToken);
         await AuthService.linkPendingMembership();
         playAccessFeedback();
+        await waitForSessionReady(cred.user.uid);
         navigate('/', { replace: true });
         return;
       }
@@ -123,11 +140,10 @@ export const PinAccessView = () => {
           // Ya no está habilitada en el negocio: no alcanza con pedirle el
           // código, hay que cerrarle la sesión.
           try { await signOut(auth); } catch { /* igual seguimos */ }
-          setError('Tu acceso fue desactivado. Hablá con tu jefe o encargado.');
+          showCodeAfterQuickEntry('Tu acceso fue desactivado. Hablá con tu jefe o encargado.');
         } else {
-          setError('Este equipo ya no está reconocido. Entrá con tu código de acceso.');
+          showCodeAfterQuickEntry('Este equipo ya no está reconocido. Entrá con tu código de acceso.');
         }
-        setForceCode(true);
         return;
       }
 
@@ -138,8 +154,7 @@ export const PinAccessView = () => {
       // ya no sirve. Se descarta (asi no se reintenta en cada apertura) y se pide
       // el codigo, que es exactamente para lo que existe: la recuperacion.
       if (!hasLiveSession) forgetDeviceSecret();
-      setError('No se pudo entrar con este equipo. Usá tu código de acceso.');
-      setForceCode(true);
+      showCodeAfterQuickEntry('No se pudo entrar con este equipo. Usá tu código de acceso.');
     } finally {
       setIsProcessing(false);
     }
@@ -166,7 +181,7 @@ export const PinAccessView = () => {
         pin,
       });
 
-      await signInWithCustomToken(auth, result.data.customToken);
+      const cred = await signInWithCustomToken(auth, result.data.customToken);
       await AuthService.linkPendingMembership();
 
       const confirmed: VendorIdentity = {
@@ -207,6 +222,7 @@ export const PinAccessView = () => {
 
       rememberVendorIdentity(confirmed);
       playAccessFeedback();
+      await waitForSessionReady(cred.user.uid);
       navigate('/', { replace: true });
     } catch (err: unknown) {
       setPin('');

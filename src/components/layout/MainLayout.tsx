@@ -136,7 +136,11 @@ export const MainLayout = () => {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 dark:bg-slate-900 overflow-hidden relative">
+    // 100dvh donde exista: en Chrome Android 100vh mide la pantalla SIN la barra
+    // de direcciones, así que con la barra visible la parte de abajo del chat (el
+    // clip, la cámara, el micrófono, enviar) quedaba por debajo del borde visible.
+    // Navegadores sin dvh se quedan con 100vh, como antes.
+    <div className="flex h-[100vh] supports-[height:100dvh]:h-[100dvh] bg-slate-50 dark:bg-slate-900 overflow-hidden relative">
       <ToastContainer />
       
       {/* Mobile Menu Overlay */}
@@ -465,8 +469,9 @@ export const MainLayout = () => {
           activar herramientas en la Tienda): a un vendedor lo mandaban a rutas que
           para el son 'Acceso restringido'. Ademas es una tarjeta fija de hasta
           384px anclada abajo con z-50, que en un telefono queda encima de la barra
-          de mensajes del chat. Solo la ve quien administra. */}
-      {(isSuperAdmin || isAdminRole(activeMembership?.role)) && <OnboardingBanner />}
+          de mensajes del chat. Solo la ve quien administra, y nunca en el chat:
+          ahí también le tapaba el clip y la cámara al Owner. */}
+      {(isSuperAdmin || isAdminRole(activeMembership?.role)) && pathname !== '/conversaciones' && <OnboardingBanner />}
     </div>
   )
 }

@@ -21,7 +21,8 @@ function describeTarget(el: EventTarget | null): string {
  * prueba caían SOBRE EL PANEL (TOQUE registraba div.fixed / div.text-emerald),
  * así que nunca llegaban al clip y el diagnóstico se contaminaba a sí mismo.
  * Ahora todo el panel es pointer-events-none; lo único que recibe toques es la
- * pastilla chiquita de arriba a la izquierda para plegarlo y limpiarlo.
+ * pastilla chiquita para plegarlo y limpiarlo — a media altura sobre el borde
+ * izquierdo: arriba a la izquierda tapaba el botón del menú.
  *
  * Además de registrar qué elemento recibe cada toque, detecta el caso que
  * importa: si el dedo cae DENTRO del área de un control multimedia pero el
@@ -61,7 +62,7 @@ export const MediaDiagPanel = ({ isSuperAdmin }: { isSuperAdmin: boolean }) => {
   if (!enabled) return null;
 
   return (
-    <div className="fixed top-1 left-1 z-[9998] max-w-[72vw] text-[9px] font-mono pointer-events-none select-none">
+    <div className="fixed top-[38%] left-1 z-[9998] max-w-[72vw] text-[9px] font-mono pointer-events-none select-none">
       <div ref={pillRef} className="pointer-events-auto inline-flex items-center gap-1 rounded-md bg-black/80 px-1.5 py-0.5">
         <button type="button" onClick={() => setOpen((v) => !v)} className="text-emerald-300 font-bold">
           QA {open ? '▾' : '▸'} {events.length}

@@ -5,6 +5,8 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useAuthStore } from '@/stores/authStore';
 import { PaymentService, PaymentMethod } from '@/services/firebase/PaymentService';
 import { useConversationStore } from '@/stores/conversationStore';
+import { isAdminRole } from '@/utils/permissions';
+import { errorCodeOf, outboundRejectionMessage, sellerErrorMessage, shouldNotify } from '@/utils/sellerErrors';
 
 interface CreatePaymentLinkModalProps {
   onClose: () => void;
@@ -100,7 +102,10 @@ export const CreatePaymentLinkModal = ({
 
   const handleCurrencyChange = async (newCurrency: string) => {
     setCurrencyCode(newCurrency);
-    if (activeMembership?.tenantId) {
+    // La moneda por defecto del negocio es configuración de Owner/Admin: para el
+    // asesor el cambio vale solo para este cobro (la Rule de settings le niega
+    // la escritura, y antes eso fallaba en silencio en cada cambio).
+    if (activeMembership?.tenantId && isAdminRole(activeMembership.role)) {
       try {
         await updateSettings(activeMembership.tenantId, {
           commercial: { ...commercial, currency: newCurrency }
@@ -161,7 +166,13 @@ export const CreatePaymentLinkModal = ({
 
       if (conversationId && activeMembership?.tenantId) {
         // Opción A: mandar las instrucciones directo al chat, sin paso extra.
-        await sendMessage(conversationId, message, 'advisor', activeMembership.tenantId);
+        // Meta puede rechazar con HTTP 200 y success:false (sin excepción): antes
+        // se anunciaba "enviadas" igual. El cobro quedó registrado de todas formas.
+        const result = await sendMessage(conversationId, message, 'advisor', activeMembership.tenantId);
+        if (result && result.success === false) {
+          addToast(outboundRejectionMessage(result.errorMessage), 'error');
+          return;
+        }
         addToast('Instrucciones de pago enviadas', 'success');
       } else {
         // Sin conversación activa (ej. desde /pagos): abrir WhatsApp con el
@@ -171,9 +182,11 @@ export const CreatePaymentLinkModal = ({
 
       setSent(true);
     } catch (error: any) {
+      // El código técnico queda en consola; el vendedor recibe algo accionable.
       console.error("Error sending payment instructions", error);
-      const msg = error?.code || error?.message || 'Error desconocido';
-      addToast(`Error al enviar instrucciones: ${msg}`, 'error');
+      if (shouldNotify(`payment:${errorCodeOf(error) || 'sin-codigo'}`)) {
+        addToast(sellerErrorMessage('send', error), 'error');
+      }
     } finally {
       setIsSending(false);
     }

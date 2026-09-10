@@ -26,7 +26,8 @@ export const useUIStore = create<UIState>((set) => ({
   })),
   
   addToast: (message, type = 'info') => {
-    const id = `toast-${Date.now()}`;
+    // Sufijo al azar: dos avisos en el mismo milisegundo compartían id (y key).
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     set((state) => ({
       toasts: [...state.toasts, { id, type, message }]
     }));

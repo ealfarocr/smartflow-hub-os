@@ -269,3 +269,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     get().initializeAuthListener();
   }
 }));
+
+/**
+ * Espera a que el listener de Auth termine de cargar perfil y membresías de
+ * `uid` (isAuthenticated). signInWithCustomToken resuelve ANTES de eso: si se
+ * navega a '/' en ese momento, ProtectedRoute todavía ve la sesión cerrada y
+ * rebota a /acceso — la reentrada rápida "no hacía nada" al primer intento
+ * (reproducido en el QA local del puesto del vendedor). Resuelve false si se
+ * agota el tiempo; quien llama navega igual.
+ */
+export function waitForSessionReady(uid: string, timeoutMs = 20000): Promise<boolean> {
+  // users/{uid} no siempre guarda el campo id: si falta, alcanza con que la
+  // sesión esté marcada como abierta.
+  const ready = (s: AuthState) => s.isAuthenticated && (!s.user?.id || s.user.id === uid);
+  if (ready(useAuthStore.getState())) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { unsubscribe(); resolve(false); }, timeoutMs);
+    const unsubscribe = useAuthStore.subscribe((s) => {
+      if (ready(s)) { clearTimeout(timer); unsubscribe(); resolve(true); }
+    });
+  });
+}

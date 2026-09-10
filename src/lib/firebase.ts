@@ -9,7 +9,7 @@ import {
 } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
-import { getStorage } from 'firebase/storage';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -51,9 +51,27 @@ export const db = getFirestore(app);
 export const functions = getFunctions(app);
 export const storage = getStorage(app);
 
-// Use emulator if explicitly set in env
+// Use emulator if explicitly set in env. Los puertos se pueden cambiar por env
+// (el QA local del puesto del vendedor usa los de firebase.e2e.json) y Storage
+// también va al emulador: sin eso, un adjunto de prueba subía a producción.
 if (import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true') {
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099');
-  connectFirestoreEmulator(db, '127.0.0.1', 8080);
-  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+  const port = (name: string, fallback: number) => Number(import.meta.env[name]) || fallback;
+  // disableWarnings: el aviso del emulador es una barra FIJA abajo que tapa la
+  // barra de mensajes del chat (el QA local la detectó como CLIP_COVERED_BY).
+  // El aviso sigue saliendo en consola.
+  connectAuthEmulator(auth, `http://127.0.0.1:${port('VITE_EMULATOR_AUTH_PORT', 9099)}`, { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', port('VITE_EMULATOR_FIRESTORE_PORT', 8080));
+  connectFunctionsEmulator(functions, '127.0.0.1', port('VITE_EMULATOR_FUNCTIONS_PORT', 5001));
+  connectStorageEmulator(storage, '127.0.0.1', port('VITE_EMULATOR_STORAGE_PORT', 9199));
+}
+
+// Solo en el build de QA local (--mode qalocal): el script de QA entra como
+// Owner con un token del emulador de Auth. En producción esta rama no existe.
+if (import.meta.env.MODE === 'qalocal' && import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true') {
+  import('firebase/auth').then(({ signInWithCustomToken }) => {
+    (window as unknown as { __sfQaAuth?: unknown }).__sfQaAuth = {
+      currentUser: () => !!auth.currentUser,
+      signInWithCustomToken: (t: string) => signInWithCustomToken(auth, t),
+    };
+  });
 }

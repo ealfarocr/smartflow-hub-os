@@ -46,7 +46,8 @@ const crypto = __importStar(require("crypto"));
 // estáticos sobre admin.firestore (le rompe igual a código preexistente e
 // intacto como registerDevice) — y sin esto el ciclo de acceso no se puede
 // probar de punta a punta contra emuladores. Acotado a las funciones del
-// ciclo de acceso: el resto del archivo queda como estaba.
+// ciclo de acceso y del puesto del vendedor (setOperationalStatus,
+// tickPresence, claimConversation): el resto del archivo queda como estaba.
 const firestore_1 = require("firebase-admin/firestore");
 const Busboy = __importStar(require("busboy"));
 const https_1 = require("firebase-functions/v2/https");
@@ -3471,9 +3472,9 @@ exports.setOperationalStatus = (0, https_1.onCall)({ maxInstances: 10 }, async (
             tx.set(sessionRef, {
                 tenantId,
                 userId: uid,
-                startedAt: admin.firestore.FieldValue.serverTimestamp(),
+                startedAt: firestore_1.FieldValue.serverTimestamp(),
                 endedAt: null,
-                lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+                lastSeenAt: firestore_1.FieldValue.serverTimestamp(),
                 activeSeconds: 0,
                 idleSeconds: 0,
                 status: toStatus,
@@ -3482,7 +3483,7 @@ exports.setOperationalStatus = (0, https_1.onCall)({ maxInstances: 10 }, async (
         }
         else if (toStatus === 'off_shift' && activeSessionId) {
             tx.update(db.collection('work_sessions').doc(activeSessionId), {
-                endedAt: admin.firestore.FieldValue.serverTimestamp(),
+                endedAt: firestore_1.FieldValue.serverTimestamp(),
                 status: toStatus,
             });
             nextSessionId = null;
@@ -3494,16 +3495,16 @@ exports.setOperationalStatus = (0, https_1.onCall)({ maxInstances: 10 }, async (
             uid,
             tenantId,
             operationalStatus: toStatus,
-            operationalStatusChangedAt: admin.firestore.FieldValue.serverTimestamp(),
+            operationalStatusChangedAt: firestore_1.FieldValue.serverTimestamp(),
             activeWorkSessionId: nextSessionId,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firestore_1.FieldValue.serverTimestamp(),
         }, { merge: true });
         tx.set(db.collection('work_status_events').doc(), {
             tenantId,
             userId: uid,
             fromStatus,
             toStatus,
-            changedAt: admin.firestore.FieldValue.serverTimestamp(),
+            changedAt: firestore_1.FieldValue.serverTimestamp(),
         });
     });
     console.log('OPERATIONAL_STATUS_CHANGED', { tenantId, uid, toStatus });
@@ -3552,8 +3553,8 @@ exports.tickPresence = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
             return;
         const field = hadActivity ? 'activeSeconds' : 'idleSeconds';
         tx.update(sessionRef, {
-            [field]: admin.firestore.FieldValue.increment(elapsedSeconds),
-            lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+            [field]: firestore_1.FieldValue.increment(elapsedSeconds),
+            lastSeenAt: firestore_1.FieldValue.serverTimestamp(),
         });
     });
     return { ticked: true };
@@ -3614,10 +3615,10 @@ exports.claimConversation = (0, https_1.onCall)({ maxInstances: 10 }, async (req
             }
             tx.update(convRef, {
                 advisorId: uid,
-                assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+                assignedAt: firestore_1.FieldValue.serverTimestamp(),
                 assignedBy: uid,
                 assignmentSource: 'manual_claim',
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: firestore_1.FieldValue.serverTimestamp(),
             });
             return { conversationId, advisorId: uid };
         });

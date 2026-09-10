@@ -78,6 +78,7 @@ export const ConversationsPageView = () => {
   const [retryingMsgId, setRetryingMsgId] = useState<string | null>(null);
   const [isClaiming, setIsClaiming] = useState(false);
   const messagesEndRef               = useRef<HTMLDivElement>(null);
+  const messagesScrollRef            = useRef<HTMLDivElement>(null);
   const [searchParams]               = useSearchParams();
   const navigate                     = useNavigate();
   const leadIdQuery                  = searchParams.get('leadId');
@@ -182,7 +183,11 @@ export const ConversationsPageView = () => {
   }, [activeConversation, subscribeMessages, conversations, markAsRead]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Se desplaza SOLO la lista de mensajes. scrollIntoView movía también cada
+    // ancestro — incluidos los overflow-hidden y la página — y en el teléfono la
+    // cabecera del chat (volver, Tomar) quedaba corrida debajo de otros botones.
+    const list = messagesScrollRef.current;
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
   }, [activeMessages]);
 
   // Modo Libre — reclamo atómico de una conversación sin asesor. La decisión
@@ -365,13 +370,36 @@ export const ConversationsPageView = () => {
       addToast(sellerErrorMessage(layer, err), 'error');
     }
   };
-  const uploadToStorage = async (file: File): Promise<string> => {
-    const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-    const { storage } = await import('@/lib/firebase');
-    const path = `chat-attachments/${activeMembership!.tenantId}/${Date.now()}-${file.name}`;
-    const storageRef = ref(storage, path);
-    await uploadBytes(storageRef, file, { contentType: file.type });
-    return getDownloadURL(storageRef);
+  // Subida con cada etapa marcada en el panel QA (<diag>_AUTH_OK, _TOKEN_REFRESH_OK,
+  // _UPLOAD_START, _UPLOAD_OK, _DOWNLOAD_URL_OK). Si falla, <diag>_FAILED_AT dice
+  // en QUÉ etapa y con qué código — para no volver a adivinar si fue la sesión,
+  // la Rule de Storage o la red. getIdToken() sin forzar renueva el token solo si
+  // venció: después de horas con la app abierta, la subida sale con uno vigente.
+  const uploadToStorage = async (file: File, diag: string): Promise<string> => {
+    let etapa = 'AUTH';
+    try {
+      const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+      const { storage, auth } = await import('@/lib/firebase');
+      const user = auth.currentUser;
+      if (!user) throw Object.assign(new Error('Sin sesión activa'), { code: 'auth/no-current-user' });
+      recordMediaDiag(`${diag}_AUTH_OK`);
+      etapa = 'TOKEN_REFRESH';
+      await user.getIdToken();
+      recordMediaDiag(`${diag}_TOKEN_REFRESH_OK`);
+      etapa = 'UPLOAD';
+      const path = `chat-attachments/${activeMembership!.tenantId}/${Date.now()}-${file.name}`;
+      const storageRef = ref(storage, path);
+      recordMediaDiag(`${diag}_UPLOAD_START`, { kb: Math.round(file.size / 1024), tipo: file.type || '(vacío)' });
+      await uploadBytes(storageRef, file, { contentType: file.type });
+      recordMediaDiag(`${diag}_UPLOAD_OK`);
+      etapa = 'DOWNLOAD_URL';
+      const url = await getDownloadURL(storageRef);
+      recordMediaDiag(`${diag}_DOWNLOAD_URL_OK`);
+      return url;
+    } catch (err) {
+      recordMediaDiag(`${diag}_FAILED_AT`, { etapa, codigo: errorCodeOf(err) || 'sin-codigo' });
+      throw err;
+    }
   };
 
   // Instrumentación temporal: el reporte en producción es que el chooser nativo de
@@ -385,7 +413,7 @@ export const ConversationsPageView = () => {
   };
   const voiceLog = (step: string, data?: Record<string, unknown>) => {
     console.log(`[VOICE] ${step}`, data ?? '');
-    recordMediaDiag(`VOICE_${step}`, data);
+    recordMediaDiag(step, data);
   };
   const debugAttach = (tag: string, data?: unknown) => {
     console.log(`[ATTACH] ${tag}`, data ?? '');
@@ -420,6 +448,8 @@ export const ConversationsPageView = () => {
   // reaccionar al toque del usuario. Cada ítem trackea su propio estado (uploading/ready/error).
   const addPendingMedia = (file: File, source: 'PHOTO' | 'VIDEO' | 'GALLERY' | 'ATTACH') => {
     debugAttach(`${source}_FILE_RECEIVED`, { name: file.name, size: file.size, type: file.type });
+    const diag = source === 'GALLERY' ? 'CLIP' : source;
+    recordMediaDiag(`${diag}_FILE_SELECTED`, { kb: Math.round(file.size / 1024), tipo: file.type || '(vacío)' });
     if (!activeMembership?.tenantId) {
       debugAttach(`${source}_ABORTED_NO_TENANT`);
       return;
@@ -449,6 +479,7 @@ export const ConversationsPageView = () => {
     }
     if (file.size > limit) {
       debugAttach(`${source}_REJECTED_TOO_LARGE`, { size: file.size, kind });
+      recordMediaDiag(`${diag}_REJECTED_TOO_LARGE`, { mb: +(file.size / 1048576).toFixed(1), tipo: kind });
       addToast(`El archivo pesa ${(file.size / 1048576).toFixed(1)}MB. WhatsApp acepta máximo ${(limit / 1048576).toFixed(0)}MB para ${MEDIA_KIND_LABEL[kind]}.`, 'error');
       return;
     }
@@ -462,9 +493,10 @@ export const ConversationsPageView = () => {
     // archivo termine de leerse antes de resetear su value — limpiarlo antes puede invalidar
     // el File en algunos navegadores móviles (mismo cuidado que ya se aplicaba acá).
     if (kind === 'video') debugAttach('VIDEO_UPLOAD_START', { id, name: file.name });
-    return uploadToStorage(file)
+    return uploadToStorage(file, diag)
       .then(url => {
         debugAttach(`${source}_ATTACHMENT_CREATED`, { url, name: file.name });
+        recordMediaDiag(`${diag}_ATTACHMENT_READY`, { tipo: kind });
         if (kind === 'video') debugAttach('VIDEO_UPLOAD_SUCCESS', { id, mediaUrl: url });
         setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'ready', remoteUrl: url } : m));
       })
@@ -506,10 +538,10 @@ export const ConversationsPageView = () => {
     cancelPendingStartRef.current = false;
     try {
       const recorder = new VoiceRecorder();
-      voiceLog('permission_requested', { hasMediaDevices: !!navigator.mediaDevices });
+      voiceLog('MIC_PERMISSION', { pedido: true, mediaDevices: !!navigator.mediaDevices });
       await recorder.start();
-      voiceLog('permission_granted');
-      voiceLog('recorder_started');
+      voiceLog('MIC_PERMISSION_OK');
+      voiceLog('RECORDER_START');
       // El permiso de micrófono puede tardar en resolverse (diálogo nativo del
       // navegador, sobre todo la primera vez) — si el usuario ya tocó "detener"
       // mientras tanto, no arrancar la grabación "fantasma".
@@ -533,8 +565,10 @@ export const ConversationsPageView = () => {
           return s + 1;
         });
       }, 1000);
-    } catch {
-      addToast('No se pudo acceder al micrófono. Revisá los permisos.', 'error');
+    } catch (err) {
+      const name = (err as { name?: string })?.name || 'desconocido';
+      voiceLog('MIC_PERMISSION_ERROR', { nombre: name });
+      addToast(sellerErrorMessage('mic', { code: name }), 'error');
     } finally {
       isStartingRecorderRef.current = false;
     }
@@ -559,23 +593,26 @@ export const ConversationsPageView = () => {
     setIsRecording(false);
     if (!activeConversation || !activeMembership?.tenantId) { setRecordSeconds(0); return; }
     setIsUploading(true);
-    voiceLog('recorder_stopped');
+    voiceLog('RECORDER_STOP');
+    // Cada etapa con su propia capa de error: antes TODO caía como 'upload', y
+    // una nota que subió bien pero que Meta no dejó salir decía "No se pudo subir
+    // el archivo" — el vendedor reintentaba algo que no estaba roto.
+    let etapa: SellerErrorLayer = 'mic';
     try {
       // La codificación a MP3 corre en el hilo principal y en un teléfono puede
       // tardar segundos: se cede un frame para que el spinner llegue a pintarse y
       // la interfaz no parezca congelada.
       await new Promise((r) => setTimeout(r, 0));
       const file = await recorder.stop();
-      voiceLog('blob_created', { sizeKB: Math.round(file.size / 1024), type: file.type });
+      voiceLog('VOICE_BLOB', { kb: Math.round(file.size / 1024), tipo: file.type });
       if (file.size < 1200) { addToast('La nota de voz quedó muy corta.', 'info'); return; }
-      voiceLog('upload_started');
-      const url = await uploadToStorage(file);
-      voiceLog('upload_completed');
-      voiceLog('send_attempted');
+      etapa = 'upload';
+      const url = await uploadToStorage(file, 'VOICE'); // VOICE_UPLOAD_START … VOICE_DOWNLOAD_URL_OK
+      etapa = 'send';
+      voiceLog('VOICE_SEND');
       reportOutboundResult(await sendMessage(activeConversation, '', 'advisor', activeMembership.tenantId, url, file.name));
     } catch (err) {
-      const esDeGrabacion = String((err as { name?: string })?.name || '').includes('Not');
-      handleSellerError(esDeGrabacion ? 'mic' : 'upload', err);
+      handleSellerError(etapa, err);
     } finally {
       setIsUploading(false);
       setRecordSeconds(0);
@@ -587,7 +624,7 @@ export const ConversationsPageView = () => {
   // permiso del micrófono todavía está pendiente, se marca para cancelar
   // apenas resuelva (evita una grabación "fantasma").
   const handleMicTap = () => {
-    voiceLog('button_pressed', { isRecording, isUploading });
+    voiceLog('VOICE_TAP', { grabando: isRecording, subiendo: isUploading });
     if (isUploading) return;
     if (isRecording) { stopAndSendRecording(); return; }
     if (isStartingRecorderRef.current) { cancelPendingStartRef.current = true; return; }
@@ -750,7 +787,7 @@ export const ConversationsPageView = () => {
             {/* Chat header */}
             <div className="bg-white dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 px-5 py-3 shrink-0 shadow-sm">
               <div className="flex items-center gap-4">
-                <button onClick={() => setActiveConversation('')} className="md:hidden text-slate-400 hover:text-slate-600">
+                <button onClick={() => setActiveConversation('')} aria-label="Volver a las conversaciones" className="md:hidden p-1.5 -m-1.5 text-slate-400 hover:text-slate-600">
                   <ArrowLeft className="w-5 h-5" />
                 </button>
 
@@ -851,7 +888,7 @@ export const ConversationsPageView = () => {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 md:px-6 py-4 space-y-3 scrollbar-hide">
+            <div ref={messagesScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden px-3 md:px-6 py-4 space-y-3 scrollbar-hide">
               {activeMessages.map(msg => (
                 <div key={msg.id} className={`flex flex-col ${msg.sender === 'advisor' ? 'items-end' : 'items-start'}`}>
                   <div className={`max-w-[85%] md:max-w-[72%] rounded-2xl px-3 md:px-4 py-3 shadow-sm ${
@@ -1366,10 +1403,16 @@ ${plantilla}` : plantilla);
               <div className="text-center py-10">
                 <Package className="w-8 h-8 text-slate-200 mx-auto mb-2" />
                 <p className="text-xs text-slate-400 mb-2">Catálogo vacío</p>
-                <button onClick={() => { setShowCatalogDrawer(false); navigate('/catalogo'); }}
-                  className="text-xs font-bold text-[#1877F2] hover:underline">
-                  Agregar productos
-                </button>
+                {/* Cargar productos es del Owner/Admin: al asesor este botón lo
+                    mandaba a /catalogo, que para él es "Acceso restringido". */}
+                {canOpenQuotesModule ? (
+                  <button onClick={() => { setShowCatalogDrawer(false); navigate('/catalogo'); }}
+                    className="text-xs font-bold text-[#1877F2] hover:underline">
+                    Agregar productos
+                  </button>
+                ) : (
+                  <p className="text-[10px] text-slate-400">Pedile a tu administrador que cargue los productos.</p>
+                )}
               </div>
             )}
           </div>

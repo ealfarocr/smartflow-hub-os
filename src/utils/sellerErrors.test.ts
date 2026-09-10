@@ -135,6 +135,11 @@ describe('Bloqueo de la cuenta de Meta: no es culpa del vendedor', () => {
     expect(META_BLOCKED_MESSAGE).not.toMatch(/unknown|error code|exception/i);
   });
 
+  it('sin integración activa (failed-precondition) el aviso es el del administrador', () => {
+    expect(sellerErrorMessage('send', { code: 'functions/failed-precondition' })).toBe(META_BLOCKED_MESSAGE);
+    expect(META_BLOCKED_MESSAGE).toContain('La cuenta de WhatsApp requiere atención del administrador.');
+  });
+
   it('un rechazo común de Meta no se disfraza de problema de cuenta', () => {
     expect(isMetaAccountBlocker('invalid phone number format')).toBe(false);
     expect(outboundRejectionMessage('invalid phone number format')).not.toBe(META_BLOCKED_MESSAGE);
