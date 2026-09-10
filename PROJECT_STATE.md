@@ -1,5 +1,131 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ DESPLEGADO — P0: el Asesor Comercial veía todo el menú administrativo (2026-09-10)
+
+**Reportado:** `eduardo pruebas` (ASESOR COMERCIAL), desde el teléfono, veía
+Usuarios, Mi Suscripción, Multi-Agente, Agente IA, Auditor IA, Integraciones y
+demás herramientas administrativas.
+
+### Causa raíz — el fallback por rol, no el login por código
+
+`ROLE_DEFAULT_TOOLS` devolvía `ALL_TOOL_KEYS` para **todos** los roles, incluido
+Asesor Comercial. Su membership no tiene `allowedTools` (ninguna la tiene), así
+que caía en ese fallback y recibía las 12 herramientas. **El rol se cargaba
+perfectamente** después de `loginWithPin`; simplemente no se usaba para nada en
+`permissions.ts`.
+
+Segundo agujero: `getEffectiveTools` nunca aplicaba el techo por rol que su
+propio comentario prometía ("allowedTools solo puede ESTRECHAR dentro de lo que
+el rol permite, nunca ampliarlo"). Nada lo hacía cumplir.
+
+### Fix — en un solo lugar
+
+- `ADVISOR_TOOLS` = `crm, conversaciones, pagos, cotizaciones, catalogo, agenda`.
+  **Cobros incluido**: el vendedor genera enlaces de pago para sus clientes.
+- `ADMIN_ONLY_TOOLS` suma `multi-agent`, `ai-agent` y `auditoria` (sus PANELES
+  son administrativos) a `usuarios/configuracion/integraciones`.
+- `getEffectiveTools` recorta las administrativas cuando el rol no es
+  Owner/Admin, venga del fallback o de una lista explícita.
+
+### Rutas — no alcanza con ocultar el menú
+
+- `/ai-agent`, `/multi-agent`, `/auditoria` → suman `RoleGuard(Admin, Owner)`.
+- `/suscripcion` → **no tenía ningún guard**; cualquier vendedor la abría
+  escribiendo la URL. Ahora `RoleGuard(Admin, Owner)`.
+- `/usuarios`, `/configuracion`, `/integraciones` ya estaban cerradas; el
+  problema ahí era que el menú igual las mostraba.
+
+### Menú
+
+El filtro salió de `MainLayout` a `navigationAccess.ts` para poder probarlo — el
+mismo `<aside>` sirve escritorio y móvil, así que **una sola función decide los
+dos**. "Mi Suscripción" no tenía `toolKey` ni filtro alguno: ahora es `adminOnly`.
+
+### Cobros — operación vs administración
+
+Las tarjetas de configuración financiera (PayPal, SINPE, cuentas bancarias)
+pasan a ser solo de Owner/Admin, igual que confirmar pagos manuales (que ya lo
+era). El Asesor sigue creando cobros, generando el enlace y consultando los
+suyos. El resto de la lógica de Cobros no se tocó.
+
+### Lo que NO se tocó
+
+Los procesos de fondo siguen igual: el Auditor IA sigue analizando todas las
+conversaciones del tenant, el Agente IA sigue respondiendo y el asesor sigue
+siendo elegible para los leads del Multi-Agente. Solo cambia quién ve los
+paneles. Tampoco se tocaron WhatsApp ni Payments más allá de lo descrito.
+
+**Decisión señalada:** `Técnico` y `Solo lectura` se dejaron con el fallback
+amplio — no fueron parte del pedido y no hay usuarios de esos roles en USADITOS.
+Igual quedan recortados por `ADMIN_ONLY_TOOLS`. `Tienda Hub` y `Paquetes` no
+estaban en ninguna de las dos listas del pedido, así que siguen visibles.
+
+### Pruebas
+
+**200/200** (22 nuevos). El test del menú corre contra el array **real** de
+`MainLayout`, no una copia, así que un ítem administrativo nuevo sin protección
+lo va a atrapar. Cubre: el Asesor ve exactamente Dashboard, Mis Tareas, CRM,
+WhatsApp, Cobros, Cotizaciones, Catálogo y Agenda; no ve ninguna administrativa
+**ni aunque un admin le marque todas las herramientas a mano**; Owner, Admin y
+SuperAdmin sin regresión; y los feature flags del tenant siguen mandando.
+
+Commit `080d83d`. Deploy: `hosting:app`. Bundle verificado (`index-Dz901kVb.js`).
+
+---
+
+## ✅ DESPLEGADO — Entrada rápida en equipo reconocido + "código de acceso" (2026-09-10)
+
+Flujo diario: abrir SmartFlow → `Hola <nombre>` → mantener presionado 2 segundos
+→ sonido/vibración → adentro.
+
+**Qué autoriza el gesto y qué no.** El botón NO es un método de autenticación y
+no reemplaza al código. Solo aparece cuando la **sesión de Firebase de este
+navegador sigue viva**, o sea que la persona ya está autenticada y su refresh
+token es la credencial real ligada al equipo. El `deviceId` **no** cuenta como
+factor: lo genera el propio cliente y vive en `localStorage`, así que no es un
+secreto. Sin sesión viva (logout, tokens revocados al desactivar a alguien, o
+código regenerado) se sigue pidiendo el código de acceso, que es lo único que
+puede emitir un customToken nuevo. Nada de PIN en texto plano en `localStorage`.
+
+`verifyDeviceSession` (Function nueva) revalida en el **servidor** en cada
+entrada rápida: membership activa, equipo registrado, no revocado, del mismo uid
+y del mismo tenant. Devuelve además qué debe hacer la UI: `require-code`
+(problema del equipo) o `sign-out` (la persona ya no está habilitada).
+
+El progreso se cancela al soltar, al salirse del botón o si la pestaña pasa a
+segundo plano. Sonido: dos notas ascendentes sintetizadas con Web Audio, 420 ms,
+pico 0.16, sin archivo ni CDN (la CSP bloquea media externa). Háptico que
+respeta "reducir movimiento" y que no existe en iOS. Fallbacks siempre visibles:
+"Usar código de acceso" y "Cambiar de usuario" (que ahora además cierra la
+sesión). "PIN" pasa a llamarse "código de acceso" en los 15 textos visibles.
+
+**73/73** E2E contra emuladores reales + **155/155** unitarios en su momento.
+Commit `6f60780`. Deploy: `functions:verifyDeviceSession` + `hosting:app`.
+
+### ⚠️ Lo que no pude verificar yo
+
+La interacción física del botón (mantener 2 s, vibración, sonido) y el menú del
+Asesor **en pantalla**: las dos cosas necesitan una sesión real y no puedo
+autenticarme en la app. El proyecto no tiene entorno DOM de tests y no instalé
+dependencias nuevas para eso. Lo verificado es: lógica con tests, backend con
+E2E contra emuladores, y el bundle desplegado.
+
+### Próximo paso exacto
+
+QA de Eduardo, en el teléfono con `eduardo pruebas`:
+1. el menú debe mostrar **solo** Dashboard, Mis Tareas, CRM, WhatsApp, Cobros,
+   Cotizaciones, Catálogo, Agenda;
+2. escribir a mano `/usuarios`, `/multi-agent`, `/ai-agent`, `/auditoria`,
+   `/integraciones`, `/configuracion` y `/suscripcion` → debe decir "Acceso
+   Restringido";
+3. en Cobros: puede crear un cobro y copiar el enlace, y **no** debe ver las
+   tarjetas de PayPal/SINPE/cuentas bancarias;
+4. cerrar y volver a abrir → `Hola eduardo pruebas` y el botón de mantener
+   presionado; probar también "Usar código de acceso" y "Cambiar de usuario";
+5. con `EDUARDO ADMIN` confirmar que sigue viendo todo.
+
+**No activar vendedoras reales hasta cerrar ese ciclo.**
+
 ## ✅ RESUELTO — "El botón Entrar con PIN no aparece en producción" (2026-09-10)
 
 **El código SÍ estaba desplegado.** Lo que fallaba era la caché de las rutas de

@@ -2,6 +2,59 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-10 — P0: el Asesor Comercial veía y podía abrir todo el menú administrativo
+
+- fix(causa raíz): `ROLE_DEFAULT_TOOLS` devolvía `ALL_TOOL_KEYS` para TODOS los
+  roles. Como ninguna membership tiene `allowedTools`, el Asesor caía en ese
+  fallback y recibía las 12 herramientas. El rol se cargaba bien tras
+  `loginWithPin` — no se usaba para nada en `permissions.ts`.
+- fix(segundo agujero): `getEffectiveTools` nunca aplicaba el techo por rol que
+  su propio comentario prometía; una lista explícita con herramientas
+  administrativas se las concedía igual a un Asesor. Ahora se recorta ahí, en un
+  solo lugar, así menú y guards no se desincronizan.
+- feat: `ADVISOR_TOOLS` = crm, conversaciones, pagos, cotizaciones, catalogo,
+  agenda. Cobros INCLUIDO (el vendedor genera enlaces de pago para sus clientes).
+- feat: `ADMIN_ONLY_TOOLS` suma multi-agent, ai-agent y auditoria — sus PANELES
+  son administrativos; los procesos de fondo siguen corriendo para todos.
+- fix(rutas): `/ai-agent`, `/multi-agent` y `/auditoria` suman
+  `RoleGuard(Admin, Owner)` además del ToolGuard. `/suscripcion` NO TENÍA NINGÚN
+  GUARD y cualquier vendedor la abría por URL: ahora también.
+- refactor: el filtro del menú sale de `MainLayout` a `navigationAccess.ts` para
+  poder probarlo (el mismo `<aside>` sirve escritorio y móvil). "Mi Suscripción"
+  no tenía `toolKey` ni filtro: ahora es `adminOnly`.
+- fix(Cobros): las tarjetas de configuración financiera (PayPal, SINPE, cuentas
+  bancarias) pasan a ser solo de Owner/Admin, igual que confirmar pagos manuales.
+  El Asesor sigue creando cobros y copiando el enlace. Resto de la lógica intacto.
+- test: 200/200 (22 nuevos). El test del menú corre contra el array REAL de
+  MainLayout, así que atrapa cualquier ítem administrativo nuevo sin protección.
+- nota: `Técnico` y `Solo lectura` quedan con el fallback amplio (no fueron parte
+  del pedido, no hay usuarios de esos roles en USADITOS); igual los recorta
+  `ADMIN_ONLY_TOOLS`. `Tienda Hub` y `Paquetes` no estaban en ninguna lista.
+- deploy: `hosting:app`. Commit `080d83d`. Bundle verificado (`index-Dz901kVb.js`).
+
+## 2026-09-10 — Entrada rápida en equipo reconocido (mantener presionado) + "código de acceso"
+
+- feat: en `/acceso`, con la sesión de Firebase viva, "Hola <nombre>" + botón de
+  encendido que hay que mantener 2 s, con anillo de progreso, vibración y una
+  firma sonora corta. Fallbacks siempre visibles: "Usar código de acceso" y
+  "Cambiar de usuario" (que ahora además cierra la sesión).
+- seguridad: el gesto NO autentica ni reemplaza al código. Solo aparece con
+  sesión viva (el refresh token es la credencial real del equipo). El `deviceId`
+  no es un factor: lo genera el cliente y vive en localStorage. Sin sesión viva
+  se sigue pidiendo el código. Nada de PIN en texto plano.
+- feat: `verifyDeviceSession` revalida en el SERVIDOR cada entrada rápida
+  (membership activa, equipo registrado, no revocado, mismo uid, mismo tenant) y
+  dice qué hacer si falla: pedir código o cerrar sesión.
+- feat: firma sonora de 420 ms sintetizada con Web Audio — sin archivo ni CDN (la
+  CSP bloquea media externa), pico bajo, solo tras entrar. Háptico que respeta
+  "reducir movimiento" y que en iOS simplemente no hace nada.
+- ux: "PIN" pasa a llamarse "código de acceso" en los 15 textos visibles.
+- test: 73/73 E2E contra emuladores reales (antes 65) + 155/155 unitarios.
+- deploy: `functions:verifyDeviceSession` + `hosting:app`. Commit `6f60780`.
+- pendiente: la interacción física del botón y el menú del Asesor en pantalla
+  necesitan una sesión real; no puedo autenticarme en la app.
+
+
 ## 2026-09-10 — Las rutas de la app se cacheaban 1 hora: los deploys tardaban en verse
 
 - auditoría: el bundle vivo SÍ tenía el botón. `/login` servía
