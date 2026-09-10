@@ -1,6 +1,28 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-10 — P0 vendedor: un adjunto fallido ya no expulsa, y galeria/camara simplificadas
+
+- fix(bug propio): handleSellerError trataba storage/unauthorized como sesion muerta
+  y hacia signOut. Ese codigo puede ser una Rule, una ruta o un limite. Ahora es
+  SOSPECHA: se fuerza un refresh real del ID token y solo se reautentica si Firebase
+  confirma token expirado / usuario deshabilitado / token invalido. Un fallo de red
+  tampoco expulsa.
+- fix(bug propio): los tres pipelines apilaban el mismo aviso tres veces con tres
+  redirecciones. Deduplicacion por causa con ventana de 8s.
+- ux: el menu confuso de Android (Camara, otra Camara, Grabadora, Fotos) lo producia
+  el accept del boton Adjuntar, que mezclaba image/video/audio. Ahora: 'Fotos y
+  videos' (sin capture), 'Camara' con solo Tomar foto / Grabar video, y
+  'Documentos' aparte con accept solo de PDF/Office. Se quito la 'Galeria'
+  duplicada del menu de camara.
+- ux: long press de acceso rapido de 2s a 1s; anillo, cancelacion, haptic y sonido
+  intactos. Sin cambios en el modelo de seguridad.
+- test: 234/234 (12 nuevos). Deploy hosting:app, commit 26aa987, bundle
+  index-DjV4IxHS.js verificado en produccion.
+- pendiente: la causa del fallo de upload EN EL TELEFONO sigue sin determinar (las
+  Rules pasan 8/8 y Storage esta sano). Ahora el fallo no expulsa y deja mensaje
+  especifico + log, para poder capturarlo. Camara, video y audio sin probar fisicamente.
+
 ## 2026-09-10 — P0 puesto de vendedor: una sesion muerta rompia texto, adjuntos y notas de voz
 
 - auditoria: Storage sano (bucket, facturacion y escritura con Admin SDK OK) y CERO

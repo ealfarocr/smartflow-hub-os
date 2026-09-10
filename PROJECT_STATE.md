@@ -1,5 +1,59 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 P0 puesto de vendedor — segunda ronda desplegada (2026-09-10)
+
+Eduardo confirmó que el **long press funciona físicamente**. Bajado a **1 s**
+(anillo, cancelación al soltar, vibración y sonido intactos; el modelo de
+seguridad no se tocó).
+
+### Dos bugs MÍOS del deploy anterior, corregidos
+
+**Expulsaba al vendedor por un adjunto fallido.** `handleSellerError` trataba
+`storage/unauthorized` como sesión muerta y hacía signOut. Ese código puede ser
+una Rule, una ruta o un límite — y sacarla le hace perder la conversación que
+estaba atendiendo. Ahora es SOSPECHA, no veredicto: antes de reautenticar se le
+pregunta a Firebase forzando un refresh real del ID token. Si el token se
+renueva, la sesión está viva y solo se informa el fallo de esa capa. Solo se
+reautentica si Firebase confirma token expirado, usuario deshabilitado o token
+inválido. Un fallo de red al refrescar tampoco expulsa.
+
+**Tres avisos apilados.** Los tres pipelines mostraban el mismo mensaje tres
+veces y disparaban tres redirecciones. Deduplicación por causa (ventana de 8 s):
+una causa, un aviso, una redirección.
+
+### Galería y cámara simplificadas
+
+El menú confuso de Android lo producía el input de "Adjuntar", cuyo `accept`
+mezclaba `image/*`, `video/*` y `audio/*`. Ahora hay tres entradas separadas y
+claras: **Fotos y videos** (sin `capture`, abre el selector de medios),
+**Cámara** (solo "Tomar foto" y "Grabar video") y **Documentos** (solo PDF/Office,
+para no perder el envío de cotizaciones). Se quitó la opción "Galería"
+duplicada del menú de cámara.
+
+234/234 tests. Commit `26aa987`. Deploy `hosting:app`, bundle `index-DjV4IxHS.js`
+verificado en producción.
+
+### ⚠️ Lo que sigue SIN cerrar
+
+**Por qué falla el upload en el teléfono real (P0-B): no está determinado.** Las
+Rules pasan 8/8 en emulador y Storage está sano, así que la causa está en el
+dispositivo. Hasta ahora era imposible diagnosticarlo porque la app expulsaba al
+vendedor apenas fallaba; con eso corregido, el fallo ahora muestra un mensaje
+específico de capa y deja la sesión viva, y queda registro en consola
+(`[SELLER_ERROR:upload]`). **Hace falta el error exacto desde el teléfono.**
+
+Cámara, video y audio: **no probados físicamente**. No los declaro OK.
+
+### Próximo paso exacto
+
+En el teléfono, sin regenerar el código antes:
+1. entrar, cerrar la app, reabrir → acceso rápido de 1 s;
+2. en una conversación probar **Fotos y videos**, **Cámara → Tomar foto**,
+   **Cámara → Grabar video** y la nota de voz;
+3. si algo falla: **anotar el mensaje exacto** y confirmar que NO lo saca de la
+   sesión ni aparecen avisos repetidos;
+4. confirmar que `Cobrar / Enviar pago` está primero y en verde.
+
 ## 🔶 EN CURSO — P0 puesto de vendedor USADITOS (2026-09-10)
 
 Loop P0 autónomo. **Avanzado y desplegado lo de mayor impacto; queda pendiente
