@@ -379,6 +379,12 @@ export const ConversationsPageView = () => {
   // Estos logs marcan cada paso (click → input disparado → change → archivo recibido →
   // attachment creado) para poder ver en remote debugging (chrome://inspect) exactamente
   // dónde se corta el flujo en un teléfono real. Quitar una vez confirmado en producción.
+  const mediaUi = (step: string, data?: Record<string, unknown>) => {
+    console.log(`[MEDIA_UI] ${step}`, data ?? '');
+  };
+  const voiceLog = (step: string, data?: Record<string, unknown>) => {
+    console.log(`[VOICE] ${step}`, data ?? '');
+  };
   const debugAttach = (tag: string, data?: unknown) => {
     console.log(`[ATTACH] ${tag}`, data ?? '');
   };
@@ -498,7 +504,10 @@ export const ConversationsPageView = () => {
     cancelPendingStartRef.current = false;
     try {
       const recorder = new VoiceRecorder();
+      voiceLog('permission_requested', { hasMediaDevices: !!navigator.mediaDevices });
       await recorder.start();
+      voiceLog('permission_granted');
+      voiceLog('recorder_started');
       // El permiso de micrófono puede tardar en resolverse (diálogo nativo del
       // navegador, sobre todo la primera vez) — si el usuario ya tocó "detener"
       // mientras tanto, no arrancar la grabación "fantasma".
@@ -548,11 +557,20 @@ export const ConversationsPageView = () => {
     setIsRecording(false);
     if (!activeConversation || !activeMembership?.tenantId) { setRecordSeconds(0); return; }
     setIsUploading(true);
+    voiceLog('recorder_stopped');
     try {
+      // La codificación a MP3 corre en el hilo principal y en un teléfono puede
+      // tardar segundos: se cede un frame para que el spinner llegue a pintarse y
+      // la interfaz no parezca congelada.
+      await new Promise((r) => setTimeout(r, 0));
       const file = await recorder.stop();
+      voiceLog('blob_created', { sizeKB: Math.round(file.size / 1024), type: file.type });
       if (file.size < 1200) { addToast('La nota de voz quedó muy corta.', 'info'); return; }
+      voiceLog('upload_started');
       const url = await uploadToStorage(file);
-      await sendMessage(activeConversation, '', 'advisor', activeMembership.tenantId, url, file.name);
+      voiceLog('upload_completed');
+      voiceLog('send_attempted');
+      reportOutboundResult(await sendMessage(activeConversation, '', 'advisor', activeMembership.tenantId, url, file.name));
     } catch (err) {
       const esDeGrabacion = String((err as { name?: string })?.name || '').includes('Not');
       handleSellerError(esDeGrabacion ? 'mic' : 'upload', err);
@@ -567,6 +585,7 @@ export const ConversationsPageView = () => {
   // permiso del micrófono todavía está pendiente, se marca para cancelar
   // apenas resuelva (evita una grabación "fantasma").
   const handleMicTap = () => {
+    voiceLog('button_pressed', { isRecording, isUploading });
     if (isUploading) return;
     if (isRecording) { stopAndSendRecording(); return; }
     if (isStartingRecorderRef.current) { cancelPendingStartRef.current = true; return; }
@@ -1133,7 +1152,7 @@ ${plantilla}` : plantilla);
                       capture="environment"
                       className="hidden"
                       onChange={async e => {
-                        debugAttach('PHOTO_CHANGE', { filesLength: e.target.files?.length ?? 0 });
+                        mediaUi('photo_change_fired', { filesLength: e.target.files?.length ?? 0 });
                         const files = e.target.files;
                         if (files?.length) await handleFilesSelected(files, 'PHOTO');
                         e.target.value = '';
@@ -1175,7 +1194,7 @@ ${plantilla}` : plantilla);
                       accept="image/*,video/*"
                       className="hidden"
                       onChange={async e => {
-                        debugAttach('GALLERY_CHANGE', { filesLength: e.target.files?.length ?? 0 });
+                        mediaUi('gallery_change_fired', { filesLength: e.target.files?.length ?? 0 });
                         const files = e.target.files;
                         if (files?.length) await handleFilesSelected(files, 'GALLERY');
                         e.target.value = '';
@@ -1188,16 +1207,16 @@ ${plantilla}` : plantilla);
                           y hace que Android ofrezca el selector de medios en vez del
                           administrador de archivos con 'Recientes'. Ya no hay boton de
                           documentos ni entrada extra de imagen: solo Clip y Camara. */}
-                      <button type="button" onClick={() => { debugAttach('GALLERY_CLICK'); galleryInputRef.current?.click(); }} disabled={isUploading}
+                      <button type="button" onClick={() => { mediaUi('clip_click', { refPresent: !!galleryInputRef.current }); galleryInputRef.current?.click(); mediaUi('gallery_input_click_called'); }}
                         title="Fotos y videos"
                         className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
-                        {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+                        <Paperclip className="w-4 h-4" />
                       </button>
                       {/* Cámara: toma foto o graba video al momento y lo sube igual que un adjunto.
                           Dos inputs separados (foto/video) porque un solo input con accept
                           mezclado no abre la cámara de forma confiable en Android. */}
                       <div className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
-                        <button type="button" onClick={() => setShowCameraChoice(v => !v)} disabled={isUploading}
+                        <button type="button" onClick={() => setShowCameraChoice(v => !v)}
                           title="Cámara"
                           className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors disabled:opacity-40">
                           <Camera className="w-4 h-4" />
@@ -1206,9 +1225,10 @@ ${plantilla}` : plantilla);
                           <div className="absolute bottom-full left-0 mb-2 w-36 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden">
                             <button type="button"
                               onClick={() => {
-                                debugAttach('PHOTO_CLICK');
+                                mediaUi('camera_photo_click', { refPresent: !!cameraInputRef.current });
                                 setShowCameraChoice(false);
                                 cameraInputRef.current?.click();
+                                mediaUi('photo_input_click_called');
                                 debugAttach('PHOTO_INPUT_TRIGGERED');
                               }}
                               className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2">
@@ -1228,8 +1248,9 @@ ${plantilla}` : plantilla);
                                 // (ya valida el límite de 16MB y da preview+enviar vía
                                 // addPendingMedia, igual que cualquier otro adjunto).
                                 debugAttach('VIDEO_RECORDER_FALLBACK_NATIVE', { reason: 'custom_recorder_disabled_unreliable_mp4' });
+                                mediaUi('camera_video_click', { refPresent: !!cameraVideoInputRef.current });
                                 cameraVideoInputRef.current?.click();
-                                debugAttach('VIDEO_INPUT_TRIGGERED');
+                                mediaUi('video_input_click_called');
                               }}
                               className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 border-t border-slate-100 dark:border-slate-700">
                               <Play className="w-3.5 h-3.5" /> Grabar video
