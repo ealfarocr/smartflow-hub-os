@@ -326,6 +326,45 @@ const TB = 't-e2e-otro-negocio';
   // Va al final a proposito: el limitador cuenta tambien por IP de origen, asi
   // que saturarlo antes afectaria a las demas pruebas. Se usa un usuario que
   // NO existe para no tocar los contadores de una credencial real.
+  // --- 16. ENTRADA RAPIDA DESDE EQUIPO RECONOCIDO --------------------
+  // "Mantener presionado para entrar" NO autentica: exige una sesion ya viva y
+  // revalida en el servidor. El deviceId no es un secreto (lo genera el
+  // cliente), asi que nunca alcanza por si solo.
+  console.log('\n=== 16. Entrada rapida desde equipo reconocido ===');
+  const quickLogin = await loginPin({ loginHandle: handle, pin: pinStale });
+  const quickToken = await idTokenForCustomToken(quickLogin.result.customToken);
+  await callFn('registerDevice', { deviceId: 'equipo-reconocido-1', tenantId: TA, label: 'Moto G' }, quickToken);
+
+  const quickOk = await callFn('verifyDeviceSession', { tenantId: TA, deviceId: 'equipo-reconocido-1' }, quickToken);
+  check('equipo reconocido + usuario activo -> entra', quickOk.result?.allowed === true, JSON.stringify(quickOk.error || quickOk.result));
+  check('devuelve el nombre visible, no el correo tecnico', quickOk.result?.displayName === 'eduardo pruebas' && !JSON.stringify(quickOk.result).includes('usuarios.smartflow.internal'), JSON.stringify(quickOk.result));
+
+  const sinSesion = await callFn('verifyDeviceSession', { tenantId: TA, deviceId: 'equipo-reconocido-1' });
+  check('SIN sesion viva no entra (el deviceId por si solo no abre nada)', !!sinSesion.error && !sinSesion.result, JSON.stringify(sinSesion.result || {}));
+
+  const inventado = await callFn('verifyDeviceSession', { tenantId: TA, deviceId: 'deviceId-inventado-999' }, quickToken);
+  check('un deviceId inventado -> DENY, y pide codigo', inventado.result?.allowed === false && inventado.result?.fallback === 'require-code', JSON.stringify(inventado.result || inventado.error));
+
+  await callFn('revokeDevice', { deviceId: 'equipo-reconocido-1' }, ownerToken);
+  const revocado = await callFn('verifyDeviceSession', { tenantId: TA, deviceId: 'equipo-reconocido-1' }, quickToken);
+  check('equipo liberado por el Owner -> DENY, y pide codigo', revocado.result?.allowed === false && revocado.result?.reason === 'device-revoked' && revocado.result?.fallback === 'require-code', JSON.stringify(revocado.result || revocado.error));
+
+  // Usuario desactivado: la entrada rapida tiene que cerrarse tambien, y ahi no
+  // alcanza con pedir codigo — hay que cerrarle la sesion.
+  await callFn('registerDevice', { deviceId: 'equipo-reconocido-2', tenantId: TA, label: 'Moto G bis' }, quickToken);
+  await callFn('setMembershipActive', { membershipId: newId, isActive: false }, ownerToken);
+  const suspendido = await callFn('verifyDeviceSession', { tenantId: TA, deviceId: 'equipo-reconocido-2' }, quickToken);
+  check('usuario desactivado -> DENY con cierre de sesion', suspendido.result?.allowed === false && suspendido.result?.reason === 'not-active' && suspendido.result?.fallback === 'sign-out', JSON.stringify(suspendido.result || suspendido.error));
+  await callFn('setMembershipActive', { membershipId: newId, isActive: true }, ownerToken);
+
+  // Otro usuario en el MISMO telefono no hereda el equipo del anterior.
+  const ajeno = await callFn('verifyDeviceSession', { tenantId: TA, deviceId: 'equipo-reconocido-2' }, asesorToken);
+  check('otra persona no hereda el equipo reconocido de la anterior', ajeno.result?.allowed === false && ajeno.result?.reason === 'device-of-another-user', JSON.stringify(ajeno.result || ajeno.error));
+
+  const cruzado = await callFn('verifyDeviceSession', { tenantId: TB, deviceId: 'equipo-reconocido-2' }, quickToken);
+  check('no cruza tenants', cruzado.result?.allowed === false, JSON.stringify(cruzado.result || cruzado.error));
+
+
   console.log('\n=== 15. Rate limiting ===');
   rateLimitTestMode = true;
   let exhausted = false;

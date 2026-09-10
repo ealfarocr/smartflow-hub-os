@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.loginWithPin = exports.getTenantAccessOverview = exports.getVendorAccessInfo = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
+exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.verifyDeviceSession = exports.loginWithPin = exports.getTenantAccessOverview = exports.getVendorAccessInfo = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const crypto = __importStar(require("crypto"));
@@ -60,6 +60,7 @@ const vendorPinAuth_1 = require("./vendorPinAuth");
 const messageStatusUpdate_1 = require("./messageStatusUpdate");
 const tenantAdminAuth_1 = require("./tenantAdminAuth");
 const accessLifecycle_1 = require("./accessLifecycle");
+const deviceSessionAuth_1 = require("./deviceSessionAuth");
 admin.initializeApp();
 const db = admin.firestore();
 /**
@@ -3121,6 +3122,55 @@ exports.loginWithPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
         };
     }
     throw new https_1.HttpsError('permission-denied', pinAuth_1.PIN_LOGIN_GENERIC_ERROR);
+});
+/**
+ * Entrada rápida desde un dispositivo reconocido ("mantener presionado para
+ * entrar"). NO es un método de autenticación: exige request.auth, o sea que la
+ * persona YA está autenticada (su sesión de Firebase sigue viva; ese refresh
+ * token es la credencial real ligada a este navegador). El gesto solo confirma
+ * la intención de entrar, y esta función re-valida contra el servidor que la
+ * persona siga habilitada y que el equipo siga reconocido — nunca se confía en
+ * lo que diga el cliente.
+ *
+ * El deviceId NO es un factor de autenticación: lo genera el propio cliente y
+ * vive en localStorage. Por eso, sin sesión viva, el código de acceso sigue
+ * siendo obligatorio (ver loginWithPin) y esta función no puede reemplazarlo.
+ */
+exports.verifyDeviceSession = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
+    const { tenantId, deviceId } = request.data;
+    if (!tenantId || !deviceId)
+        throw new https_1.HttpsError('invalid-argument', 'Falta tenantId o deviceId');
+    const uid = request.auth.uid;
+    const [membershipSnap, deviceSnap] = await Promise.all([
+        db.collection('memberships').doc(`${uid}_${tenantId}`).get(),
+        db.collection('trusted_devices').doc(deviceId).get(),
+    ]);
+    const device = deviceSnap.data();
+    const result = (0, deviceSessionAuth_1.checkDeviceQuickEntry)({
+        membershipExists: membershipSnap.exists,
+        membershipStatus: membershipSnap.data()?.status,
+        deviceExists: deviceSnap.exists,
+        deviceStatus: device?.status,
+        deviceUserId: device?.userId,
+        deviceTenantId: device?.tenantId,
+        callerUid: uid,
+        tenantId,
+    });
+    if (!result.allowed) {
+        console.log('DEVICE_QUICK_ENTRY_DENIED', { tenantId, uid, deviceId, reason: result.reason });
+        return { allowed: false, reason: result.reason, fallback: (0, deviceSessionAuth_1.quickEntryFallback)(result.reason) };
+    }
+    // Mismo refresco de actividad que hace registerDevice — entrar cuenta como
+    // uso del equipo. No cambia nada más del doc.
+    await deviceSnap.ref.update({ lastSeenAt: firestore_1.FieldValue.serverTimestamp() });
+    console.log('DEVICE_QUICK_ENTRY_OK', { tenantId, uid, deviceId });
+    return {
+        allowed: true,
+        // Nombre visible de la membership, nunca el correo técnico interno.
+        displayName: membershipSnap.data()?.name || 'Vendedor',
+    };
 });
 /**
  * Registra (o refresca lastSeenAt de) el dispositivo desde el que un usuario

@@ -407,7 +407,7 @@ export const UsersManagementView = () => {
               usan para entrar es enlace + PIN + dispositivo reconocido, y eso
               es lo único que un Owner necesita leer acá. */}
           Vía: {accessMap[u.id]?.hasPinAccess
-            ? 'PIN + dispositivo'
+            ? 'Código + dispositivo'
             : presenceMap[u.userId].authProvider === 'google.com' ? 'Google SSO' : 'Correo y contraseña'}
         </span>
       )}
@@ -449,7 +449,7 @@ export const UsersManagementView = () => {
         return;
 
       case 'generate': {
-        if (!window.confirm(`¿Generar el acceso de ${u.name}?\n\nSe crea su usuario y un PIN nuevo para que entre desde su teléfono.`)) return;
+        if (!window.confirm(`¿Generar el acceso de ${u.name}?\n\nSe crea su usuario y un código de acceso nuevo para que entre desde su teléfono.`)) return;
         setGeneratingPinId(u.id);
         try {
           await callSetVendorPin(u.id, u.name, tenantId);
@@ -506,11 +506,11 @@ export const UsersManagementView = () => {
 
   const handleRegenerateAccess = async (u: Row) => {
     if (!activeMembership?.tenantId) return;
-    if (!window.confirm(`¿Generar un acceso NUEVO para ${u.name}?\n\nEl PIN anterior deja de funcionar y, si tenía la sesión abierta, se cierra: tendrá que entrar otra vez con el PIN nuevo.`)) return;
+    if (!window.confirm(`¿Generar un acceso NUEVO para ${u.name}?\n\nEl código anterior deja de funcionar y, si tenía la sesión abierta, se cierra: tendrá que entrar otra vez con el código nuevo.`)) return;
     setGeneratingPinId(u.id);
     try {
       await callSetVendorPin(u.id, u.name, activeMembership.tenantId);
-      addToast('Acceso regenerado — el PIN anterior ya no sirve', 'success');
+      addToast('Acceso regenerado — el código anterior ya no sirve', 'success');
       await refreshAccess();
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'No se pudo regenerar el acceso', 'error');
@@ -553,7 +553,7 @@ export const UsersManagementView = () => {
             onClick={() => handleRegenerateAccess(u)}
             disabled={busy}
             className="text-slate-400 hover:text-amber-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
-            title="Regenerar acceso (el PIN anterior deja de funcionar)"
+            title="Regenerar acceso (el código anterior deja de funcionar)"
           >
             <KeyRound className="w-4 h-4" />
           </button>
@@ -564,7 +564,7 @@ export const UsersManagementView = () => {
             onClick={() => handleAddEmail(u.id, u.name)}
             disabled={convertingId === u.id}
             className="text-slate-400 hover:text-violet-600 p-2 transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 disabled:opacity-40"
-            title="Agregar correo (para invitarlo por email en vez de PIN)"
+            title="Agregar correo (para invitarlo por email en vez de código)"
           >
             {convertingId === u.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
           </button>
@@ -998,7 +998,7 @@ export const UsersManagementView = () => {
                     // modal, no la acción que correspondía antes de generarlo.
                     await refreshAccess();
                   } catch (err) {
-                    addToast(err instanceof Error ? err.message : 'Error al generar el PIN', 'error');
+                    addToast(err instanceof Error ? err.message : 'Error al generar el código de acceso', 'error');
                   }
                 }
               : undefined

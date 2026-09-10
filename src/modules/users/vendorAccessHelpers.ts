@@ -85,8 +85,8 @@ export function buildFullMessage(data: Pick<VendorAccessData, 'loginHandle' | 'p
   lines.push(`Enlace: ${data.link}`, '');
   lines.push(
     data.pin
-      ? 'Abre este enlace una sola vez desde tu teléfono. Después el dispositivo quedará reconocido y solo necesitarás tu PIN.'
-      : 'Abre este enlace desde tu teléfono y usá tu PIN para entrar. Si no tenés PIN o lo olvidaste, pedile a tu Owner/Admin que te genere uno nuevo.'
+      ? 'Abre este enlace una sola vez desde tu teléfono. Después el equipo queda reconocido y solo necesitarás tu código de acceso.'
+      : 'Abre este enlace desde tu teléfono y usá tu código de acceso para entrar. Si no lo tenés o lo olvidaste, pedile a tu jefe o encargado que te genere uno nuevo.'
   );
   return lines.join('\n');
 }
@@ -110,6 +110,6 @@ export function isInternalVendorEmail(email: string | null | undefined): boolean
  * (prepared).
  */
 export function displayMemberEmail(email: string | null | undefined): string {
-  if (isInternalVendorEmail(email)) return 'Acceso por PIN (sin correo)';
+  if (isInternalVendorEmail(email)) return 'Acceso por código (sin correo)';
   return email || 'Sin correo aún';
 }

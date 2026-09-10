@@ -35,7 +35,7 @@ export interface PrimaryActionMeta {
 const PRIMARY_ACTION_META: Record<AccessActionKey, PrimaryActionMeta> = {
   generate: {
     label: 'Generar acceso',
-    hint: 'Crea el usuario y el PIN para que esta persona pueda entrar desde su teléfono',
+    hint: 'Crea el usuario y el código de acceso para que esta persona pueda entrar desde su teléfono',
     tone: 'primary',
   },
   copy: {

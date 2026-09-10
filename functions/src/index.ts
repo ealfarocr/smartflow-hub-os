@@ -27,6 +27,7 @@ import {
   resolveAccessState, resolveAccessActionsFor, checkSetVendorPinTransition,
   SUSPENDED_PIN_ERROR,
 } from './accessLifecycle';
+import { checkDeviceQuickEntry, quickEntryFallback } from './deviceSessionAuth';
 
 admin.initializeApp();
 
@@ -3367,6 +3368,59 @@ export const loginWithPin = onCall({ maxInstances: 10 }, async (request) => {
   }
 
   throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
+});
+
+/**
+ * Entrada rápida desde un dispositivo reconocido ("mantener presionado para
+ * entrar"). NO es un método de autenticación: exige request.auth, o sea que la
+ * persona YA está autenticada (su sesión de Firebase sigue viva; ese refresh
+ * token es la credencial real ligada a este navegador). El gesto solo confirma
+ * la intención de entrar, y esta función re-valida contra el servidor que la
+ * persona siga habilitada y que el equipo siga reconocido — nunca se confía en
+ * lo que diga el cliente.
+ *
+ * El deviceId NO es un factor de autenticación: lo genera el propio cliente y
+ * vive en localStorage. Por eso, sin sesión viva, el código de acceso sigue
+ * siendo obligatorio (ver loginWithPin) y esta función no puede reemplazarlo.
+ */
+export const verifyDeviceSession = onCall({ maxInstances: 10 }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Usuario no autenticado');
+  const { tenantId, deviceId } = request.data as { tenantId?: string; deviceId?: string };
+  if (!tenantId || !deviceId) throw new HttpsError('invalid-argument', 'Falta tenantId o deviceId');
+
+  const uid = request.auth.uid;
+  const [membershipSnap, deviceSnap] = await Promise.all([
+    db.collection('memberships').doc(`${uid}_${tenantId}`).get(),
+    db.collection('trusted_devices').doc(deviceId).get(),
+  ]);
+
+  const device = deviceSnap.data();
+  const result = checkDeviceQuickEntry({
+    membershipExists: membershipSnap.exists,
+    membershipStatus: membershipSnap.data()?.status,
+    deviceExists: deviceSnap.exists,
+    deviceStatus: device?.status,
+    deviceUserId: device?.userId,
+    deviceTenantId: device?.tenantId,
+    callerUid: uid,
+    tenantId,
+  });
+
+  if (!result.allowed) {
+    console.log('DEVICE_QUICK_ENTRY_DENIED', { tenantId, uid, deviceId, reason: result.reason });
+    return { allowed: false, reason: result.reason, fallback: quickEntryFallback(result.reason) };
+  }
+
+  // Mismo refresco de actividad que hace registerDevice — entrar cuenta como
+  // uso del equipo. No cambia nada más del doc.
+  await deviceSnap.ref.update({ lastSeenAt: FieldValue.serverTimestamp() });
+
+  console.log('DEVICE_QUICK_ENTRY_OK', { tenantId, uid, deviceId });
+  return {
+    allowed: true,
+    // Nombre visible de la membership, nunca el correo técnico interno.
+    displayName: (membershipSnap.data()?.name as string) || 'Vendedor',
+  };
 });
 
 /**

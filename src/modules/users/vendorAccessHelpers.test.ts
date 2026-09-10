@@ -82,7 +82,7 @@ describe('buildFullMessage — mensaje de WhatsApp para acceso de vendedor', () 
     expect(msg).not.toContain('PIN:');
     expect(msg).toContain('Usuario: eduardopruebas');
     expect(msg).toContain('Enlace: https://hub.smartflow-suite.com/acceso?h=eduardopruebas&t=t-1&n=Eduardo%20Pruebas');
-    expect(msg).toContain('pedile a tu Owner/Admin que te genere uno nuevo');
+    expect(msg).toContain('pedile a tu jefe o encargado que te genere uno nuevo');
   });
 });
 
@@ -111,7 +111,7 @@ describe('VendorAccessData — AJUSTE UX: usuario sin PIN (pinConfigured:false)'
 describe('displayMemberEmail — la lista de /usuarios no muestra el correo técnico interno', () => {
   it('caso real de USADITOS: el correo interno de un vendedor PIN no se muestra', () => {
     expect(displayMemberEmail('vendedor.lsmdecwvmanldy4wedrm@t-1788554584458.usuarios.smartflow.internal'))
-      .toBe('Acceso por PIN (sin correo)');
+      .toBe('Acceso por código (sin correo)');
   });
 
   it('detecta el correo interno sin importar mayúsculas', () => {

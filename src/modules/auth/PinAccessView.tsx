@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { signInWithCustomToken } from 'firebase/auth';
+import { signInWithCustomToken, signOut } from 'firebase/auth';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 import { auth } from '@/lib/firebase';
 import { useAuthStore } from '@/stores/authStore';
@@ -12,24 +12,25 @@ import {
   forgetDeviceAndIdentity,
   type VendorIdentity,
 } from '@/utils/deviceTrust';
+import { playAccessFeedback } from '@/utils/accessSound';
+import { HoldToEnterButton } from './HoldToEnterButton';
 import { Loader2, Delete, ArrowLeft, UserRound } from 'lucide-react';
 
-// Acceso del equipo — PIN corto en lugar de email/contraseña, NUNCA a Firebase
-// Auth directo (ver LOOP Fase 1-4/13). Dos modos:
+// Acceso del equipo. Tres situaciones, de la más cómoda a la más exigente:
 //
-//  - Dispositivo reconocido: la identidad ("quién sos") quedó recordada en
-//    ESTE navegador tras el primer acceso. Solo se pide el PIN.
-//  - Dispositivo nuevo: se pide usuario + PIN. Antes esta pantalla solo
-//    funcionaba con el enlace de alta (?h=&t=&n=) y sin él mostraba "Este
-//    enlace no es válido" — o sea que un vendedor que cerraba sesión y perdía
-//    el mensaje de WhatsApp se quedaba sin forma de volver a entrar. El
-//    enlace sigue sirviendo para el alta y para compartir el acceso, pero ya
-//    no es la única puerta.
+//  1. ENTRADA RÁPIDA — la sesión sigue viva en este equipo y la persona ya
+//     entró antes: "Hola <nombre>" y mantener presionado el botón 2 segundos.
+//     El gesto NO autentica: la credencial real es el refresh token de Firebase
+//     que ya tiene este navegador. Antes de dejar pasar se revalida contra el
+//     servidor (verifyDeviceSession) que la persona siga activa y que el equipo
+//     siga reconocido y no revocado.
+//  2. CÓDIGO DE ACCESO en equipo reconocido — no hay sesión viva: se pide solo
+//     el código, sin volver a preguntar quién es.
+//  3. EQUIPO NUEVO — usuario + código.
 //
-// El PIN es obligatorio en cada visita: el dispositivo reconocido evita
-// reescribir quién sos, no evita autenticarse. Y nunca se le pide al vendedor
-// un tenantId ni ningún otro dato técnico: cuando no se conoce el negocio, el
-// backend lo resuelve internamente desde el usuario (ver loginWithPin).
+// El deviceId NUNCA cuenta como factor de autenticación: lo genera el propio
+// cliente y vive en localStorage, así que no es un secreto. Y el código nunca
+// se guarda: solo existe mientras se tipea.
 export const PinAccessView = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -51,6 +52,12 @@ export const PinAccessView = () => {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  // El usuario puede pedir el código a mano aunque tenga entrada rápida
+  // disponible, y algunos rechazos lo fuerzan (equipo revocado, por ejemplo).
+  const [forceCode, setForceCode] = useState(false);
+
+  const hasLiveSession = isAuthenticated && !!user && memberships.length > 0;
+  const quickEntryAvailable = hasLiveSession && !!identity && !forceCode;
 
   const handleDigit = (d: string) => {
     if (pin.length >= 6) return;
@@ -59,16 +66,55 @@ export const PinAccessView = () => {
   };
   const handleBackspace = () => setPin(pin.slice(0, -1));
 
-  const switchUser = () => {
-    // Borra identidad Y deviceId: si solo se borrara la identidad, el próximo
-    // enrolamiento reusaría el mismo deviceId y la persona nueva heredaría la
-    // "confianza" de la anterior (ver Fase 11).
+  const switchUser = async () => {
+    // Borra identidad Y deviceId: si solo borrara la identidad, el próximo
+    // enrolamiento reusaría el mismo deviceId y la persona siguiente heredaría
+    // la "confianza" del equipo anterior (ver Fase 11). Y se cierra la sesión
+    // abierta: nadie debe heredar la sesión de quien usaba antes el teléfono.
     forgetDeviceAndIdentity();
+    if (hasLiveSession) { try { await signOut(auth); } catch { /* igual seguimos */ } }
     setIdentity(null);
+    setForceCode(false);
     setHandleInput('');
     setPin('');
     setError('');
   };
+
+  // ENTRADA RÁPIDA: la sesión ya está abierta, así que acá no se autentica
+  // nada nuevo — se revalida en el servidor y se entra.
+  const quickEnter = useCallback(async () => {
+    if (!identity || isProcessing) return;
+    setIsProcessing(true);
+    setError('');
+    try {
+      const verifyDeviceSession = httpsCallable<
+        { tenantId: string; deviceId: string },
+        { allowed: boolean; reason?: string; fallback?: 'require-code' | 'sign-out'; displayName?: string }
+      >(getFunctions(), 'verifyDeviceSession');
+      const res = await verifyDeviceSession({ tenantId: identity.tenantId, deviceId: getOrCreateDeviceId() });
+
+      if (!res.data.allowed) {
+        if (res.data.fallback === 'sign-out') {
+          // Ya no está habilitada en el negocio: no alcanza con pedirle el
+          // código, hay que cerrarle la sesión.
+          try { await signOut(auth); } catch { /* igual seguimos */ }
+          setError('Tu acceso fue desactivado. Hablá con tu jefe o encargado.');
+        } else {
+          setError('Este equipo ya no está reconocido. Entrá con tu código de acceso.');
+        }
+        setForceCode(true);
+        return;
+      }
+
+      playAccessFeedback();
+      navigate('/mi-turno', { replace: true });
+    } catch {
+      setError('No se pudo entrar. Probá con tu código de acceso.');
+      setForceCode(true);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [identity, isProcessing, navigate]);
 
   const submit = useCallback(async () => {
     const loginHandle = identity?.loginHandle ?? handleInput.trim();
@@ -82,9 +128,9 @@ export const PinAccessView = () => {
         { tenantId?: string; loginHandle: string; pin: string },
         { customToken: string; tenantId: string; loginHandle: string; displayName: string }
       >(functions, 'loginWithPin');
-      // tenantId solo se manda cuando ya se conoce (enlace de alta o
-      // dispositivo reconocido). Sin él, el backend resuelve el negocio a
-      // partir del usuario; el vendedor nunca tiene que saberlo.
+      // tenantId solo se manda cuando ya se conoce (enlace de alta o equipo
+      // reconocido). Sin él, el backend resuelve el negocio a partir del
+      // usuario; el vendedor nunca tiene que saberlo.
       const result = await loginWithPin({
         ...(identity?.tenantId ? { tenantId: identity.tenantId } : {}),
         loginHandle,
@@ -100,7 +146,7 @@ export const PinAccessView = () => {
         displayName: identity?.displayName || result.data.displayName,
       };
 
-      // El registro del dispositivo NO decide si la persona entra: ya está
+      // El registro del equipo NO decide si la persona entra: ya está
       // autenticada. Si su equipo fue revocado por un Admin (o el id quedó
       // tomado por otra persona), se pide una vinculación nueva de forma
       // transparente — un deviceId nuevo — en vez de dejarla afuera.
@@ -117,12 +163,13 @@ export const PinAccessView = () => {
         try {
           await registerWithCurrentDevice();
         } catch {
-          // Sin dispositivo de confianza se sigue operando igual; es
+          // Sin equipo de confianza se sigue operando igual; es
           // telemetría/confianza, no la puerta de acceso.
         }
       }
 
       rememberVendorIdentity(confirmed);
+      playAccessFeedback();
       navigate('/mi-turno', { replace: true });
     } catch (err: unknown) {
       setPin('');
@@ -130,9 +177,9 @@ export const PinAccessView = () => {
       if (code === 'functions/resource-exhausted') {
         setError('Demasiados intentos. Probá de nuevo en unos minutos.');
       } else if (code === 'functions/permission-denied') {
-        // Mismo texto exacto para "usuario no existe" y "PIN incorrecto" —
+        // Mismo texto exacto para "usuario no existe" y "código incorrecto" —
         // checkpoint de seguridad: nunca revelar cuál de las dos pasó.
-        setError('Usuario o PIN incorrecto.');
+        setError('Usuario o código incorrecto.');
       } else {
         setError('No se pudo iniciar sesión. Intentá de nuevo.');
       }
@@ -146,9 +193,11 @@ export const PinAccessView = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pin]);
 
+  // Con sesión viva pero SIN identidad recordada no hay a quién saludar (es el
+  // caso de alguien corporativo que llegó acá de rebote): se lo manda adentro.
   useEffect(() => {
-    if (isAuthenticated && user && memberships.length > 0) navigate('/mi-turno', { replace: true });
-  }, [isAuthenticated, user, memberships.length, navigate]);
+    if (hasLiveSession && !identity) navigate('/mi-turno', { replace: true });
+  }, [hasLiveSession, identity, navigate]);
 
   const keypadDisabled = isProcessing || (!identity && !handleInput.trim());
 
@@ -209,9 +258,9 @@ export const PinAccessView = () => {
         </>
       ) : (
         <>
-          <h1 className="text-white text-2xl font-black mb-2 text-center">Entrar con PIN</h1>
+          <h1 className="text-white text-2xl font-black mb-2 text-center">Entrar con código</h1>
           <p className="text-slate-400 text-sm mb-8 text-center max-w-xs">
-            Escribí tu usuario y tu PIN. Te los dio tu jefe o encargado.
+            Escribí tu usuario y tu código de acceso. Te los dio tu jefe o encargado.
           </p>
           <div className="w-full max-w-xs mb-8">
             <label htmlFor="loginHandle" className="block text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">
@@ -238,15 +287,29 @@ export const PinAccessView = () => {
         </>
       )}
 
-      {pinDots}
+      {quickEntryAvailable ? (
+        <HoldToEnterButton onComplete={quickEnter} busy={isProcessing} />
+      ) : (
+        <>
+          {pinDots}
+          {isProcessing && <Loader2 className="w-6 h-6 text-white animate-spin mb-6" />}
+          {keypad}
+        </>
+      )}
 
-      {error && <p className="text-red-400 text-sm font-bold mb-6 text-center max-w-xs">{error}</p>}
-      {isProcessing && <Loader2 className="w-6 h-6 text-white animate-spin mb-6" />}
-
-      {keypad}
+      {error && <p className="text-red-400 text-sm font-bold mt-6 text-center max-w-xs">{error}</p>}
 
       <div className="mt-10 flex flex-col items-center gap-4">
-        {identity ? (
+        {quickEntryAvailable && (
+          <button
+            type="button"
+            onClick={() => { setForceCode(true); setError(''); }}
+            className="text-slate-400 hover:text-white text-sm font-bold transition-colors"
+          >
+            Usar código de acceso
+          </button>
+        )}
+        {identity && (
           <button
             type="button"
             onClick={switchUser}
@@ -255,7 +318,7 @@ export const PinAccessView = () => {
           >
             Cambiar de usuario
           </button>
-        ) : null}
+        )}
         <Link to="/login" className="text-slate-500 hover:text-slate-300 text-sm font-bold inline-flex items-center gap-1.5 transition-colors">
           <ArrowLeft className="w-4 h-4" />
           Volver
