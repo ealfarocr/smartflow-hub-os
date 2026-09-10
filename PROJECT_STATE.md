@@ -3,21 +3,23 @@
 ## ✅ DESPLEGADO — /login prioriza el acceso del equipo (2026-09-10)
 
 SmartFlow es una herramienta operativa: la mayoría de las aperturas son de
-vendedores y encargados, no del dueño, pero  mostraba Google y
+vendedores y encargados, no del dueño, pero `/login` mostraba Google y
 correo/contraseña arriba y el acceso del equipo abajo del todo.
 
 **Orden nuevo:**
-1. **ACCESO DEL EQUIPO** —  si este equipo ya fue usado, y el
-   botón principal grande **Entrar con código de acceso** → . Debajo,
-   **Cambiar de usuario** (borra identidad Y deviceId).
-2. **ACCESO CORPORATIVO** — Google y correo/contraseña, sin tocar nada.
+1. **ACCESO DEL EQUIPO** — `Hola <nombre>` si este equipo ya fue usado, y el
+   botón principal grande **Entrar con código de acceso** → `/acceso`. Debajo,
+   **Cambiar de usuario** (borra identidad Y deviceId: si solo borrara la
+   identidad, la persona siguiente heredaría la confianza del equipo anterior).
+2. **ACCESO CORPORATIVO** — Google y correo/contraseña, sin tocar nada: mismos
+   handlers, mismo "¿Olvidaste tu contraseña?", mismo "¿Ya fuiste invitado?".
 
 ### Aclaración importante sobre el "mantener presionado"
 
-Ese gesto **no puede vivir en **: solo tiene sentido con la sesión de
+Ese gesto **no puede vivir en `/login`**: solo tiene sentido con la sesión de
 Firebase viva, y con sesión viva esa pantalla **ni se muestra** — la app
 redirige derecho adentro, que es el mejor flujo posible. El long press vive en
-, que es donde sí se llega con sesión activa.
+`/acceso`, que es donde sí se llega con sesión activa.
 
 Si en algún momento se quiere que el vendedor pase SIEMPRE por esa pantalla al
 abrir la app, es una **decisión de producto aparte**: le agregaría 2 segundos a
@@ -29,15 +31,16 @@ cada apertura de un flujo que hoy es instantáneo.
   scroll** (260–324 px de 812). El corporativo queda debajo (Google en 473) y
   también entra en pantalla. Sin scroll horizontal.
 - **1440x900**: mismo orden, botón sin scroll, sin scroll horizontal.
-- **Cambiar de usuario** probado sobre  real: borra las dos claves,
-  deja de saludar y no toca el bloque corporativo.
+- **Cambiar de usuario** probado sobre `localStorage` real: borra las dos claves
+  (`smartflow_vendor_identity` y `smartflow_device_id`), deja de saludar y no
+  toca el bloque corporativo.
 - Corporativo intacto: Google, correo, contraseña, "Acceder al Sistema",
   "¿Olvidaste tu contraseña?" y "¿Ya fuiste invitado?" siguen presentes.
-- **En producción**: orden [Acceso del equipo, Acceso corporativo], botón sin
-  scroll a 375x812, bundle .
+- **En producción**: orden `[Acceso del equipo, Acceso corporativo]`, botón sin
+  scroll a 375x812, bundle `index-SnMMbySx.js`.
 
 Solo jerarquía visual y copy. Sin cambios de seguridad ni de autenticación.
-206/206 tests. Commit . Deploy: .
+206/206 tests. Commit `c359fa5`. Deploy: `hosting:app`.
 
 ## ✅ DESPLEGADO — Preset final del Asesor Comercial: solo atención y ventas (2026-09-10)
 
