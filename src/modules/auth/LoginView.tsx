@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link } from 'react-router-dom';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useAuthStore } from '@/stores/authStore';
 import { AuthService } from '@/services/AuthService';
-import { Mail, Lock, Loader2, Globe } from 'lucide-react';
+import { Mail, Lock, Loader2, Globe, KeyRound } from 'lucide-react';
 
 export const LoginView = () => {
   const { isAuthenticated, user, memberships } = useAuthStore();
@@ -153,7 +153,9 @@ export const LoginView = () => {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white dark:bg-slate-900 py-8 px-4 shadow-xl sm:rounded-2xl sm:px-10 border border-slate-100 dark:border-slate-800">
-          
+
+          <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4">Acceso corporativo</p>
+
           <button
             onClick={handleGoogleLogin}
             disabled={isProcessing}
@@ -267,6 +269,27 @@ export const LoginView = () => {
             >
               {view === 'login' ? '¿Ya fuiste invitado? Crea tu cuenta aquí' : '¿Ya tienes cuenta? Inicia sesión'}
             </button>
+          </div>
+
+          {/* ACCESO DEL EQUIPO — los vendedores entran con usuario + PIN, no con
+              correo y contraseña: su cuenta técnica interna usa un password
+              aleatorio que nadie conoce. Antes, si se les cerraba la sesión
+              caían acá y esta pantalla no ofrecía ninguna vía para volver a
+              entrar: dependían de conservar el enlace de WhatsApp. Este bloque
+              es SOLO una puerta más — no reemplaza ni toca el acceso
+              corporativo de arriba. */}
+          <div className="mt-10 pt-8 border-t-2 border-slate-100 dark:border-slate-800">
+            <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4">Acceso del equipo</p>
+            <Link
+              to="/acceso"
+              className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-2xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 active:scale-[0.98] transition-all"
+            >
+              <KeyRound className="w-5 h-5 text-white" />
+              <span className="text-base font-black text-white uppercase tracking-tight">Entrar con PIN</span>
+            </Link>
+            <p className="text-center text-xs text-slate-400 mt-3">
+              Para vendedores y encargados, con el usuario y el PIN que te dieron.
+            </p>
           </div>
         </div>
         

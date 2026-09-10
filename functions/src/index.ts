@@ -3194,76 +3194,23 @@ export const getTenantAccessOverview = onCall({ maxInstances: 10 }, async (reque
 });
 
 /**
- * Acceso por PIN — el vendedor SOLO ve su nombre/usuario + PIN, nunca un
- * membershipId. tenantId + loginHandle resuelven el membership vía
- * login_handles/{tenantId}_{handle} (índice, no legible desde el cliente).
- * Si el usuario no existe, se hace el MISMO trabajo de hash (DUMMY_PIN_HASH)
- * y se devuelve el MISMO error genérico que un PIN incorrecto — nunca se
- * revela si el usuario existe, ni por mensaje ni por tiempo de respuesta.
- * Sin request.auth previo a propósito — este endpoint ES el paso de
- * autenticación. El límite de intentos por identidad ya resuelta es
- * transaccional sobre Firestore (no en memoria, válido entre instancias
- * concurrentes); además hay un límite liviano en memoria por
- * tenantId+handle y por IP de origen para frenar enumeración antes de
- * siquiera tocar Firestore (best-effort, no distribuido — mismo criterio
- * que el rate limiter de mensajes de arriba).
+ * Un intento de PIN contra UNA credencial concreta. Transaccional: el
+ * contador de intentos fallidos y el bloqueo temporal viven en el propio doc
+ * de credencial, así que valen entre instancias concurrentes.
+ *
+ * Devuelve null cuando el PIN no coincide (para poder probar el siguiente
+ * candidato sin abortar); lanza cuando el intento no debe continuar de
+ * ninguna forma (credencial bloqueada por intentos, membership no habilitada).
  */
-export const loginWithPin = onCall({ maxInstances: 10 }, async (request) => {
-  const { tenantId, loginHandle: rawHandle, pin } = request.data as { tenantId?: string; loginHandle?: string; pin?: string };
-  if (!tenantId || !rawHandle || !pin) throw new HttpsError('invalid-argument', 'Falta tenantId, loginHandle o pin');
-
-  const handle = normalizeLoginHandle(rawHandle);
-  const identityKey = `pin:${tenantId}:${handle}`;
-  const originIp = request.rawRequest?.ip || 'unknown';
-  if (isRateLimited(identityKey) || isRateLimited(`pin-origin:${originIp}`)) {
-    throw new HttpsError('resource-exhausted', 'Demasiados intentos. Probá de nuevo en unos minutos.');
-  }
-
-  const handleSnap = await db.collection('login_handles').doc(`${tenantId}_${handle}`).get();
-  if (!handleSnap.exists) {
-    // Costo constante: mismo hash que haría una verificación real, para no
-    // delatar por timing que este usuario no existe.
-    verifyPinHash(pin, DUMMY_PIN_SALT, DUMMY_PIN_HASH);
-    throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
-  }
-  const handleData = handleSnap.data()!;
-  const membershipId = handleData.membershipId as string;
-
-  // ÚNICA FUENTE DE VERDAD: loginHandle -> credencial -> authUid -> membership.
-  // Ya NO se deriva el doc de credencial del ID de la membership, que es
-  // mutable (acceptTenantInvite lo cambia en el primer acceso). Se intenta, en
-  // orden: el puntero explícito del índice (credDocId), el lugar canónico
-  // (= ID actual de la membership), y por último una búsqueda por loginHandle
-  // dentro del tenant — así el login funciona aunque el índice haya quedado
-  // viejo por cualquier motivo, en vez de responder "Usuario o PIN incorrecto"
-  // sobre una credencial que sí existe.
-  const credRef = await resolveCredRefForLogin(tenantId, handle, handleData);
-  if (!credRef) {
-    verifyPinHash(pin, DUMMY_PIN_SALT, DUMMY_PIN_HASH);
-    throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
-  }
-
-  const result = await db.runTransaction(async (tx) => {
+async function attemptPinLogin(
+  credRef: admin.firestore.DocumentReference,
+  pin: string,
+  fallbackMembershipId?: string,
+): Promise<{ authUid: string; tenantId: string; loginHandle: string; displayName: string } | null> {
+  return db.runTransaction(async (tx) => {
     const credSnap = await tx.get(credRef);
-    if (!credSnap.exists) throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
+    if (!credSnap.exists) return null;
     const cred = credSnap.data()!;
-
-    // FIX URGENTE — antes esto leía memberships/{membershipId} con el ID que
-    // guardó login_handles AL GENERAR el PIN. acceptTenantInvite re-indexa la
-    // membership a {uid}_{tenantId} y borra el doc original en el primer
-    // acceso, así que a partir de ahí ese read daba "no existe" y
-    // checkPinLoginAllowed denegaba: CUALQUIER vendedor que ya hubiera
-    // entrado una vez quedaba sin poder volver a entrar, con el mismo mensaje
-    // genérico que un PIN incorrecto (imposible de diagnosticar desde la UI).
-    // La identidad estable es authUid, así que el ID canónico de la
-    // membership es {authUid}_{tenantId}; el ID viejo se consulta solo como
-    // fallback, que es el caso del PRIMER acceso (la membership todavía está
-    // bajo su doc id original, en 'pending').
-    const canonicalRef = db.collection('memberships').doc(`${cred.authUid}_${cred.tenantId}`);
-    let membershipSnap = await tx.get(canonicalRef);
-    if (!membershipSnap.exists) {
-      membershipSnap = await tx.get(db.collection('memberships').doc(membershipId));
-    }
 
     const lockedUntil = cred.lockedUntil?.toMillis?.() ?? 0;
     if (lockedUntil > Date.now()) {
@@ -3277,19 +3224,29 @@ export const loginWithPin = onCall({ maxInstances: 10 }, async (request) => {
       if (attempts >= PIN_MAX_ATTEMPTS) {
         update.failedAttempts = 0;
         update.lockedUntil = Timestamp.fromMillis(Date.now() + PIN_LOCKOUT_MS);
-        console.warn('VENDOR_PIN_LOCKED', { membershipId, tenantId: cred.tenantId });
+        console.warn('VENDOR_PIN_LOCKED', { credDocId: credRef.id, tenantId: cred.tenantId });
       }
       tx.update(credRef, update);
-      throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
+      return null;
+    }
+
+    // La identidad estable es authUid, así que el ID canónico de la membership
+    // es {authUid}_{tenantId}; el ID viejo se consulta solo como fallback, que
+    // es el caso del PRIMER acceso (la membership todavía está bajo su doc id
+    // original, en 'pending').
+    const canonicalRef = db.collection('memberships').doc(`${cred.authUid}_${cred.tenantId}`);
+    let membershipSnap = await tx.get(canonicalRef);
+    if (!membershipSnap.exists && fallbackMembershipId) {
+      membershipSnap = await tx.get(db.collection('memberships').doc(fallbackMembershipId));
     }
 
     // LOOP — reutilización de teléfonos corporativos: el PIN sigue siendo
-    // válido después de que Owner/Admin desactive a alguien (setVendorPin
-    // no se vuelve a llamar solo porque cambió el status, y desactivar no
-    // borra vendor_credentials — ver setMembershipActive). Sin este chequeo,
-    // un vendedor desactivado se podía loguear igual. Mismo error genérico
-    // que un PIN incorrecto, a propósito: nunca hay que dejarle a alguien
-    // distinguir "cuenta desactivada" de "PIN incorrecto" por la respuesta.
+    // válido después de que Owner/Admin desactive a alguien (setVendorPin no
+    // se vuelve a llamar solo porque cambió el status, y desactivar no borra
+    // vendor_credentials — ver setMembershipActive). Sin este chequeo, un
+    // vendedor desactivado se podía loguear igual. Mismo error genérico que un
+    // PIN incorrecto, a propósito: nunca hay que dejarle a alguien distinguir
+    // "cuenta desactivada" de "PIN incorrecto" por la respuesta.
     const pinLoginAuth = checkPinLoginAllowed({
       membershipExists: membershipSnap.exists,
       membershipStatus: membershipSnap.data()?.status,
@@ -3300,12 +3257,116 @@ export const loginWithPin = onCall({ maxInstances: 10 }, async (request) => {
     }
 
     tx.update(credRef, { failedAttempts: 0, lockedUntil: null, lastLoginAt: FieldValue.serverTimestamp() });
-    return { authUid: cred.authUid, tenantId: cred.tenantId };
+    return {
+      authUid: cred.authUid as string,
+      tenantId: cred.tenantId as string,
+      loginHandle: (cred.loginHandle as string) || '',
+      // El nombre visible sale de la membership, NUNCA del email técnico
+      // interno (vendedor.*@*.usuarios.smartflow.internal): ese dato no es
+      // algo que el vendedor deba conocer ni ver en ninguna pantalla.
+      displayName: (membershipSnap.data()?.name as string) || 'Vendedor',
+    };
   });
+}
 
-  const customToken = await admin.auth().createCustomToken(result.authUid, { pinLogin: true });
-  console.log('VENDOR_PIN_LOGIN_SUCCESS', { membershipId, tenantId: result.tenantId });
-  return { customToken };
+/**
+ * Candidatos de credencial cuando el vendedor entra desde /login SIN el
+ * enlace, o sea sin tenantId: solo escribió su usuario ("eduardopruebas") y su
+ * PIN. loginHandle es único POR TENANT, no globalmente, así que puede haber
+ * más de un candidato (dos negocios con una "michelle"); en ese caso el PIN es
+ * lo que desambigua — se prueba contra cada uno y entra el que coincida.
+ * Nunca se le pide al vendedor un tenantId ni ningún otro dato técnico, y la
+ * respuesta es la misma exista o no el usuario.
+ */
+async function findCredentialsByHandle(loginHandle: string, tenantId?: string): Promise<admin.firestore.DocumentReference[]> {
+  const snap = await db.collection('vendor_credentials').where('loginHandle', '==', loginHandle).limit(10).get();
+  const docs = tenantId ? snap.docs.filter((d) => d.data().tenantId === tenantId) : snap.docs;
+  return docs.map((d) => d.ref);
+}
+
+/**
+ * Acceso por PIN — el vendedor SOLO ve su nombre/usuario + PIN, nunca un
+ * membershipId, un tenantId ni el email técnico interno. `tenantId` es
+ * OPCIONAL: viene cuando se entra por el enlace de alta (/acceso?h=&t=&n=) o
+ * desde un dispositivo ya reconocido, y NO viene cuando el vendedor vuelve a
+ * entrar desde /login escribiendo su usuario — ahí el tenant se resuelve
+ * internamente desde las credenciales, sin exponerlo.
+ *
+ * Si el usuario no existe se hace el MISMO trabajo de hash (DUMMY_PIN_HASH) y
+ * se devuelve el MISMO error genérico que un PIN incorrecto — nunca se revela
+ * si el usuario existe, ni por mensaje ni por tiempo de respuesta. Sin
+ * request.auth previo a propósito: este endpoint ES el paso de autenticación.
+ * El límite de intentos por credencial es transaccional sobre Firestore (no en
+ * memoria, válido entre instancias concurrentes); además hay un límite liviano
+ * en memoria por usuario y por IP de origen para frenar enumeración antes de
+ * siquiera tocar Firestore (best-effort, no distribuido).
+ */
+export const loginWithPin = onCall({ maxInstances: 10 }, async (request) => {
+  const { tenantId, loginHandle: rawHandle, pin } = request.data as { tenantId?: string; loginHandle?: string; pin?: string };
+  if (!rawHandle || !pin) throw new HttpsError('invalid-argument', 'Falta loginHandle o pin');
+
+  const handle = normalizeLoginHandle(rawHandle);
+  // El cupo se cuenta por USUARIO, no por tenant+usuario: si dependiera del
+  // tenantId (que ahora es opcional) se podría esquivar el límite alternando
+  // entre mandarlo y no mandarlo.
+  const identityKey = `pin:${handle}`;
+  const originIp = request.rawRequest?.ip || 'unknown';
+  if (isRateLimited(identityKey) || isRateLimited(`pin-origin:${originIp}`)) {
+    throw new HttpsError('resource-exhausted', 'Demasiados intentos. Probá de nuevo en unos minutos.');
+  }
+
+  // Camino con tenant conocido (enlace de alta o dispositivo reconocido): se
+  // usa el índice login_handles, que además da el fallback de membershipId
+  // para el primer acceso. ÚNICA FUENTE DE VERDAD:
+  // loginHandle -> credencial -> authUid -> membership; nunca se deriva el doc
+  // de credencial de un ID de membership, que es mutable.
+  const candidates: { ref: admin.firestore.DocumentReference; fallbackMembershipId?: string }[] = [];
+  if (tenantId) {
+    const handleSnap = await db.collection('login_handles').doc(`${tenantId}_${handle}`).get();
+    if (handleSnap.exists) {
+      const handleData = handleSnap.data()!;
+      const credRef = await resolveCredRefForLogin(tenantId, handle, handleData);
+      if (credRef) candidates.push({ ref: credRef, fallbackMembershipId: handleData.membershipId as string });
+    }
+    // Si el índice no existe o quedó apuntando a la nada, se busca igual por
+    // usuario DENTRO de ese tenant antes de darse por vencido.
+    if (candidates.length === 0) {
+      (await findCredentialsByHandle(handle, tenantId)).forEach((ref) => candidates.push({ ref }));
+    }
+  } else {
+    (await findCredentialsByHandle(handle)).forEach((ref) => candidates.push({ ref }));
+  }
+
+  if (candidates.length === 0) {
+    // Costo constante: mismo hash que haría una verificación real, para no
+    // delatar por timing que este usuario no existe.
+    verifyPinHash(pin, DUMMY_PIN_SALT, DUMMY_PIN_HASH);
+    throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
+  }
+
+  for (const candidate of candidates) {
+    const result = await attemptPinLogin(candidate.ref, pin, candidate.fallbackMembershipId);
+    if (!result) continue;
+
+    const customToken = await admin.auth().createCustomToken(result.authUid, { pinLogin: true });
+    console.log('VENDOR_PIN_LOGIN_SUCCESS', {
+      credDocId: candidate.ref.id,
+      tenantId: result.tenantId,
+      viaHandleOnly: !tenantId,
+    });
+    // tenantId/displayName se devuelven DESPUÉS de autenticar, y son del
+    // propio usuario: los necesita el cliente para registrar el dispositivo y
+    // para recordar "quién sos" en este navegador. Nunca se devuelve authUid,
+    // ni IDs de credencial, ni el email técnico interno.
+    return {
+      customToken,
+      tenantId: result.tenantId,
+      loginHandle: result.loginHandle || handle,
+      displayName: result.displayName,
+    };
+  }
+
+  throw new HttpsError('permission-denied', PIN_LOGIN_GENERIC_ERROR);
 });
 
 /**

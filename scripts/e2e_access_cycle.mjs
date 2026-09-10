@@ -31,6 +31,23 @@ function check(label, cond, extra = '') {
   else { failures.push(label); console.log(`  FALLA ${label} ${extra}`); }
 }
 
+// El rate limiter de loginWithPin cuenta 20 intentos por minuto POR IP de
+// origen, y este script hace muchos mas logins seguidos que una persona real.
+// Cuando se satura NO es un fallo del producto (es la proteccion funcionando),
+// asi que se espera a que se libere la ventana y se reintenta una vez. La
+// prueba que verifica el rate limit a proposito (seccion 15) usa callFn en
+// crudo, sin este reintento.
+let rateLimitTestMode = false;
+async function loginPin(data) {
+  const first = await callFn('loginWithPin', data);
+  if (!rateLimitTestMode && first.error?.status === 'RESOURCE_EXHAUSTED') {
+    console.log('     (ventana de rate limit saturada por el propio script; esperando 62s)');
+    await new Promise((r) => setTimeout(r, 62000));
+    return callFn('loginWithPin', data);
+  }
+  return first;
+}
+
 async function callFn(name, data, idToken) {
   const res = await fetch(`${FN_BASE}/${name}`, {
     method: 'POST',
@@ -108,7 +125,7 @@ const TB = 't-e2e-otro-negocio';
 
   // --- 2. primer acceso (la membership esta en 'pending') ------------
   console.log('\n=== 2. Primer acceso con PIN (membership en pending) ===');
-  const login1 = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pin1 });
+  const login1 = await loginPin({ tenantId: TA, loginHandle: handle, pin: pin1 });
   check('PRIMER login con PIN permitido (antes se denegaba y nadie nuevo podia entrar)', !!login1.result?.customToken, JSON.stringify(login1.error || {}));
 
   const vendorIdToken = await idTokenForCustomToken(login1.result.customToken);
@@ -140,7 +157,7 @@ const TB = 't-e2e-otro-negocio';
 
   // --- 5. re-login (la regresion que dejaba a todos afuera) ----------
   console.log('\n=== 5. Volver a entrar con el MISMO PIN ===');
-  const login2 = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pin1 });
+  const login2 = await loginPin({ tenantId: TA, loginHandle: handle, pin: pin1 });
   check('re-login permitido despues del re-indexado', !!login2.result?.customToken, JSON.stringify(login2.error || {}));
 
   // --- 6. regenerar: invalida el anterior ---------------------------
@@ -152,16 +169,16 @@ const TB = 't-e2e-otro-negocio';
   check('el PIN nuevo es distinto del anterior', pin2 !== pin1);
   check('el loginHandle se conserva (no se inventa uno nuevo)', gen2.result?.loginHandle === handle, `handle=${gen2.result?.loginHandle}`);
 
-  const oldPinTry = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pin1 });
+  const oldPinTry = await loginPin({ tenantId: TA, loginHandle: handle, pin: pin1 });
   check('PIN VIEJO denegado', !!oldPinTry.error && !oldPinTry.result, JSON.stringify(oldPinTry.result || {}));
-  const newPinTry = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pin2 });
+  const newPinTry = await loginPin({ tenantId: TA, loginHandle: handle, pin: pin2 });
   check('PIN NUEVO permitido', !!newPinTry.result?.customToken, JSON.stringify(newPinTry.error || {}));
 
   // --- 7. suspender --------------------------------------------------
   console.log('\n=== 7. Desactivar usuario ===');
   const deact = await callFn('setMembershipActive', { membershipId: newId, isActive: false }, ownerToken);
   check('desactivacion aplicada', deact.result?.status === 'suspended', JSON.stringify(deact.error || {}));
-  const susLogin = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pin2 });
+  const susLogin = await loginPin({ tenantId: TA, loginHandle: handle, pin: pin2 });
   check('login de un usuario desactivado DENEGADO', !!susLogin.error && !susLogin.result, JSON.stringify(susLogin.result || {}));
   const susGen = await callFn('setVendorPin', { membershipId: newId }, ownerToken);
   check('generar PIN sobre un suspendido: rechazo explicito y accionable', !!susGen.error && /[Rr]eactiva/.test(susGen.error.message || ''), JSON.stringify(susGen.error || susGen.result));
@@ -175,9 +192,9 @@ const TB = 't-e2e-otro-negocio';
   const gen3 = await callFn('setVendorPin', { membershipId: newId }, ownerToken);
   check('tras reactivar, generar acceso nuevo ALLOW', !!gen3.result?.pin, JSON.stringify(gen3.error || {}));
   const pin3 = gen3.result?.pin;
-  const login3 = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pin3 });
+  const login3 = await loginPin({ tenantId: TA, loginHandle: handle, pin: pin3 });
   check('login con el acceso nuevo permitido', !!login3.result?.customToken, JSON.stringify(login3.error || {}));
-  const pin2AfterReact = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pin2 });
+  const pin2AfterReact = await loginPin({ tenantId: TA, loginHandle: handle, pin: pin2 });
   check('el PIN anterior sigue invalido despues de reactivar', !!pin2AfterReact.error && !pin2AfterReact.result);
 
   // --- 9. autorizacion ----------------------------------------------
@@ -205,7 +222,7 @@ const TB = 't-e2e-otro-negocio';
 
   const staleInfo = await callFn('getVendorAccessInfo', { membershipId: newId }, ownerToken);
   check('credencial huerfana: getVendorAccessInfo la resuelve por authUid', staleInfo.result?.hasPinAccess === true, JSON.stringify(staleInfo.result || staleInfo.error));
-  const staleLogin = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pin3 });
+  const staleLogin = await loginPin({ tenantId: TA, loginHandle: handle, pin: pin3 });
   check('credencial huerfana: el login sigue funcionando', !!staleLogin.result?.customToken, JSON.stringify(staleLogin.error || {}));
   const staleGen = await callFn('setVendorPin', { membershipId: newId }, ownerToken);
   check('credencial huerfana: regenerar ALLOW (ya no es un estado muerto)', staleGen.result?.mode === 'regenerate', JSON.stringify(staleGen.error || staleGen.result));
@@ -238,9 +255,9 @@ const TB = 't-e2e-otro-negocio';
   // le importa al vendedor.
   console.log('\n=== 12. Login con el PIN RECIEN generado sobre una credencial desubicada ===');
   const pinStale = staleGen.result?.pin;
-  const loginAfterStaleRegen = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pinStale });
+  const loginAfterStaleRegen = await loginPin({ tenantId: TA, loginHandle: handle, pin: pinStale });
   check('el PIN recien generado ENTRA (regresion del PIN nuevo que no servia)', !!loginAfterStaleRegen.result?.customToken, JSON.stringify(loginAfterStaleRegen.error || {}));
-  const pin3AfterStale = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pin3 });
+  const pin3AfterStale = await loginPin({ tenantId: TA, loginHandle: handle, pin: pin3 });
   check('el PIN anterior quedo invalidado', !!pin3AfterStale.error && !pin3AfterStale.result);
 
   // La credencial tiene que haber quedado en su lugar canonico y el indice
@@ -255,18 +272,68 @@ const TB = 't-e2e-otro-negocio';
 
   // Entrar dos veces mas seguidas = recargar la pagina / volver a entrar tras
   // cerrar sesion. No debe degradarse.
-  const reload1 = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pinStale });
-  const reload2 = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pinStale });
+  const reload1 = await loginPin({ tenantId: TA, loginHandle: handle, pin: pinStale });
+  const reload2 = await loginPin({ tenantId: TA, loginHandle: handle, pin: pinStale });
   check('login repetido (recargar pagina / volver a entrar) sigue funcionando', !!reload1.result?.customToken && !!reload2.result?.customToken);
 
   // Y si el indice vuelve a quedar roto por cualquier motivo, el login se
   // recupera por loginHandle/authUid en vez de decir "PIN incorrecto".
   console.log('\n=== 13. Indice roto a proposito: el login se recupera solo ===');
   await db.collection('login_handles').doc(`${TA}_${handle}`).set({ tenantId: TA, membershipId: 'IdQueNoExiste999', credDocId: 'TampocoExiste999' }, { merge: true });
-  const recovered = await callFn('loginWithPin', { tenantId: TA, loginHandle: handle, pin: pinStale });
+  const recovered = await loginPin({ tenantId: TA, loginHandle: handle, pin: pinStale });
   check('con el indice apuntando a la nada, el login igual entra (red de seguridad)', !!recovered.result?.customToken, JSON.stringify(recovered.error || {}));
-  const wrongTenant = await callFn('loginWithPin', { tenantId: TB, loginHandle: handle, pin: pinStale });
+  const wrongTenant = await loginPin({ tenantId: TB, loginHandle: handle, pin: pinStale });
   check('esa red de seguridad NO cruza tenants', !!wrongTenant.error && !wrongTenant.result, JSON.stringify(wrongTenant.result || {}));
+
+  // --- 14. REENTRADA DESDE /login (sin el enlace de WhatsApp) --------
+  // El vendedor cierra sesion y cae en /login. Antes esa pantalla solo ofrecia
+  // Google y email/password, y /acceso sin el enlace decia "Este enlace no es
+  // valido": quedaba afuera salvo que conservara el mensaje de WhatsApp. Ahora
+  // escribe SOLO su usuario y su PIN — nunca un tenantId ni ningun dato
+  // tecnico — y el backend resuelve el negocio internamente.
+  console.log('\n=== 14. Reentrada desde /login: usuario + PIN, sin tenantId ===');
+  const noTenant = await loginPin({ loginHandle: handle, pin: pinStale });
+  check('entra con usuario + PIN, SIN mandar tenantId', !!noTenant.result?.customToken, JSON.stringify(noTenant.error || {}));
+  check('la respuesta trae el tenant para poder registrar el dispositivo', noTenant.result?.tenantId === TA, `tenantId=${noTenant.result?.tenantId}`);
+  check('la respuesta trae el nombre visible (de la membership, no del correo tecnico)', noTenant.result?.displayName === 'eduardo pruebas', `displayName=${noTenant.result?.displayName}`);
+  check('la respuesta NO filtra authUid ni ids de credencial', !('authUid' in (noTenant.result || {})) && !('credDocId' in (noTenant.result || {})) && !('membershipId' in (noTenant.result || {})));
+  check('la respuesta NO filtra el correo tecnico interno', !JSON.stringify(noTenant.result || {}).includes('usuarios.smartflow.internal'));
+
+  const noTenantBadPin = await loginPin({ loginHandle: handle, pin: '000000' });
+  check('PIN incorrecto sin tenantId -> DENY', !!noTenantBadPin.error && !noTenantBadPin.result);
+  const unknownUser = await loginPin({ loginHandle: 'noexisteestapersona', pin: '123456' });
+  check('usuario inexistente -> mismo error generico', unknownUser.error?.message === noTenantBadPin.error?.message, `"${unknownUser.error?.message}" vs "${noTenantBadPin.error?.message}"`);
+
+  // Aislamiento: el usuario existe en TA; pedir entrar diciendo que es de TB
+  // no debe funcionar aunque el PIN sea correcto.
+  const wrongTenantExplicit = await loginPin({ tenantId: TB, loginHandle: handle, pin: pinStale });
+  check('usuario de un tenant no entra declarando otro tenant', !!wrongTenantExplicit.error && !wrongTenantExplicit.result);
+
+  // Suspendido: tampoco entra por esta puerta nueva.
+  await callFn('setMembershipActive', { membershipId: newId, isActive: false }, ownerToken);
+  const suspendedNoTenant = await loginPin({ loginHandle: handle, pin: pinStale });
+  check('usuario desactivado -> DENY tambien entrando por usuario+PIN', !!suspendedNoTenant.error && !suspendedNoTenant.result);
+  await callFn('setMembershipActive', { membershipId: newId, isActive: true }, ownerToken);
+  const backAfterReactivate = await loginPin({ loginHandle: handle, pin: pinStale });
+  check('reactivado -> vuelve a entrar por usuario+PIN', !!backAfterReactivate.result?.customToken, JSON.stringify(backAfterReactivate.error || {}));
+
+  // Dispositivo reconocido = el cliente ya guardo tenantId+handle y los manda:
+  // mismo endpoint, mismo resultado, sin volver a escribir el usuario.
+  const knownDevice = await loginPin({ tenantId: TA, loginHandle: handle, pin: pinStale });
+  check('dispositivo reconocido (tenant ya guardado) sigue entrando solo con PIN', !!knownDevice.result?.customToken, JSON.stringify(knownDevice.error || {}));
+
+  // --- 15. RATE LIMITING --------------------------------------------
+  // Va al final a proposito: el limitador cuenta tambien por IP de origen, asi
+  // que saturarlo antes afectaria a las demas pruebas. Se usa un usuario que
+  // NO existe para no tocar los contadores de una credencial real.
+  console.log('\n=== 15. Rate limiting ===');
+  rateLimitTestMode = true;
+  let exhausted = false;
+  for (let i = 0; i < 25 && !exhausted; i++) {
+    const r = await callFn('loginWithPin', { loginHandle: 'usuarioinventadoparaellimite', pin: '111111' });
+    if (r.error?.status === 'RESOURCE_EXHAUSTED') exhausted = true;
+  }
+  check('los intentos repetidos terminan bloqueados por rate limit', exhausted);
 
   console.log(`\n=== RESULTADO: ${pass} OK, ${failures.length} fallos ===`);
   if (failures.length) {
