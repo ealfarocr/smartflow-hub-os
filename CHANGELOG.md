@@ -1,6 +1,24 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-10 — /login prioriza el acceso del equipo sobre el corporativo
+
+- ux: el bloque "Acceso del equipo" pasa arriba, con el botón principal grande
+  "Entrar con código de acceso" y un saludo "Hola <nombre>" cuando este equipo
+  ya fue usado. "Acceso corporativo" (Google + correo/contraseña) queda debajo,
+  con los mismos handlers y enlaces: sin regresión.
+- ux: "Cambiar de usuario" también desde /login — borra identidad Y deviceId.
+- nota: el "mantener presionado" NO puede vivir en /login. Solo tiene sentido
+  con la sesión de Firebase viva, y con sesión viva esa pantalla ni se muestra
+  (la app redirige derecho adentro). El long press vive en /acceso. Que el
+  vendedor pase siempre por esa pantalla al abrir sería una decisión aparte:
+  agregaría 2 segundos a cada apertura de un flujo hoy instantáneo.
+- qa: verificado en navegador a 375x812 (botón del equipo visible sin scroll,
+  260-324 de 812) y a 1440x900, sin scroll horizontal; "Cambiar de usuario"
+  comprobado sobre localStorage real; y en producción, orden correcto y botón
+  sin scroll (bundle ).
+- deploy: . Solo jerarquía visual y copy; sin cambios de seguridad.
+
 
 ## 2026-09-10 — Preset final del Asesor Comercial: solo atención y ventas
 
