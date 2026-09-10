@@ -1,5 +1,93 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ DESPLEGADO — Preset final del Asesor Comercial: solo atención y ventas (2026-09-10)
+
+Confirmado por Eduardo: el menú restringido ya funcionaba en el teléfono. Este
+ajuste lo lleva al alcance definitivo.
+
+**Menú del Asesor:** Dashboard, Mis Tareas, CRM, WhatsApp, Agenda. Nada más.
+
+**Ocultos y denegados por ruta directa:** Paquetes, Tienda Hub, Cobros,
+Cotizaciones, Catálogo, Usuarios, Mi Suscripción, Multi-Agente, Agente IA,
+Auditor IA, Integraciones, Configuración.
+
+### Lo delicado: no romperle el trabajo al vendedor
+
+El asesor sigue usando **desde la conversación** todo lo que el Owner/Admin ya
+creó: consultar el catálogo y elegir un producto, mandar una cotización,
+generar un enlace de cobro.
+
+**Auditado antes de tocar nada:** `hasTool` / `getEffectiveTools` /
+`allowedTools` se usaban SOLO en `ToolGuard` (rutas), `MainLayout` (menú) y la
+ficha de usuario. **Ningún** módulo de conversaciones ni de CRM condicionaba una
+acción comercial con ellos — o sea que `MODULE_ACCESS` y `COMMERCIAL_ACTION` ya
+estaban separados y no hubo nada que desacoplar.
+
+Lo que sí se agregó es un **candado** para que siga así:
+`src/utils/commercialActionsDecoupled.test.ts` lee el código de esos dos módulos
+(vía `import.meta.glob`) y falla si alguien mete un permiso de navegación dentro
+de una acción comercial. Además verifica que el drawer de catálogo, el modal de
+cobro y la plantilla de cotización sigan estando en la conversación.
+
+### Permisos
+
+- `ADVISOR_TOOLS` = `crm, conversaciones, agenda`.
+- `ADMIN_ONLY_TOOLS` suma `catalogo`, `cotizaciones` y `pagos` — sus **módulos**
+  son configuración (productos maestros, plantillas, cuentas de cobro).
+- El preset "Vendedor" de la ficha de usuario se alinea con el rol.
+
+### Rutas
+
+- `/cotizaciones`, `/catalogo`, `/paquetes` y `/pagos` suman
+  `RoleGuard(Admin, Owner)`.
+- `/tienda` y `/paquetes` **no tenían ningún guard**: cualquiera las abría
+  escribiendo la URL.
+- En el menú, Paquetes y Tienda Hub pasan a `adminOnly` (no tenían `toolKey`).
+
+### Agujero encontrado de paso en `firestore.rules`
+
+El catálogo permitía `create/update/delete` a cualquier `isTenantMember`: un
+asesor podía **alterar los productos maestros del negocio saltándose la UI**.
+Ahora **leer** sigue abierto a todo miembro activo (lo necesita desde la
+conversación) pero crear, editar y borrar exigen `isTenantAdmin`.
+
+`packages` ya estaba bien. `quotes` y `payment_requests` se dejan como estaban
+**a propósito**: crear una cotización o un enlace de cobro ES una acción
+comercial legítima del asesor.
+
+### Sin cambios funcionales en backend
+
+Multi-Agente, Agente IA y Auditor IA siguen trabajando por debajo exactamente
+igual; solo sus paneles son de Owner/Admin. No se tocaron el outbound de Meta,
+los pagos externos, la autenticación por código, Presence ni el routing del
+Multi-Agente.
+
+### Pruebas
+
+**206/206** unitarios + **42/42** de Rules (7 nuevas del catálogo). El test del
+menú corre contra el array **real** de `MainLayout` y ahora exige que el menú
+del asesor sea **exactamente** esos 5 ítems, ni uno más — ni siquiera si un
+admin le marca todas las herramientas a mano. Owner, Admin y SuperAdmin sin
+regresión.
+
+Commit `f3532d9`. Deploy: `hosting:app` + `firestore:rules`. Bundle verificado
+en producción (`index-K1efxHg1.js`, mismo hash del build).
+
+### Próximo paso exacto
+
+QA de Eduardo en el teléfono con `eduardo pruebas`:
+1. el menú debe mostrar **solo** Dashboard, Mis Tareas, CRM, WhatsApp, Agenda;
+2. escribir a mano `/catalogo`, `/cotizaciones`, `/pagos`, `/paquetes`,
+   `/tienda`, `/usuarios`, `/suscripcion`, `/multi-agent`, `/ai-agent`,
+   `/auditoria`, `/integraciones` y `/configuracion` → "Acceso Restringido";
+3. **lo importante**: abrir una conversación de WhatsApp y confirmar que sigue
+   pudiendo abrir el catálogo, elegir un producto, mandar la cotización y
+   generar el enlace de cobro;
+4. con `EDUARDO ADMIN` confirmar que conserva todo y que puede crear/editar
+   productos del catálogo.
+
+**No activar vendedoras reales hasta cerrar ese ciclo.**
+
 ## ✅ DESPLEGADO — P0: el Asesor Comercial veía todo el menú administrativo (2026-09-10)
 
 **Reportado:** `eduardo pruebas` (ASESOR COMERCIAL), desde el teléfono, veía

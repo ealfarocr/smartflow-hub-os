@@ -2,6 +2,45 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-10 — Preset final del Asesor Comercial: solo atención y ventas
+
+- feat: menú del Asesor = Dashboard, Mis Tareas, CRM, WhatsApp, Agenda. Ocultos y
+  denegados por ruta directa: Paquetes, Tienda Hub, Cobros, Cotizaciones,
+  Catálogo, Usuarios, Mi Suscripción, Multi-Agente, Agente IA, Auditor IA,
+  Integraciones y Configuración.
+- auditoría (antes de tocar nada): `hasTool`/`getEffectiveTools`/`allowedTools`
+  se usaban SOLO en ToolGuard, MainLayout y la ficha de usuario. Ningún módulo de
+  conversaciones ni de CRM ataba una acción comercial a esos permisos, así que
+  MODULE_ACCESS y COMMERCIAL_ACTION ya estaban separados: no hubo que
+  desacoplar nada.
+- test: `commercialActionsDecoupled.test.ts` es el candado de esa separación —
+  lee el código de conversaciones y CRM (con `import.meta.glob`) y falla si
+  alguien mete un permiso de navegación dentro de una acción comercial. Verifica
+  además que el drawer de catálogo, el modal de cobro y la plantilla de
+  cotización sigan estando en la conversación.
+- feat: `ADVISOR_TOOLS` = crm, conversaciones, agenda. `ADMIN_ONLY_TOOLS` suma
+  catalogo, cotizaciones y pagos (sus MÓDULOS son configuración: productos
+  maestros, plantillas, cuentas de cobro). El preset "Vendedor" de la ficha se
+  alinea con el rol.
+- fix(rutas): `/cotizaciones`, `/catalogo`, `/paquetes` y `/pagos` suman
+  `RoleGuard(Admin, Owner)`. `/tienda` y `/paquetes` NO TENÍAN NINGÚN GUARD.
+  En el menú, Paquetes y Tienda Hub pasan a `adminOnly`.
+- fix(seguridad, firestore.rules): el catálogo permitía create/update/delete a
+  cualquier `isTenantMember` — un asesor podía alterar los productos maestros
+  saltándose la UI. Leer sigue abierto a todo miembro activo (lo necesita desde
+  la conversación); crear, editar y borrar exigen `isTenantAdmin`. `packages` ya
+  estaba bien; `quotes` y `payment_requests` se dejan como estaban a propósito:
+  crear una cotización o un enlace de cobro ES una acción comercial del asesor.
+- sin cambios funcionales en backend: Multi-Agente, Agente IA y Auditor IA siguen
+  trabajando por debajo; solo sus paneles son de Owner/Admin. No se tocaron el
+  outbound de Meta, los pagos externos, el acceso por código, Presence ni el
+  routing del Multi-Agente.
+- test: 206/206 unitarios + 42/42 de Rules (7 nuevas del catálogo). El test del
+  menú exige que el del asesor sea EXACTAMENTE esos 5 ítems, ni uno más.
+- deploy: `hosting:app` + `firestore:rules`. Commit `f3532d9`. Bundle verificado
+  (`index-K1efxHg1.js`).
+
+
 ## 2026-09-10 — P0: el Asesor Comercial veía y podía abrir todo el menú administrativo
 
 - fix(causa raíz): `ROLE_DEFAULT_TOOLS` devolvía `ALL_TOOL_KEYS` para TODOS los
