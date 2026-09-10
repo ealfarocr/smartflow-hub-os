@@ -1,6 +1,25 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-10 — Adjuntos: solo clip y camara; el Asesor entra directo a WhatsApp
+
+- ux: se elimina el boton extra de imagen (lo habia agregado yo en el deploy
+  anterior) y el de documentos, que abria 'Recientes'/el file manager. Quedan dos
+  botones: Clip (fotos y videos, accept image/video SIN capture) y Camara (solo
+  Tomar foto / Grabar video, ambos con capture). 3 inputs, 2 botones, sin audio ni
+  documentos en el accept, sin galeria duplicada.
+- nota: desde la web no existe forma de invocar una app concreta de galeria de
+  Android. accept + ausencia de capture es lo mas especifico disponible; que
+  selector aparece lo decide el sistema. No se agrego ningun hack.
+- ux: LandingRedirect resuelve el destino de '/' por rol — /conversaciones para el
+  Asesor, /dashboard para Owner/Admin/SuperAdmin. Aplica a login con codigo, acceso
+  rapido y reentrada. Los deep links no se tocan y /mi-turno sigue accesible (el
+  estado operativo esta en la barra de MainLayout).
+- test: 238/238 (4 nuevos del aterrizaje por rol). Deploy hosting:app, commit
+  8c1fdc4, bundle index-CrlPEnTj.js verificado en produccion.
+- pendiente: causa del fallo de upload en el telefono, y camara/video/audio sin
+  probar fisicamente.
+
 ## 2026-09-10 — P0 vendedor: un adjunto fallido ya no expulsa, y galeria/camara simplificadas
 
 - fix(bug propio): handleSellerError trataba storage/unauthorized como sesion muerta

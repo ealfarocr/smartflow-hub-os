@@ -1,5 +1,48 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 P0 vendedor — adjuntos simplificados y entrada directa a WhatsApp (2026-09-10)
+
+### Adjuntos: dos botones y nada más
+
+El **botón extra de imagen lo había agregado yo** en el deploy anterior al
+separar galería de documentos. Se elimina, junto con el botón de documentos —
+que era el que abría "Recientes" / el administrador de archivos.
+
+- **Clip** → fotos y videos. `accept="image/*,video/*"` **sin** `capture`.
+- **Cámara** → solo **Tomar foto** (`image/*` + capture) y **Grabar video**
+  (`video/*` + capture).
+
+Quedan **3 inputs y 2 botones visibles**. Sin audio ni documentos en el accept,
+sin cámaras duplicadas, sin acceso redundante a galería.
+
+**Nota honesta sobre el Photo Picker de Android:** desde la web **no existe**
+forma de invocar una app concreta de galería. `accept` + ausencia de `capture` es
+el mecanismo más específico que la plataforma permite, y es el que se usa; qué
+selector muestra finalmente el sistema lo decide Android. No se agregó ningún
+hack para forzarlo.
+
+### Aterrizaje por rol
+
+`LandingRedirect` (nuevo) resuelve el destino de `/` según el rol:
+**`/conversaciones` para el Asesor**, `/dashboard` para Owner, Admin y
+SuperAdmin. Aplica a login con código, acceso rápido y reentrada con sesión
+válida, porque las tres terminan en `/`.
+
+Los **deep links no se tocan**: quien abre `/crm` o `/agenda` va ahí, y
+ProtectedRoute sigue controlando el acceso. `/mi-turno` sigue accesible y el
+estado operativo está en la barra de MainLayout, así que el vendedor **no pierde
+el marcado de turno** al saltarse esa pantalla.
+
+238/238 tests. Commit `8c1fdc4`. Deploy `hosting:app`, bundle `index-CrlPEnTj.js`
+verificado en producción.
+
+### ⚠️ Sigue sin cerrar
+
+La causa del **fallo de upload en el teléfono** (P0-B) sigue sin determinarse:
+las Rules pasan 8/8 y Storage está sano. Cámara, video y audio **no probados
+físicamente**. Con el fix de no-expulsión ya se puede capturar el error real sin
+perder la sesión.
+
 ## 🔶 P0 puesto de vendedor — segunda ronda desplegada (2026-09-10)
 
 Eduardo confirmó que el **long press funciona físicamente**. Bajado a **1 s**
