@@ -28,7 +28,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { TenantService } from '@/services/firebase/TenantService';
 import { WhatsappConnectionModal } from './WhatsappConnectionModal';
 import { CatalogService } from '@/services/firebase/CatalogService';
-import { sellerErrorMessage, isSessionDeadError, type SellerErrorLayer } from '@/utils/sellerErrors';
+import { sellerErrorMessage, isSessionDeadError, outboundRejectionMessage, type SellerErrorLayer } from '@/utils/sellerErrors';
 import { isAdminRole } from '@/utils/permissions';
 import { AudioMessagePlayer } from './components/AudioMessagePlayer';
 
@@ -259,23 +259,18 @@ export const ConversationsPageView = () => {
           // indistinguible de un envío exitoso — exactamente el bug reportado de
           // "video no envía" sin ningún error visible.
           const result = await sendMessage(activeConversation, caption, 'advisor', activeMembership.tenantId, item.remoteUrl, item.filename);
-          if (isVideoItem) {
-            debugAttach('VIDEO_SEND_RESPONSE', result);
-            if (result && result.success === false) {
-              debugAttach('VIDEO_SEND_ERROR', { status: result.status, message: result.errorMessage });
-              addToast(`WhatsApp rechazó el video: ${result.errorMessage || 'error desconocido'}`, 'error');
-            }
-          }
+          if (isVideoItem) debugAttach('VIDEO_SEND_RESPONSE', result);
+          reportOutboundResult(result);
           caption = '';
         }
         pendingMedia.forEach(m => URL.revokeObjectURL(m.localPreviewUrl));
         setPendingMedia([]);
         if (!readyItems.length && cleanText) {
           // No había adjuntos listos (todos con error) pero sí texto: igual se envía el texto solo.
-          await sendMessage(activeConversation, cleanText, 'advisor', activeMembership.tenantId, null, null);
+          reportOutboundResult(await sendMessage(activeConversation, cleanText, 'advisor', activeMembership.tenantId, null, null));
         }
       } else {
-        await sendMessage(activeConversation, cleanText, 'advisor', activeMembership.tenantId, mediaUrl, mediaFilename);
+        reportOutboundResult(await sendMessage(activeConversation, cleanText, 'advisor', activeMembership.tenantId, mediaUrl, mediaFilename));
       }
       setInputText(''); setMediaUrl(null); setMediaFilename(null);
     } catch (err) { handleSellerError('send', err); }
@@ -311,6 +306,18 @@ export const ConversationsPageView = () => {
       activeMembership.tenantId, null, null, template.metaTemplateName, template.languageCode, components);
   };
 
+  // Meta puede rechazar un envio devolviendo HTTP 200 con success:false — no
+  // lanza excepcion, asi que el catch de arriba no lo ve. Antes solo se avisaba
+  // en el caso de VIDEO, y con el texto crudo de Meta: el vendedor leia
+  // "An unknown error has occurred" y no podia hacer nada con eso. Ahora se
+  // revisa SIEMPRE y se traduce; cuando el problema es la cuenta de WhatsApp del
+  // negocio (metodo de pago, verificacion, WABA inactiva) el mensaje apunta al
+  // administrador, que es quien puede resolverlo.
+  const reportOutboundResult = (result: { success?: boolean; errorMessage?: string | null } | undefined) => {
+    if (!result || result.success !== false) return;
+    console.error('[OUTBOUND_REJECTED]', result);
+    addToast(outboundRejectionMessage(result.errorMessage), 'error');
+  };
   // Owner/Admin abren el modulo de Cotizaciones; el asesor trabaja desde el chat.
   const canOpenQuotesModule = isAdminRole(activeMembership?.role);
 
