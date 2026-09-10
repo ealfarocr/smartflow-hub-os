@@ -1,6 +1,26 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-10 — Clip y camara morian junto con la nota de voz
+
+- fix(causa mas probable): isUploading lo pone SOLO el envio de la nota de voz pero
+  deshabilitaba tambien el clip y la camara. Si queda pegado — y puede: recorder.stop()
+  codifica el MP3 en el hilo principal, segundos con la UI congelada — los cuatro
+  controles multimedia mueren juntos, que es el sintoma reportado. El clip y la camara
+  dejan de mirar ese estado; el boton de microfono lo conserva.
+- fix: se cede un frame antes de codificar, para que el spinner alcance a pintarse.
+- auditado y SIN cambios necesarios: los tres input.click() ya ocurren sincronamente
+  dentro del onClick (sin setTimeout/await/modal de por medio) y los inputs viven en el
+  mismo bloque JSX que sus botones, asi que los refs no pueden ser null por render
+  condicional. Igual ahora se registra el estado del ref en cada toque.
+- feat(diagnostico): logs [MEDIA_UI] y [VOICE] paso a paso, sin datos sensibles, para
+  ver por chrome://inspect exactamente donde se corta el flujo en el telefono.
+- fix: el envio de la nota de voz pasa por reportOutboundResult; un rechazo de Meta se
+  explica en vez de fallar en silencio.
+- test: 238/238. Deploy hosting:app, commit a962812, bundle index-UbHfOzd4.js verificado.
+- pendiente: no se pudo reproducir el fallo (llegar a /conversaciones requiere sesion
+  real). Si persiste, hacen falta los logs del telefono.
+
 ## 2026-09-10 — Adjuntos: solo clip y camara; el Asesor entra directo a WhatsApp
 
 - ux: se elimina el boton extra de imagen (lo habia agregado yo en el deploy

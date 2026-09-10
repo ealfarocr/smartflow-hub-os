@@ -1,5 +1,66 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 P0 vendedor — controles multimedia sin responder (2026-09-10)
+
+Confirmado por Eduardo: cerrar/reabrir OK, reentrada OK, aterriza directo en
+WhatsApp OK. Pero clip, cámara-foto, cámara-video y nota de voz **no
+respondían** — los cuatro a la vez.
+
+### Causa más probable, y la que explica que fallen los cuatro juntos
+
+`isUploading` lo pone **solo** el envío de la nota de voz, pero deshabilitaba
+también el clip y la cámara (`disabled={isUploading}`). Si ese estado queda
+pegado, los cuatro controles mueren a la vez. Y puede quedarse pegado con
+facilidad: `recorder.stop()` codifica el MP3 con lamejs **en el hilo principal**
+—segundos con la interfaz congelada en un teléfono— y cualquier camino que no
+llegue al `finally` lo deja en `true` para siempre.
+
+Adjuntar una foto no tiene por qué depender de que una nota de voz haya
+terminado de subir: **el clip y la cámara dejan de mirar `isUploading`**. El
+botón de micrófono sí lo conserva, que es donde tiene sentido. Además se cede un
+frame antes de codificar, para que el spinner alcance a pintarse.
+
+### Lo que se auditó y NO había que corregir
+
+- **Gesto de usuario**: los tres `input.click()` ya ocurren **síncronamente**
+  dentro del `onClick`, sin `setTimeout`, `await` ni modal asíncrono de por medio.
+- **Refs**: los inputs viven en el **mismo bloque JSX** que sus botones, así que
+  no pueden ser `null` por render condicional.
+
+Aun así, ahora cada toque registra si el ref está presente, para confirmarlo con
+datos del propio teléfono en vez de por deducción.
+
+### Diagnóstico desplegado (sin datos sensibles)
+
+```
+[MEDIA_UI] clip_click / gallery_input_click_called / gallery_change_fired
+[MEDIA_UI] camera_photo_click / photo_input_click_called / photo_change_fired
+[MEDIA_UI] camera_video_click / video_input_click_called
+[VOICE]    button_pressed / permission_requested / permission_granted /
+           recorder_started / recorder_stopped / blob_created /
+           upload_started / upload_completed / send_attempted
+```
+
+Con `chrome://inspect` sobre el teléfono, esos logs dicen **exactamente** en qué
+paso se corta. El envío de la nota de voz también pasa ahora por
+`reportOutboundResult`, así que un rechazo de Meta se explica en vez de fallar en
+silencio.
+
+238/238 tests. Commit `a962812`. Deploy `hosting:app`, bundle `index-UbHfOzd4.js`
+verificado en producción.
+
+### ⚠️ Sigue sin confirmarse
+
+**No pude reproducir el fallo**: llegar a `/conversaciones` requiere sesión real y
+no puedo autenticarme. Lo desplegado ataca la causa más probable y deja la
+instrumentación para cerrar el caso con datos si persiste.
+
+### Próximo paso exacto
+
+En el teléfono: tocar clip, Tomar foto, Grabar video y la nota de voz. Si alguno
+sigue sin responder, conectar el teléfono por `chrome://inspect` y mandar las
+líneas `[MEDIA_UI]` y `[VOICE]` de la consola — con eso se cierra.
+
 ## 🔶 P0 vendedor — adjuntos simplificados y entrada directa a WhatsApp (2026-09-10)
 
 ### Adjuntos: dos botones y nada más
