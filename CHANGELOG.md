@@ -2,6 +2,22 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — AJUSTE UX: modal de acceso maneja el caso "usuario sin PIN"
+
+- fix: un usuario active/pending sin PIN generado (nunca tuvo
+  `vendor_credentials`) no tenía forma de arrancar su acceso desde
+  Usuarios — 🔗 solo mostraba un toast, y el botón 🔑 dedicado solo aparece
+  en filas prepared/draft. `VendorAccessData` suma `pinConfigured:boolean`
+  (+ `membershipId`): en `false`, el modal no muestra usuario/enlace/PIN ni
+  ningún botón de copiar (nada de eso existe todavía, y mostrarlo
+  implicaría que el vendedor ya puede entrar) — solo un aviso claro "PIN no
+  configurado" + un botón primario "Generar PIN". Al generarlo, el MISMO
+  modal pasa al estado ya existente ("recién generado": PIN visible una
+  vez, Copiar PIN/enlace/mensaje habilitados) sin cerrarse.
+- deploy: `hosting:app` únicamente — sin cambios de backend
+  (`setVendorPin`/`getVendorAccessInfo`/Rules intactos). Commit `69ae189`,
+  ya en `main`.
+
 ## 2026-09-09 — FIX URGENTE: ícono 🔗 abría /login en vez del enlace real de acceso
 
 - fix(bug real confirmado): la rama `else` de `renderActions` (mostrada para
