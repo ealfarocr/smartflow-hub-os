@@ -8,16 +8,26 @@
 
 export type SellerErrorLayer = 'upload' | 'send' | 'mic' | 'camera';
 
-/** Códigos de Firebase que significan "tu sesión ya no sirve, hay que volver a entrar". */
+// Firebase confirma por sí mismo que la sesión ya no sirve.
 const SESSION_DEAD_CODES = [
-  'unauthenticated',
-  'functions/unauthenticated',
-  'storage/unauthenticated',
-  'storage/unauthorized',
   'auth/user-token-expired',
   'auth/id-token-expired',
   'auth/user-disabled',
   'auth/invalid-user-token',
+  'auth/user-not-found',
+];
+
+// Estos NO alcanzan por sí solos. Un 'storage/unauthorized' puede ser una Rule
+// que no matchea, una ruta mal armada o un archivo fuera de límite — nada de eso
+// significa que la persona tenga que volver a entrar. Sacarla de la sesión por
+// un adjunto fallido es peor que el fallo original: pierde la conversación que
+// estaba atendiendo. Cuando aparece uno de estos se le PREGUNTA a Firebase (ver
+// confirmSessionDead) en vez de suponer.
+const SESSION_SUSPECT_CODES = [
+  'unauthenticated',
+  'functions/unauthenticated',
+  'storage/unauthenticated',
+  'storage/unauthorized',
   'permission-denied',
   'functions/permission-denied',
 ];
@@ -27,18 +37,42 @@ export function errorCodeOf(err: unknown): string {
   return '';
 }
 
-/**
- * ¿Este error significa que la sesión murió? Pasa, por ejemplo, cuando un
- * Owner/Admin regenera el código de acceso de esa persona: se revocan sus
- * refresh tokens, el teléfono sigue "abierto" pero ya no puede renovar su token
- * y a partir de ahí TODO falla a la vez — texto, adjuntos y notas de voz — con
- * tres mensajes distintos que no explican nada. Detectarlo permite mandarla a
- * entrar de nuevo con una sola frase clara.
- */
+const matches = (code: string, list: string[]) =>
+  list.some((c) => code === c || code.endsWith(`/${c}`) || code.includes(c));
+
+/** Firebase ya dijo explícitamente que el token no sirve. */
 export function isSessionDeadError(err: unknown): boolean {
   const code = errorCodeOf(err).toLowerCase();
-  if (!code) return false;
-  return SESSION_DEAD_CODES.some((c) => code === c || code.endsWith(`/${c}`) || code.includes(c));
+  return !!code && matches(code, SESSION_DEAD_CODES);
+}
+
+/** Podría ser la sesión... o no. Hay que confirmarlo antes de expulsar a nadie. */
+export function isSessionSuspectError(err: unknown): boolean {
+  const code = errorCodeOf(err).toLowerCase();
+  return !!code && (matches(code, SESSION_DEAD_CODES) || matches(code, SESSION_SUSPECT_CODES));
+}
+
+export interface RefreshableUser {
+  getIdToken: (forceRefresh: boolean) => Promise<string>;
+}
+
+/**
+ * Le PREGUNTA a Firebase si la sesión sigue viva, forzando un refresh real del
+ * ID token. Es la única prueba válida: si el refresh funciona, la sesión está
+ * sana y el error era de otra cosa (una Rule, una ruta, un límite) — y a la
+ * persona no hay que sacarla de ningún lado.
+ *
+ * Devuelve true SOLO si Firebase confirma que hay que volver a entrar.
+ */
+export async function confirmSessionDead(getUser: () => RefreshableUser | null): Promise<boolean> {
+  const user = getUser();
+  if (!user) return true; // ya no hay sesión que sostener
+  try {
+    await user.getIdToken(true);
+    return false; // el token se renovó: la sesión está viva
+  } catch (e) {
+    return isSessionDeadError(e);
+  }
 }
 
 export const SESSION_DEAD_MESSAGE =
@@ -46,6 +80,8 @@ export const SESSION_DEAD_MESSAGE =
 
 /** Mensaje para el vendedor según la capa donde falló. */
 export function sellerErrorMessage(layer: SellerErrorLayer, err: unknown): string {
+  // Solo cuando Firebase lo confirmó explícitamente. Los códigos meramente
+  // sospechosos se traducen según su capa, sin hablar de sesión.
   if (isSessionDeadError(err)) return SESSION_DEAD_MESSAGE;
 
   const code = errorCodeOf(err).toLowerCase();
@@ -71,6 +107,7 @@ export function sellerErrorMessage(layer: SellerErrorLayer, err: unknown): strin
       return 'La subida se cortó. Revisá tu conexión y probá de nuevo.';
     }
     if (code.includes('quota')) return 'No se pudo subir el archivo. Avisale a tu administrador.';
+    if (code.includes('unauthorized')) return 'No se pudo subir el archivo. Probá de nuevo.';
     return 'No se pudo subir el archivo. Intentá nuevamente.';
   }
 
@@ -79,6 +116,28 @@ export function sellerErrorMessage(layer: SellerErrorLayer, err: unknown): strin
     return 'Sin conexión estable. El mensaje no salió: probá de nuevo.';
   }
   return 'No se pudo enviar el mensaje. Intentá de nuevo.';
+}
+
+/**
+ * Anti-apilado: una causa, un solo aviso. Sin esto, un adjunto que falla en tres
+ * pipelines (texto, media, nota de voz) mostraba tres toasts idénticos y
+ * disparaba tres redirecciones — eso fue exactamente lo reportado desde el
+ * teléfono. La ventana es corta a propósito: no silencia un problema nuevo más
+ * tarde, solo la ráfaga simultánea de la misma causa.
+ */
+const DEDUPE_WINDOW_MS = 8000;
+const recentNotices = new Map<string, number>();
+
+export function shouldNotify(key: string, now: number = Date.now()): boolean {
+  const last = recentNotices.get(key);
+  if (last !== undefined && now - last < DEDUPE_WINDOW_MS) return false;
+  recentNotices.set(key, now);
+  return true;
+}
+
+/** Solo para tests: limpia el estado de deduplicación. */
+export function resetNoticeDedupe(): void {
+  recentNotices.clear();
 }
 
 /**

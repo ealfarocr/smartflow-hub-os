@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   sellerErrorMessage,
   isSessionDeadError,
+  isSessionSuspectError,
+  confirmSessionDead,
+  shouldNotify,
+  resetNoticeDedupe,
   isMetaAccountBlocker,
   outboundRejectionMessage,
   SESSION_DEAD_MESSAGE,
@@ -42,43 +46,79 @@ describe('El vendedor nunca recibe jerga técnica', () => {
   });
 });
 
-// Cuando un Owner/Admin regenera el código de acceso de alguien, se revocan sus
-// refresh tokens: el teléfono sigue abierto pero ya no renueva el token, y a
-// partir de ahí fallan A LA VEZ el texto, los adjuntos y las notas de voz. Ese
-// fue exactamente el cuadro reportado desde el teléfono de USADITOS.
-describe('Sesión muerta: una sola causa detrás de que falle todo junto', () => {
-  const codigos = [
-    'unauthenticated',
-    'functions/unauthenticated',
-    'storage/unauthorized',
-    'auth/user-token-expired',
-    'permission-denied',
-  ];
+// REGLA CORREGIDA: un fallo de adjunto NO puede expulsar al vendedor. Un
+// storage/unauthorized puede ser una Rule, una ruta o un limite — sacarlo de la
+// sesion por eso le hace perder la conversacion que estaba atendiendo. Solo se
+// reautentica si Firebase CONFIRMA que el token ya no se puede renovar.
+describe('Un fallo de adjunto no expulsa a nadie', () => {
+  const sospechosos = ['unauthenticated', 'functions/unauthenticated', 'storage/unauthorized', 'permission-denied'];
 
-  codigos.forEach((code) => {
-    it(`${code} se reconoce como sesión caída`, () => {
-      expect(isSessionDeadError({ code })).toBe(true);
+  sospechosos.forEach((code) => {
+    it(`${code} NO se da por sesion muerta sin confirmar`, () => {
+      expect(isSessionDeadError({ code })).toBe(false);
+      expect(isSessionSuspectError({ code })).toBe(true);
     });
   });
 
-  it('cualquiera de esas capas muestra el MISMO mensaje, no tres distintos', () => {
-    const err = { code: 'storage/unauthorized' };
-    expect(sellerErrorMessage('upload', err)).toBe(SESSION_DEAD_MESSAGE);
-    expect(sellerErrorMessage('send', err)).toBe(SESSION_DEAD_MESSAGE);
-    expect(sellerErrorMessage('mic', err)).toBe(SESSION_DEAD_MESSAGE);
+  it('storage/unauthorized se traduce como problema de subida, no de acceso', () => {
+    const msg = sellerErrorMessage('upload', { code: 'storage/unauthorized' });
+    expect(msg).not.toBe(SESSION_DEAD_MESSAGE);
+    expect(msg).toMatch(/subir/i);
   });
 
-  it('el mensaje le dice qué hacer', () => {
-    expect(SESSION_DEAD_MESSAGE).toMatch(/código/i);
+  it('si el token SI se renueva, la sesion esta viva y no hay que sacar a nadie', async () => {
+    const vivo = { getIdToken: async () => 'token-nuevo' };
+    expect(await confirmSessionDead(() => vivo)).toBe(false);
   });
 
-  it('un error normal NO se confunde con sesión caída', () => {
-    expect(isSessionDeadError({ code: 'storage/retry-limit-exceeded' })).toBe(false);
-    expect(isSessionDeadError(new Error('cualquier cosa'))).toBe(false);
-    expect(isSessionDeadError(null)).toBe(false);
+  it('solo si Firebase confirma que el token no se renueva se pide volver a entrar', async () => {
+    const muerto = { getIdToken: async () => { throw { code: 'auth/user-token-expired' }; } };
+    expect(await confirmSessionDead(() => muerto)).toBe(true);
+  });
+
+  it('un fallo de red al refrescar tampoco expulsa', async () => {
+    const red = { getIdToken: async () => { throw { code: 'auth/network-request-failed' }; } };
+    expect(await confirmSessionDead(() => red)).toBe(false);
+  });
+
+  it('sin usuario, ya no hay sesion que sostener', async () => {
+    expect(await confirmSessionDead(() => null)).toBe(true);
+  });
+
+  it('Firebase confirmando el token vencido si es sesion muerta', () => {
+    expect(isSessionDeadError({ code: 'auth/user-token-expired' })).toBe(true);
+    expect(isSessionDeadError({ code: 'auth/user-disabled' })).toBe(true);
+  });
+
+  it('un error normal NO se confunde con sesion caida', () => {
+    expect(isSessionSuspectError({ code: 'storage/retry-limit-exceeded' })).toBe(false);
+    expect(isSessionSuspectError(new Error('cualquier cosa'))).toBe(false);
+    expect(isSessionSuspectError(null)).toBe(false);
   });
 });
 
+// Sin esto, un adjunto que falla en tres pipelines mostraba tres toasts identicos
+// y disparaba tres redirecciones: exactamente lo reportado desde el telefono.
+describe('Los avisos no se apilan', () => {
+  it('la misma causa avisa una sola vez dentro de la ventana', () => {
+    resetNoticeDedupe();
+    expect(shouldNotify('session-dead', 1000)).toBe(true);
+    expect(shouldNotify('session-dead', 1100)).toBe(false);
+    expect(shouldNotify('session-dead', 2000)).toBe(false);
+  });
+
+  it('pasada la ventana vuelve a avisar (no silencia un problema nuevo)', () => {
+    resetNoticeDedupe();
+    expect(shouldNotify('upload:x', 1000)).toBe(true);
+    expect(shouldNotify('upload:x', 1000 + 9000)).toBe(true);
+  });
+
+  it('causas distintas avisan por separado', () => {
+    resetNoticeDedupe();
+    expect(shouldNotify('upload:a', 1000)).toBe(true);
+    expect(shouldNotify('mic:b', 1000)).toBe(true);
+  });
+});
 describe('Bloqueo de la cuenta de Meta: no es culpa del vendedor', () => {
   it('reconoce el "An unknown error has occurred" que devolvía Meta', () => {
     expect(isMetaAccountBlocker('An unknown error has occurred')).toBe(true);

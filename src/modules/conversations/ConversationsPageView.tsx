@@ -28,7 +28,10 @@ import { useUIStore } from '@/stores/uiStore';
 import { TenantService } from '@/services/firebase/TenantService';
 import { WhatsappConnectionModal } from './WhatsappConnectionModal';
 import { CatalogService } from '@/services/firebase/CatalogService';
-import { sellerErrorMessage, isSessionDeadError, outboundRejectionMessage, type SellerErrorLayer } from '@/utils/sellerErrors';
+import {
+  sellerErrorMessage, isSessionSuspectError, confirmSessionDead, shouldNotify,
+  errorCodeOf, outboundRejectionMessage, SESSION_DEAD_MESSAGE, type SellerErrorLayer,
+} from '@/utils/sellerErrors';
 import { isAdminRole } from '@/utils/permissions';
 import { AudioMessagePlayer } from './components/AudioMessagePlayer';
 
@@ -316,7 +319,9 @@ export const ConversationsPageView = () => {
   const reportOutboundResult = (result: { success?: boolean; errorMessage?: string | null } | undefined) => {
     if (!result || result.success !== false) return;
     console.error('[OUTBOUND_REJECTED]', result);
-    addToast(outboundRejectionMessage(result.errorMessage), 'error');
+    if (shouldNotify(`outbound:${result.errorMessage || 'sin-detalle'}`)) {
+      addToast(outboundRejectionMessage(result.errorMessage), 'error');
+    }
   };
   // Owner/Admin abren el modulo de Cotizaciones; el asesor trabaja desde el chat.
   const canOpenQuotesModule = isAdminRole(activeMembership?.role);
@@ -331,14 +336,34 @@ export const ConversationsPageView = () => {
   // adjuntos y las notas de voz, cada uno con su propio mensaje generico. Cuando
   // se detecta ese caso se cierra la sesion y se la manda a entrar de nuevo con
   // una sola frase clara, en vez de dejarla peleando con tres errores distintos.
-  const handleSellerError = (layer: SellerErrorLayer, err: unknown) => {
+  const handleSellerError = async (layer: SellerErrorLayer, err: unknown) => {
     console.error(`[SELLER_ERROR:${layer}]`, err);
-    addToast(sellerErrorMessage(layer, err), 'error');
-    if (isSessionDeadError(err)) {
-      setTimeout(async () => {
-        try { const { signOut } = await import('firebase/auth'); const { auth } = await import('@/lib/firebase'); await signOut(auth); } catch { /* igual navegamos */ }
-        navigate('/acceso', { replace: true });
-      }, 2500);
+
+    // Un fallo de adjunto, camara o microfono NO saca a nadie de la sesion. Un
+    // 'storage/unauthorized' puede ser una Rule, una ruta o un limite; expulsar
+    // por eso le hace perder la conversacion que estaba atendiendo. Solo se
+    // reautentica si Firebase CONFIRMA que el token ya no se puede renovar.
+    if (isSessionSuspectError(err)) {
+      const { auth } = await import('@/lib/firebase');
+      const muerta = await confirmSessionDead(() => auth.currentUser);
+      if (muerta) {
+        // Una causa, un solo aviso y una sola redireccion: sin esto, los tres
+        // pipelines (texto, adjunto, nota de voz) mostraban el mismo mensaje
+        // tres veces y disparaban tres navegaciones.
+        if (!shouldNotify('session-dead')) return;
+        addToast(SESSION_DEAD_MESSAGE, 'error');
+        setTimeout(async () => {
+          try { const { signOut } = await import('firebase/auth'); await signOut(auth); } catch { /* igual navegamos */ }
+          navigate('/acceso', { replace: true });
+        }, 2500);
+        return;
+      }
+      // La sesion esta sana: era otra cosa. Se informa por capa y se sigue.
+      console.warn(`[SELLER_ERROR:${layer}] sesion viva; el fallo NO es de acceso`);
+    }
+
+    if (shouldNotify(`${layer}:${errorCodeOf(err) || 'sin-codigo'}`)) {
+      addToast(sellerErrorMessage(layer, err), 'error');
     }
   };
   const uploadToStorage = async (file: File): Promise<string> => {
@@ -1102,7 +1127,7 @@ ${plantilla}` : plantilla);
                       ref={fileInputRef}
                       type="file"
                       multiple
-                      accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.mp4,.mov,.3gp,.ogg,.mp3,.m4a,.aac,.wav,.opus"
+                      accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
                       className="hidden"
                       onChange={async e => {
                         const files = e.target.files;
@@ -1171,17 +1196,27 @@ ${plantilla}` : plantilla);
                     />
                     <div className="flex items-center gap-2">
                       {/* Adjuntar (oculto mientras se graba) */}
-                      <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}
-                        title="Adjuntar imagen, audio o documento"
+                      {/* GALERIA — una sola entrada de 'Fotos y videos'. Sin capture, para
+                          que abra el selector de medios y NO la camara. */}
+                      <button type="button" onClick={() => { debugAttach('GALLERY_CLICK'); galleryInputRef.current?.click(); }} disabled={isUploading}
+                        title="Fotos y videos"
                         className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
-                        {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+                        {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Image className="w-4 h-4" />}
+                      </button>
+                      {/* Documentos (PDF de cotizacion, etc.) aparte: su accept ya no
+                          incluye imagen/video/audio, asi que Android abre el selector de
+                          archivos en vez del menu con cuatro camaras. */}
+                      <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}
+                        title="Adjuntar documento"
+                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 disabled:opacity-40 ${isRecording ? 'hidden' : ''}`}>
+                        <Paperclip className="w-4 h-4" />
                       </button>
                       {/* Cámara: toma foto o graba video al momento y lo sube igual que un adjunto.
                           Dos inputs separados (foto/video) porque un solo input con accept
                           mezclado no abre la cámara de forma confiable en Android. */}
                       <div className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
                         <button type="button" onClick={() => setShowCameraChoice(v => !v)} disabled={isUploading}
-                          title="Cámara o galería"
+                          title="Cámara"
                           className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors disabled:opacity-40">
                           <Camera className="w-4 h-4" />
                         </button>
@@ -1195,7 +1230,7 @@ ${plantilla}` : plantilla);
                                 debugAttach('PHOTO_INPUT_TRIGGERED');
                               }}
                               className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2">
-                              <Camera className="w-3.5 h-3.5" /> Foto
+                              <Camera className="w-3.5 h-3.5" /> Tomar foto
                             </button>
                             <button type="button"
                               onClick={() => {
@@ -1215,17 +1250,7 @@ ${plantilla}` : plantilla);
                                 debugAttach('VIDEO_INPUT_TRIGGERED');
                               }}
                               className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 border-t border-slate-100 dark:border-slate-700">
-                              <Play className="w-3.5 h-3.5" /> Video
-                            </button>
-                            <button type="button"
-                              onClick={() => {
-                                debugAttach('GALLERY_CLICK');
-                                setShowCameraChoice(false);
-                                galleryInputRef.current?.click();
-                                debugAttach('GALLERY_INPUT_TRIGGERED');
-                              }}
-                              className="w-full text-left px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 border-t border-slate-100 dark:border-slate-700">
-                              <Image className="w-3.5 h-3.5" /> Galería
+                              <Play className="w-3.5 h-3.5" /> Grabar video
                             </button>
                           </div>
                         )}
