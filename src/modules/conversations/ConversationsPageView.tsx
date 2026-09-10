@@ -35,6 +35,7 @@ import {
 import { isAdminRole } from '@/utils/permissions';
 import { recordMediaDiag } from '@/utils/mediaDiag';
 import { MediaDiagPanel } from './MediaDiagPanel';
+import { FileTapTarget } from './FileTapTarget';
 import { AudioMessagePlayer } from './components/AudioMessagePlayer';
 
 // Hoy: solo hora (como antes). Otro día: día + mes + hora, para no confundir
@@ -126,9 +127,6 @@ export const ConversationsPageView = () => {
   const [pendingMedia, setPendingMedia] = useState<PendingMediaItem[]>([]);
   const pendingMediaRef = useRef<PendingMediaItem[]>([]);
   useEffect(() => { pendingMediaRef.current = pendingMedia; }, [pendingMedia]);
-  const cameraInputRef                            = useRef<HTMLInputElement>(null);
-  const cameraVideoInputRef                       = useRef<HTMLInputElement>(null);
-  const galleryInputRef                           = useRef<HTMLInputElement>(null);
 
   // Grabación de notas de voz por TAP (no mantener presionado, estilo WhatsApp
   // actual): un toque inicia, el mismo botón cambia de Mic a Enviar mientras
@@ -1151,81 +1149,26 @@ ${plantilla}` : plantilla);
                         accept mezclado "image/*,video/*" no abre la camara en varios navegadores
                         de Android — un solo tipo por input es lo confiable. Sin "multiple": una
                         captura de cámara siempre es una sola foto/video por naturaleza. */}
-                    <input
-                      ref={cameraInputRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      id="sf-camera-photo-input"
-                      className="sr-only"
-                      onChange={async e => {
-                        mediaUi('PHOTO_CHANGE', { filesLength: e.target.files?.length ?? 0 });
-                        const files = e.target.files;
-                        if (files?.length) await handleFilesSelected(files, 'PHOTO');
-                        e.target.value = '';
-                      }}
-                    />
-                    <input
-                      ref={cameraVideoInputRef}
-                      type="file"
-                      accept="video/*"
-                      capture="environment"
-                      id="sf-camera-video-input"
-                      className="sr-only"
-                      onChange={async e => {
-                        const files = e.target.files;
-                        mediaUi('VIDEO_CHANGE', { filesLength: e.target.files?.length ?? 0 });
-                        debugAttach('VIDEO_CHANGE', {
-                          filesLength: files?.length ?? 0,
-                          files: files ? Array.from(files).map(f => ({ name: f.name, type: f.type, size: f.size })) : [],
-                        });
-                        // Instrumentación temporal: primer eslabón de la cadena
-                        // "video no envía" — confirma qué entrega REALMENTE la
-                        // cámara nativa de Android antes de cualquier procesamiento propio.
-                        if (files?.length) {
-                          Array.from(files).forEach(f => debugAttach('VIDEO_NATIVE_CHANGE', {
-                            name: f.name, type: f.type, size: f.size, sizeMB: +(f.size / 1048576).toFixed(2),
-                          }));
-                          await handleFilesSelected(files, 'VIDEO');
-                        }
-                        e.target.value = '';
-                      }}
-                    />
-                    {/* Galería: sin "capture", así el navegador abre el selector de fotos/videos
-                        del teléfono en vez de la cámara. Input separado del de "Adjuntar" (que
-                        acepta también audio/documentos) para que el punto de entrada quede
-                        claro junto a Foto/Video en el mismo menú. "multiple": selección de
-                        varias imágenes/videos de una sola vez. */}
-                    <input
-                      ref={galleryInputRef}
-                      type="file"
-                      multiple
-                      accept="image/*,video/*"
-                      id="sf-gallery-input"
-                      className="sr-only"
-                      onChange={async e => {
-                        mediaUi('CLIP_CHANGE', { filesLength: e.target.files?.length ?? 0 });
-                        const files = e.target.files;
-                        if (files?.length) await handleFilesSelected(files, 'GALLERY');
-                        e.target.value = '';
-                      }}
-                    />
                     <div className="flex items-center gap-2">
-                      {/* Adjuntar (oculto mientras se graba) */}
-                      {/* UN SOLO CLIP, y abre fotos y videos. accept="image/*,video/*"
-                          sin capture: eso es lo mas especifico que la web permite pedir,
-                          y hace que Android ofrezca el selector de medios en vez del
-                          administrador de archivos con 'Recientes'. Ya no hay boton de
-                          documentos ni entrada extra de imagen: solo Clip y Camara. */}
-                      <label htmlFor="sf-gallery-input"
-                        onClick={() => mediaUi('CLIP_TAP', { inputPresent: !!document.getElementById('sf-gallery-input') })}
-                        title="Fotos y videos" role="button" aria-label="Fotos y videos"
-                        className={`w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors shrink-0 cursor-pointer ${isRecording ? 'hidden' : ''}`}>
-                        <Paperclip className="w-4 h-4" />
-                      </label>
-                      {/* Cámara: toma foto o graba video al momento y lo sube igual que un adjunto.
-                          Dos inputs separados (foto/video) porque un solo input con accept
-                          mezclado no abre la cámara de forma confiable en Android. */}
+                      {/* CLIP — fotos y videos. El input transparente ES la superficie
+                          que se toca (ver FileTapTarget): sin label ni click programático
+                          de por medio. accept="image/*,video/*" sin capture, para pedir
+                          el selector de medios y no la cámara. */}
+                      <FileTapTarget
+                        diag="CLIP"
+                        accept="image/*,video/*"
+                        multiple
+                        title="Fotos y videos"
+                        onFiles={files => handleFilesSelected(files, 'GALLERY')}
+                        className={`w-9 h-9 shrink-0 ${isRecording ? 'hidden' : ''}`}>
+                        <span className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-xl pointer-events-none">
+                          <Paperclip className="w-4 h-4" />
+                        </span>
+                      </FileTapTarget>
+                      {/* CÁMARA — un icono con dos opciones: Tomar foto y Grabar video,
+                          cada una con su propio input capture="environment" que el dedo
+                          toca directamente. El menú no se desmonta en el mismo toque: se
+                          cierra cuando la ventana recupera el foco al volver de la cámara. */}
                       <div className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
                         <button type="button" onClick={() => { mediaUi('CAMERA_MENU_TAP'); setShowCameraChoice(v => !v); }}
                           title="Cámara"
@@ -1233,26 +1176,38 @@ ${plantilla}` : plantilla);
                           <Camera className="w-4 h-4" />
                         </button>
                         {showCameraChoice && (
-                          <div className="absolute bottom-full left-0 mb-2 w-36 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden">
-                            <label htmlFor="sf-camera-photo-input" role="button"
-                              onClick={() => {
-                                mediaUi('PHOTO_TAP', { inputPresent: !!document.getElementById('sf-camera-photo-input') });
-                                window.addEventListener('focus', () => setShowCameraChoice(false), { once: true });
-                              }}
-                              className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 cursor-pointer">
-                              <Camera className="w-3.5 h-3.5" /> Tomar foto
-                            </label>
+                          <div
+                            onClickCapture={() => window.addEventListener('focus', () => setShowCameraChoice(false), { once: true })}
+                            className="absolute bottom-full left-0 mb-2 w-40 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden">
+                            <FileTapTarget
+                              diag="PHOTO"
+                              accept="image/*"
+                              capture="environment"
+                              title="Tomar foto"
+                              onFiles={files => handleFilesSelected(files, 'PHOTO')}>
+                              <span className="w-full px-4 py-3 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 pointer-events-none">
+                                <Camera className="w-3.5 h-3.5" /> Tomar foto
+                              </span>
+                            </FileTapTarget>
                             {/* Grabador propio (VideoRecorderModal) desactivado: en Android el MP4
-                                del MediaRecorder sale sin duracion valida (preview negro, 0:00).
-                                Se usa la camara nativa del telefono, igual que para la foto. */}
-                            <label htmlFor="sf-camera-video-input" role="button"
-                              onClick={() => {
-                                mediaUi('VIDEO_TAP', { inputPresent: !!document.getElementById('sf-camera-video-input') });
-                                window.addEventListener('focus', () => setShowCameraChoice(false), { once: true });
+                                del MediaRecorder sale sin duración válida (preview negro, 0:00).
+                                Se usa la cámara nativa del teléfono, igual que para la foto. */}
+                            <FileTapTarget
+                              diag="VIDEO"
+                              accept="video/*"
+                              capture="environment"
+                              title="Grabar video"
+                              onFiles={files => {
+                                Array.from(files).forEach(f => debugAttach('VIDEO_NATIVE_CHANGE', {
+                                  name: f.name, type: f.type, size: f.size, sizeMB: +(f.size / 1048576).toFixed(2),
+                                }));
+                                return handleFilesSelected(files, 'VIDEO');
                               }}
-                              className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 border-t border-slate-100 dark:border-slate-700 cursor-pointer">
-                              <Play className="w-3.5 h-3.5" /> Grabar video
-                            </label>
+                              className="border-t border-slate-100 dark:border-slate-700">
+                              <span className="w-full px-4 py-3 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 pointer-events-none">
+                                <Play className="w-3.5 h-3.5" /> Grabar video
+                              </span>
+                            </FileTapTarget>
                           </div>
                         )}
                       </div>

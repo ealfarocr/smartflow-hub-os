@@ -22,7 +22,7 @@ import { Loader2, Delete, ArrowLeft, UserRound } from 'lucide-react';
 // Acceso del equipo. Tres situaciones, de la más cómoda a la más exigente:
 //
 //  1. ENTRADA RÁPIDA — la sesión sigue viva en este equipo y la persona ya
-//     entró antes: "Hola <nombre>" y mantener presionado el botón 2 segundos.
+//     entró antes: "Hola <nombre>" y mantener presionado el botón medio segundo.
 //     El gesto NO autentica: la credencial real es el refresh token de Firebase
 //     que ya tiene este navegador. Antes de dejar pasar se revalida contra el
 //     servidor (verifyDeviceSession) que la persona siga activa y que el equipo

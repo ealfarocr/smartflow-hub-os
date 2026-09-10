@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Power, Loader2 } from 'lucide-react';
 
-export const HOLD_DURATION_MS = 1000;
+export const HOLD_DURATION_MS = 500;
 
 interface HoldToEnterButtonProps {
   onComplete: () => void;
@@ -10,7 +10,7 @@ interface HoldToEnterButtonProps {
 }
 
 /**
- * Botón de encendido: hay que MANTENERLO presionado 1 segundo para entrar.
+ * Botón de encendido: hay que MANTENERLO presionado medio segundo (500 ms) para entrar.
  * El anillo de progreso muestra cuánto falta y se cancela si se suelta antes,
  * si el dedo se va del botón o si la pestaña pasa a segundo plano.
  *
