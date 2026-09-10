@@ -2,6 +2,44 @@
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
 
+## 2026-09-09 — FIX URGENTE: el Owner local solo veía su propio usuario en /usuarios
+
+- fix(causa raíz del cliente, NO de las Rules): `useUserStore.subscribe` hacía
+  `getUserProfile(m.userId)` —un `getDoc` sobre `users/{uid}`— por cada
+  compañero de equipo dentro de un `Promise.all`. Las Rules de `users/` solo
+  permiten leer el perfil propio o SuperAdmin (PII), así que el perfil ajeno
+  tiraba `permission-denied` y una sola promesa rechazada tiraba TODO el lote:
+  `set({teamMembers})` no volvía a correr. Por eso el SuperAdmin sí veía al
+  equipo completo (él puede leer cualquier `users/{uid}`) y el Owner no.
+- fix(por qué era 1 fila y no cero): `AuthService.getUserMemberships` deja la
+  membership propia en el cache local de Firestore al entrar; el primer
+  snapshot de `/usuarios` llega desde ese cache con ese único doc (perfil
+  propio → legible → lote OK → `teamMembers=[él mismo]`), y el snapshot del
+  servidor con los 10 miembros rompía el lote y congelaba el estado ahí.
+- fix: el callback ya no lee `users/{uid}` de nadie — la membership ya trae
+  `name`/`email`. Pasó de `async`+`Promise.all` a un `map` síncrono y
+  `UserService.getUserProfile` se eliminó (sin otros usos; el de `AuthService`,
+  que lee el perfil propio, intacto).
+- test: 7 escenarios nuevos en `firestore.rules.test.ts` contra el emulador
+  real — Owner y Admin activos ven el tenant completo (active/prepared/pending/
+  suspended, incluidos `userId:null`), el Asesor no gana permisos de
+  administración, cruce de tenants denegado, SuperAdmin intacto. **Las Rules no
+  se tocaron**: la query de `memberships` nunca fue el problema.
+- verificación de datos: script de solo lectura sobre `t-1788554584458` (10
+  membresías) — el único doc sin `name` es la invitación `pending` con
+  `userId:null`, que ya caía en el mismo fallback de antes. Cero regresión de
+  nombres. `eduardo pruebas` está hoy **suspended**.
+- ux(derivado): `displayMemberEmail()` deja de mostrar el correo técnico interno
+  (`vendedor.*@*.usuarios.smartflow.internal`) de los vendedores PIN en la
+  lista y pone "Acceso por PIN (sin correo)". 4 tests nuevos.
+- tests: 95/95 unitarios + 35/35 de Rules. Typecheck y build limpios.
+- deploy: `hosting:app` únicamente — sin Functions ni Rules. Commit `bc6cd09`,
+  ya en `main`. Bundle en producción verificado (`index-Cx1vhmFb.js`, mismo
+  hash del build, contiene el string nuevo).
+- pendiente: validación visual de Eduardo en `/usuarios` con recarga forzada
+  (Ctrl+Shift+R). No se activan vendedoras reales hasta cerrar el ciclo de QA.
+
+
 ## 2026-09-09 — AJUSTE UX: modal de acceso maneja el caso "usuario sin PIN"
 
 - fix: un usuario active/pending sin PIN generado (nunca tuvo

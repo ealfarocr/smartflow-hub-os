@@ -1,5 +1,89 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ FIX DESPLEGADO — El Owner local solo veía su propio usuario en /usuarios (2026-09-09)
+
+**Síntoma:** con sesión `EDUARDO ADMIN` (rol OWNER / SOCIO PRINCIPAL, tenant
+USADITOS `t-1788554584458`, Opera), `/usuarios` mostraba UNA sola fila: él
+mismo. No veía a "eduardo pruebas", Michelle, Ana, Celina, Alondra, Indyra ni
+a los demás Owners. `EDUARDO ALFARO` (SuperAdmin) sí veía a todos.
+
+### Causa raíz — del lado del cliente, NO de las Firestore Rules
+
+`useUserStore.subscribe` llamaba `UserService.getUserProfile(m.userId)` —un
+`getDoc` sobre `users/{uid}`— por CADA compañero de equipo, dentro de un
+`Promise.all`. Las Rules de `users/` permiten leer **solo el perfil propio o
+SuperAdmin** (endurecido a propósito para no exponer PII, `firestore.rules`
+línea 108). Leer el perfil ajeno tiraba `permission-denied`, y **una sola
+promesa rechazada tira TODO el lote**: `set({teamMembers})` no volvía a
+ejecutarse nunca. Esa asimetría es exactamente por qué el SuperAdmin sí veía
+al equipo completo: él puede leer cualquier `users/{uid}`.
+
+**Por qué veía 1 fila y no cero:** al entrar, `AuthService.getUserMemberships`
+hace `where('userId','==',uid)` y deja SU membership en el cache local de
+Firestore. Después `/usuarios` se suscribe con `where('tenantId','==',...)` y
+Firestore entrega un primer snapshot **desde cache** con ese único doc: ahí el
+único `userId` era el propio, el perfil sí se podía leer, el lote resolvía y
+`teamMembers` quedaba en `[él mismo]`. El snapshot del servidor con los 10
+miembros llegaba después, rompía el `Promise.all` y dejaba el estado congelado
+en esa única fila.
+
+### Fix
+
+`subscribe` ya no lee `users/{uid}` de nadie: la membership YA trae
+`name`/`email` (los escriben `inviteUser`/`createDraftMember`/
+`createPreparedMember`, y `acceptTenantInvite` los preserva al migrar el ID).
+El callback pasó de `async` + `Promise.all` a un `map` síncrono — sin lecturas
+de por medio no hay nada que pueda rechazar el lote. `UserService.getUserProfile`
+quedó eliminado (no tenía otros usos; el `getUserProfile` de `AuthService`, que
+lee el perfil PROPIO, sigue intacto).
+
+**Las Firestore Rules NO se tocaron.** La query de `memberships` nunca fue el
+problema: 7 escenarios nuevos en `firestore.rules.test.ts` la ejercitan contra
+el emulador real y pasan — Owner y Admin activos ven el tenant completo
+(active/prepared/pending/suspended, incluidos los `userId:null`), el Asesor
+Comercial no gana permisos de administración, el cruce de tenants queda
+denegado y el SuperAdmin sigue igual.
+
+**Sin regresión de nombres, verificado contra el dataset real** (script de solo
+lectura sobre `t-1788554584458`, 10 membresías): el único doc sin campo `name`
+es la invitación `pending` de `usaditossanpedro1@gmail.com` (con `userId:null`),
+que ya caía en el mismo fallback "Pendiente de acceso" antes del fix.
+`eduardo pruebas` figura hoy como **suspended** — aparece en la lista, como
+debe ser para poder gestionarlo.
+
+### Ajuste derivado del mismo fix
+
+Al funcionar la lista, aparecería el correo **técnico interno** de cada vendedor
+PIN (`vendedor.<membershipId>@<tenantId>.usuarios.smartflow.internal`, lo arma
+`setVendorPin`) en su fila — un identificador que el vendedor nunca ve ni usa
+para entrar. `displayMemberEmail()` lo reemplaza por "Acceso por PIN (sin
+correo)"; los correos reales y el "Sin correo aún" de los `prepared` quedan
+igual. 4 tests nuevos.
+
+### Estado y verificación
+
+- Commit `bc6cd09`, ya en `main`. Deploy: **`hosting:app` únicamente** — sin
+  cambios de backend, de Functions ni de Rules.
+- Tests: 95/95 unitarios + 35/35 de Rules (emulador real). Typecheck y build
+  limpios. Lint: los 3 errores de `UsersManagementView.tsx` son preexistentes
+  (líneas 53/82/677, idénticas en el `HEAD` anterior), ninguno en lo tocado.
+- Bundle en producción verificado: `hub.smartflow-suite.com` sirve
+  `index-Cx1vhmFb.js`, el mismo hash del build, y contiene el string nuevo.
+- **Falta la prueba real de Eduardo** (no puedo autenticarme en la app): entrar
+  como `EDUARDO ADMIN` a `/usuarios` con **recarga forzada** (Ctrl+Shift+R — el
+  cache local de Firestore y el bundle viejo pueden sobrevivir un F5) y
+  confirmar que aparecen las 10 personas del tenant.
+
+### Próximo paso exacto
+
+Esperar la validación visual de Eduardo en `/usuarios`. Recién con eso en verde
+sigue el ciclo de QA acordado: generar/reactivar el PIN de `eduardo pruebas`
+(hoy **suspended**: hay que reactivarlo primero) → entrar en el teléfono →
+Presence en línea → Trabajando → elegible en Multi-Agent → desactivar →
+confirmar PIN bloqueado → mismo teléfono con otro usuario QA. **No activar
+vendedoras reales** hasta cerrar ese ciclo.
+
+
 ## ✅ FIX DESPLEGADO — Sincronización móvil + Presence OFFLINE + Invalid Date (2026-09-09)
 
 **Los 3 síntomas reportados, causa raíz real, no supuesta.**
