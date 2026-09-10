@@ -28,6 +28,8 @@ import { useUIStore } from '@/stores/uiStore';
 import { TenantService } from '@/services/firebase/TenantService';
 import { WhatsappConnectionModal } from './WhatsappConnectionModal';
 import { CatalogService } from '@/services/firebase/CatalogService';
+import { sellerErrorMessage, isSessionDeadError, type SellerErrorLayer } from '@/utils/sellerErrors';
+import { isAdminRole } from '@/utils/permissions';
 import { AudioMessagePlayer } from './components/AudioMessagePlayer';
 
 // Hoy: solo hora (como antes). Otro día: día + mes + hora, para no confundir
@@ -276,7 +278,7 @@ export const ConversationsPageView = () => {
         await sendMessage(activeConversation, cleanText, 'advisor', activeMembership.tenantId, mediaUrl, mediaFilename);
       }
       setInputText(''); setMediaUrl(null); setMediaFilename(null);
-    } catch { addToast('Error al enviar mensaje', 'error'); }
+    } catch (err) { handleSellerError('send', err); }
     finally { setIsSending(false); }
   };
 
@@ -309,6 +311,29 @@ export const ConversationsPageView = () => {
       activeMembership.tenantId, null, null, template.metaTemplateName, template.languageCode, components);
   };
 
+  // Owner/Admin abren el modulo de Cotizaciones; el asesor trabaja desde el chat.
+  const canOpenQuotesModule = isAdminRole(activeMembership?.role);
+
+  // Un solo lugar donde se traduce un error tecnico a algo accionable para quien
+  // esta atendiendo a un cliente. El detalle completo sigue yendo a consola para
+  // Admin/Auditor; lo que cambia es lo que ve el vendedor.
+  //
+  // Caso importante: si un Owner/Admin regenera el codigo de acceso de esta
+  // persona, se revocan sus refresh tokens y el telefono queda "abierto" pero sin
+  // poder renovar el token — a partir de ahi fallan a la vez el texto, los
+  // adjuntos y las notas de voz, cada uno con su propio mensaje generico. Cuando
+  // se detecta ese caso se cierra la sesion y se la manda a entrar de nuevo con
+  // una sola frase clara, en vez de dejarla peleando con tres errores distintos.
+  const handleSellerError = (layer: SellerErrorLayer, err: unknown) => {
+    console.error(`[SELLER_ERROR:${layer}]`, err);
+    addToast(sellerErrorMessage(layer, err), 'error');
+    if (isSessionDeadError(err)) {
+      setTimeout(async () => {
+        try { const { signOut } = await import('firebase/auth'); const { auth } = await import('@/lib/firebase'); await signOut(auth); } catch { /* igual navegamos */ }
+        navigate('/acceso', { replace: true });
+      }, 2500);
+    }
+  };
   const uploadToStorage = async (file: File): Promise<string> => {
     const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
     const { storage } = await import('@/lib/firebase');
@@ -408,7 +433,7 @@ export const ConversationsPageView = () => {
         debugAttach(`${source}_UPLOAD_ERROR`, err);
         if (kind === 'video') debugAttach('VIDEO_UPLOAD_ERROR', { id, code: err?.code, message: err?.message });
         setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'error' } : m));
-        addToast('Error al subir archivo', 'error');
+        handleSellerError('upload', err);
       });
   };
 
@@ -497,8 +522,9 @@ export const ConversationsPageView = () => {
       if (file.size < 1200) { addToast('La nota de voz quedó muy corta.', 'info'); return; }
       const url = await uploadToStorage(file);
       await sendMessage(activeConversation, '', 'advisor', activeMembership.tenantId, url, file.name);
-    } catch {
-      addToast('Error al enviar la nota de voz.', 'error');
+    } catch (err) {
+      const esDeGrabacion = String((err as { name?: string })?.name || '').includes('Not');
+      handleSellerError(esDeGrabacion ? 'mic' : 'upload', err);
     } finally {
       setIsUploading(false);
       setRecordSeconds(0);
@@ -970,17 +996,31 @@ export const ConversationsPageView = () => {
                         </div>
                       )}
                     </div>
+                    {/* COBRO PRIMERO Y EN VERDE: es la accion que cierra la venta, y
+                        antes era el ultimo chip gris-verde de la fila, del mismo tamano
+                        que el resto. Es una accion DE VENTA dentro de la conversacion, no
+                        configuracion financiera: el asesor genera el enlace y se lo manda
+                        al cliente; las cuentas de cobro las administra Owner/Admin. */}
+                    <button onClick={() => setShowPaymentModal(true)}
+                      className="flex items-center gap-2 px-5 py-3 bg-[#10B981] hover:bg-emerald-600 active:scale-[0.98] rounded-2xl text-sm font-black text-white shadow-md transition-all w-full sm:w-auto justify-center order-first">
+                      <CreditCard className="w-4 h-4" /> Cobrar / Enviar pago
+                    </button>
                     <button onClick={() => setShowCatalogDrawer(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 rounded-xl text-xs font-bold text-slate-500 transition-colors">
+                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 rounded-xl text-xs font-bold text-slate-500 transition-colors">
                       <Package className="w-3.5 h-3.5 text-slate-400" /> Catálogo
                     </button>
-                    <button onClick={() => navigate('/cotizaciones')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 rounded-xl text-xs font-bold text-slate-500 transition-colors">
+                    {/* El asesor NO navega a /cotizaciones (modulo administrativo): antes
+                        este boton lo mandaba derecho a "Acceso restringido". Ahora le deja
+                        la plantilla de cotizacion lista en el mensaje, que es la accion
+                        comercial que necesita; Owner/Admin sigue abriendo el modulo. */}
+                    <button onClick={() => {
+                      if (canOpenQuotesModule) { navigate('/cotizaciones'); return; }
+                      const plantilla = (quickTemplates?.quoteMessage || '').replace(/{{quoteNumber}}/g, '—');
+                      setInputText(prev => prev ? `${prev}
+${plantilla}` : plantilla);
+                    }}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 rounded-xl text-xs font-bold text-slate-500 transition-colors">
                       <FileText className="w-3.5 h-3.5 text-slate-400" /> Cotizar
-                    </button>
-                    <button onClick={() => setShowPaymentModal(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-900/10 hover:bg-emerald-100 rounded-xl text-xs font-bold text-emerald-600 transition-colors">
-                      <CreditCard className="w-3.5 h-3.5" /> Instrucciones de pago
                     </button>
                   </div>
                 )}
