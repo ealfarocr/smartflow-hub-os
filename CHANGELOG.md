@@ -1,6 +1,18 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-11 — Causa del selector confirmada (standalone); aviso ABRIR EN CHROME (632ee49)
+
+- evidencia fisica A/B: desde el icono (standalone) galeria/foto/video no aparecen
+  (cancel ~300-400 ms); en Chrome normal funcionan y los archivos vuelven al chat.
+  Video de 25,3 MB rechazado correctamente (limite 16 MB). Voz ATTACHMENT_READY en prod.
+- feat: fuera de una pestaña, el cancel instantaneo muestra un aviso en linea con
+  ABRIR EN CHROME (intent a com.android.chrome + respaldo https) y Copiar enlace. Sin
+  tocar los controles multimedia.
+- ops: procedimiento temporal — vendedores usan Chrome directo, no el icono.
+- P1: VIDEO_AUTO_COMPRESSION / TRANSCODING (videos de mas de 16 MB).
+- test: 313 unit + 42 rules; QA local 53/53. Deploy hosting:app, bundle index-dGE_qY5C.js.
+
 ## 2026-09-11 — Storage cerrado en produccion; contenedor real de la pagina (c3a3377)
 
 - evidencia fisica: VOICE_UPLOAD_OK + VOICE_ATTACHMENT_READY en produccion tras el rol

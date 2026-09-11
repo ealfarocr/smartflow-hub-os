@@ -1,5 +1,59 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ P0 media — causa confirmada por prueba física A/B; operativo en Chrome (2026-09-11, 632ee49)
+
+**Evidencia física de Eduardo:**
+- **A. Desde el ícono / modo standalone:** galería, foto y video NO aparecen;
+  `*_PICKER_REQUESTED` sí; `*_CANCEL` en ~300-400 ms con `paginaOculta=false`.
+- **B. Desde Chrome normal (hub.smartflow-suite.com):** la galería abre y los
+  archivos vuelven como miniaturas; la cámara de foto abre y la foto vuelve
+  adjunta; la cámara de video abre y el video vuelve. Un video de 25,3 MB se
+  rechazó correctamente (límite de WhatsApp 16 MB).
+- Voz: `VOICE_UPLOAD_OK`, `VOICE_DOWNLOAD_URL_OK` y `VOICE_ATTACHMENT_READY` en
+  producción.
+
+**ROOT_CAUSE_PICKER:** el acceso directo / modo standalone del teléfono. La app
+no tiene manifest de PWA; ese modo lo arma otra cosa que Chrome y ahí Android no
+presenta el selector. No es Storage, auth, membresía, el input del chat, la
+cámara ni el selector de Android: en Chrome normal todo funciona.
+
+**Cambio (en producción, `hosting:app`, bundle `index-dGE_qY5C.js`):** fuera de
+una pestaña de Chrome, el cancel instantáneo muestra un aviso **en línea** (no
+flotante): "Para adjuntar fotos y videos, abrí SmartFlow directamente en Google
+Chrome." con **ABRIR EN CHROME** (intent de Android a `com.android.chrome`, con
+respaldo https) y **Copiar enlace**. En una pestaña normal sigue el aviso de
+permisos. No toca FileTapTarget ni los controles multimedia. QA local 53/53.
+Tests: 313 unitarios + 42 de reglas.
+
+### Procedimiento operativo temporal (go-live)
+
+- Los vendedores abren **https://hub.smartflow-suite.com en Google Chrome**. No
+  usar el ícono / acceso directo actual.
+- Si alguno ya tiene el ícono: borrarlo, abrir Chrome, entrar a la URL y, si se
+  quiere un atajo, usar el menú de Chrome → "Agregar a pantalla principal"
+  **como acceso directo**; probarlo con el 📎 antes de dejarlo.
+- La sesión: si el ícono corría dentro de otra app (WebView), Chrome no comparte
+  su almacenamiento y va a pedir el código de acceso una vez; después vuelve la
+  reentrada rápida.
+
+### P1 registrado
+
+- **VIDEO_AUTO_COMPRESSION / TRANSCODING:** hoy un video de más de 16 MB se
+  rechaza con aviso claro (validado con uno de 25,3 MB). Mejora: reducirlo en el
+  teléfono a 16 MB o menos antes de subir (WebCodecs / MediaRecorder, o
+  transcodificación en servidor). Requiere auditoría de rendimiento en gama baja.
+  No se implementa hoy.
+- **P2 opcional:** manifest de PWA propio (display standalone), para que "instalar"
+  genere una app de Chrome real. Validar el 📎 físicamente antes de recomendarla.
+
+### Próximo paso exacto
+
+Validación corta en Chrome normal: 📎 con una foto, 📷 Tomar foto, 📷 Grabar video
+de 3-5 s (menos de 16 MB), 🎤. Después 📋 COPIAR DIAGNÓSTICO y confirmar
+`*_ATTACHMENT_READY` en los cuatro (la foto y la galería ya se vieron como
+miniaturas; falta confirmar un video de menos de 16 MB). Meta sigue siendo un
+bloqueo externo aparte.
+
 ## 🔶 P0 media — Storage cerrado; el selector depende del contenedor (2026-09-11, c3a3377)
 
 **Evidencia física de producción:** tras otorgar el rol IAM
