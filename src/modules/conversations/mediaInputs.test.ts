@@ -66,6 +66,17 @@ describe('El dedo toca directamente el input de archivo', () => {
     expect(target).toContain("el.addEventListener('cancel', onCancel)");
   });
 
+  // Prueba física A/B: desde el ícono (standalone) el selector no aparece; en
+  // Chrome normal sí. Fuera de una pestaña, el aviso ofrece ABRIR EN CHROME, en
+  // línea (no flotante) y sin tocar los controles multimedia.
+  it('fuera de una pestaña de Chrome, el cancel instantáneo ofrece ABRIR EN CHROME', () => {
+    expect(view).toContain('isOutsideBrowserTab(describeEnvironment().container)');
+    expect(view).toContain('Para adjuntar fotos y videos, abrí SmartFlow directamente en Google Chrome.');
+    expect(view).toContain('href={chromeIntentUrl(window.location.href)}');
+    const aviso = view.slice(view.indexOf('data-open-in-chrome'), view.indexOf('Abrir en Chrome'));
+    expect(aviso).not.toMatch(/\bfixed\b|\babsolute\b/);
+  });
+
   it('cancel casi instantáneo sin ocultar la página = Chrome no pudo abrir: aviso de permisos', () => {
     expect(target).toContain('FAST_CANCEL_MS');
     expect(view.match(/onFastCancel=\{warnPickerBlocked\}/g)?.length).toBe(3);

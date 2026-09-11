@@ -35,6 +35,7 @@ import {
 import { isAdminRole } from '@/utils/permissions';
 import { consumePickerReload, describeEnvironment, recordMediaDiag } from '@/utils/mediaDiag';
 import { extensionOf, mimeFor, prepareImage, safeFileName } from '@/utils/mediaPrep';
+import { chromeIntentUrl, isOutsideBrowserTab } from '@/utils/openInChrome';
 import { MediaDiagPanel } from './MediaDiagPanel';
 import { FileTapTarget } from './FileTapTarget';
 import { AudioMessagePlayer } from './components/AudioMessagePlayer';
@@ -570,18 +571,28 @@ export const ConversationsPageView = () => {
       });
   };
 
-  // El selector se cerró casi al instante sin mostrarse (ver FAST_CANCEL_MS): en
-  // Android es Chrome sin permiso de Cámara o de Fotos y videos. Se le dice al
-  // vendedor dónde se arregla, una sola vez por ráfaga.
-  // Si la app corre como acceso directo / app instalada / WebView (no en una
-  // pestaña de Chrome), lo primero es probar en Chrome directo.
+  // El selector se cerró casi al instante sin mostrarse (ver FAST_CANCEL_MS).
+  // - Fuera de una pestaña de Chrome (ícono de inicio / standalone): causa
+  //   confirmada por la prueba física A/B — ahí Android no presenta el selector y
+  //   en Chrome normal sí. Se muestra el aviso con el botón ABRIR EN CHROME.
+  // - En una pestaña normal: lo que queda son los permisos de Chrome en Android.
+  // No toca los controles multimedia: solo decide qué aviso ver.
+  const [openInChromeHint, setOpenInChromeHint] = useState(false);
   const warnPickerBlocked = () => {
+    if (isOutsideBrowserTab(describeEnvironment().container)) {
+      setOpenInChromeHint(true);
+      return;
+    }
     if (!shouldNotify('picker-blocked')) return;
-    const permisos = 'Ajustes → Aplicaciones → Chrome → Permisos → Cámara y Fotos y videos en "Permitir".';
-    const enPestana = describeEnvironment().container === 'pestaña del navegador';
-    addToast(enPestana
-      ? `¿No se abrió la cámara o la galería? Revisá que Chrome tenga permiso de Cámara y de Fotos y videos: ${permisos}`
-      : `¿No se abrió la cámara o la galería? Abrí hub.smartflow-suite.com directamente en Chrome (no desde el ícono). Si sigue igual: ${permisos}`, 'info');
+    addToast('¿No se abrió la cámara o la galería? Revisá que Chrome tenga permiso de Cámara y de Fotos y videos: Ajustes → Aplicaciones → Chrome → Permisos → "Permitir".', 'info');
+  };
+  const copySmartflowLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.origin + window.location.pathname);
+      addToast('Enlace copiado. Pegalo en Google Chrome.', 'success');
+    } catch {
+      addToast(`Abrí Google Chrome y escribí ${window.location.host}`, 'info');
+    }
   };
 
   const handleFilesSelected = (fileList: FileList, source: 'PHOTO' | 'VIDEO' | 'GALLERY' | 'ATTACH') => {
@@ -1118,6 +1129,31 @@ export const ConversationsPageView = () => {
                 )
               )}
               <div className="px-4 py-3">
+                {/* Aviso EN LÍNEA (no flotante: no tapa la barra de adjuntos). */}
+                {openInChromeHint && (
+                  <div role="alert" data-open-in-chrome className="mb-2.5 rounded-2xl border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/20 p-3">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <p className="flex-1 text-xs font-bold text-amber-800 dark:text-amber-200">
+                        Para adjuntar fotos y videos, abrí SmartFlow directamente en Google Chrome.
+                      </p>
+                      <button type="button" onClick={() => setOpenInChromeHint(false)} aria-label="Cerrar aviso"
+                        className="p-0.5 text-amber-500 hover:text-amber-700 shrink-0">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <a href={chromeIntentUrl(window.location.href)}
+                        className="flex-1 text-center px-3 py-2.5 bg-[#1877F2] hover:bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-wide">
+                        Abrir en Chrome
+                      </a>
+                      <button type="button" onClick={copySmartflowLink}
+                        className="px-3 py-2.5 bg-white dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 text-amber-700 dark:text-amber-300 rounded-xl text-xs font-bold">
+                        Copiar enlace
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {!isWindowExpired && (
                   <button
                     type="button"

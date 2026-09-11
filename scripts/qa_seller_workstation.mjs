@@ -313,6 +313,30 @@ try {
   const errores = await page.evaluate(() => document.querySelectorAll('form .w-16.h-16 .bg-red-500\\/70').length);
   record('ATTACHMENT_READY_OK', previews >= 5 && errores === 0, `previews=${previews} conError=${errores}`);
 
+  // Evidencia física A/B: desde el ícono (display-mode standalone) el selector se
+  // cancela solo en ~300-400 ms. Se emula ese modo y ese cancel: tiene que salir
+  // el aviso ABRIR EN CHROME, en línea, sin tapar el 📎.
+  // Chromium headless no emula display-mode por CDP: se simula la señal del
+  // contenedor sobre matchMedia (solo para esa consulta).
+  await page.evaluate(() => {
+    const real = window.matchMedia.bind(window);
+    window.__realMatchMedia = real;
+    window.matchMedia = (q) => (/display-mode:\s*standalone/.test(q) ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} } : real(q));
+  });
+  const standalone = await page.evaluate(() => window.matchMedia('(display-mode: standalone)').matches);
+  await clearDiag();
+  const clipSa = await page.$('[data-media-input="gallery"]');
+  const [chSa] = await Promise.all([page.waitForFileChooser({ timeout: 6000 }), tap(clipSa, 'clip standalone')]);
+  await chSa.cancel();
+  const banner = await page.waitForSelector('[data-open-in-chrome]', { timeout: 4000 }).catch(() => null);
+  const href = banner ? await banner.$eval('a', (a) => a.getAttribute('href')) : '';
+  const cancelEv = (await diagFull()).find((e) => e.step === 'CLIP_CANCEL')?.data || {};
+  const clipLibre = (await tapTarget(await page.$('[data-media-input="gallery"]'))).hit.ok;
+  record('OPEN_IN_CHROME_HINT_OK', standalone && !!banner && href.startsWith('intent://') && href.includes('package=com.android.chrome') && clipLibre,
+    `standalone=${standalone} aviso=${!!banner} cancel=${JSON.stringify(cancelEv)} 📎 libre=${clipLibre}`);
+  if (banner) { const x = await page.$('[data-open-in-chrome] button[aria-label="Cerrar aviso"]'); if (x) await tap(x, 'cerrar aviso'); }
+  await page.evaluate(() => { if (window.__realMatchMedia) window.matchMedia = window.__realMatchMedia; });
+
   // Video de 17 MB (más que el límite de WhatsApp): aviso claro, sin subir, sin salir de la sesión.
   await clearDiag(); await collectToasts();
   const clipBig = await page.$('[data-media-input="gallery"]');
