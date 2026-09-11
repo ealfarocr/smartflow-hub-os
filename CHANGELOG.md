@@ -1,6 +1,17 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-11 — Storage cerrado en produccion; contenedor real de la pagina (c3a3377)
+
+- evidencia fisica: VOICE_UPLOAD_OK + VOICE_ATTACHMENT_READY en produccion tras el rol
+  IAM. Storage/IAM/sesion cerrados.
+- hallazgo: el telefono reporta standalone pero la app no tiene manifest; la pagina
+  no corre en una pestaña de Chrome (acceso directo/TWA/WebView).
+- feat(QA): describeContainer (Client Hints, display-mode, referrer android-app://),
+  ENV y PERMISOS_SITIO; prueba GALERIA (showPicker) con QA_SHOWPICKER_ERROR.
+- fix(UX): aviso de selector bloqueado sugiere Chrome directo fuera de pestaña + permisos.
+- test: 310 unit + 42 rules; QA local 52/52. Deploy hosting:app, bundle index-C1lvn0lb.js.
+
 ## 2026-09-11 — storage/unauthorized: falta rol IAM; DIALOG_OPENED era falso positivo (8b2a7f0)
 
 - causa (solo lectura): la cuenta de servicio de Storage no tiene

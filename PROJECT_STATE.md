@@ -1,5 +1,55 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 P0 media — Storage cerrado; el selector depende del contenedor (2026-09-11, c3a3377)
+
+**Evidencia física de producción:** tras otorgar el rol IAM
+`roles/firebaserules.firestoreServiceAgent`, la nota de voz llega a
+`VOICE_UPLOAD_OK`, `VOICE_DOWNLOAD_URL_OK` y `VOICE_ATTACHMENT_READY`. Storage,
+IAM, sesión y auth quedan **cerrados**: no se tocan más.
+
+**Único P0 restante:** 📎, Tomar foto y Grabar video no muestran el selector en el
+teléfono.
+
+**Hallazgo:** el panel reporta "PWA instalada: sí", pero la app **no tiene
+manifest** (`/manifest.json` devuelve el index por la regla de SPA). Entonces la
+página no corre en una pestaña normal de Chrome, sino en un acceso directo en
+modo app, una TWA o el WebView de otra app. En un WebView el selector de archivos
+solo aparece si la app que lo envuelve lo implementa; si no, pasa exactamente lo
+observado: toque, blur, `cancel` inmediato y nada en pantalla. El micrófono sí
+puede funcionar, porque es otro permiso.
+
+### Diagnóstico agregado (en producción, bundle `index-C1lvn0lb.js`)
+
+Sin tocar el mecanismo de media:
+- **Contenedor:** Client Hints (`userAgentData.brands`, que delata "Android
+  WebView" aunque el user agent diga Chrome), display-mode y referrer
+  `android-app://` (TWA). Aparecen en el panel ("Contenedor: …"), en los eventos
+  `ENV` y `PERMISOS_SITIO` y en el texto copiado.
+- **GALERÍA (showPicker):** pide el selector con `input.showPicker()` y registra
+  `QA_SHOWPICKER_RETURNED` o `QA_SHOWPICKER_ERROR {nombre, detalle}`.
+- **Aviso al vendedor** si el selector se cancela al instante: fuera de una
+  pestaña de Chrome primero sugiere abrir hub.smartflow-suite.com en Chrome;
+  siempre indica Ajustes → Aplicaciones → Chrome → Permisos.
+
+QA local 52/52. Tests: 310 unitarios + 42 de reglas.
+
+### Próximo paso exacto (comparación A/B, una ronda)
+
+A. **Desde el ícono de inicio (la "app"):** abrir la conversación → 🧹 → los
+   cuatro de PRUEBA MEDIA NATIVA (incluido GALERÍA showPicker) → 📎 y 📷 del chat
+   → DOM → 📋 copiar.
+B. **Abriendo Chrome y escribiendo hub.smartflow-suite.com** (no el ícono): lo
+   mismo.
+
+Lectura:
+- Si funciona en B y no en A: la causa es el contenedor. Solución: usar Chrome
+  directo o reinstalar el acceso directo desde Chrome.
+- Si no funciona en ninguno y el `_CANCEL` dice "casi al instante": son los
+  permisos de Chrome en Android (Cámara, y Fotos y videos o Archivos y
+  multimedia).
+- Si la prueba nativa abre y el chat no: aplicar DOM_DIFF y copiar el patrón
+  nativo al chat.
+
 ## 🔴 P0 media — storage/unauthorized: falta un rol IAM en producción (2026-09-11, 8b2a7f0)
 
 **Evidencia física:** `VOICE_FAILED_AT {etapa: UPLOAD, codigo: storage/unauthorized}`
