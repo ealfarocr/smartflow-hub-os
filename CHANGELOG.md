@@ -1,6 +1,19 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-10 — Panel QA copiable y detector que explica (c833c47)
+
+- fix(UX): "COPIA DEL CLIP DEL CHAT" -> "PROBAR CLIP AISLADO".
+- feat(QA): 📋 COPIAR DIAGNOSTICO (Clipboard API + respaldo execCommand + copia manual)
+  con entorno, estado del chat, controles y todos los eventos; "Diagnostico copiado".
+- feat(QA): 🧹 LIMPIAR. MAX_EVENTS 24 -> 80.
+- fix(QA): el detector decia "no hay controles en pantalla" cuando el composer no
+  estaba dibujado; ahora explica por que (lista abierta, ventana vencida, grabando,
+  ocultos) y registra CHAT_STATE. TOQUE con tipo/zona/rotulo; <CONTROL>_CLICK;
+  POINTERCANCEL con scroll/viewport/zoom.
+- test: 290 unit + 42 rules; QA local 49/49 (portapapeles real verificado).
+  Deploy hosting:app, bundle index-RBO5RG2Y.js verificado.
+
 ## 2026-09-10 — Prueba media nativa aislada y auditoría del DOM (63b0b57)
 
 - evidencia fisica: solo TOQUE, nunca CLIP_TAP — el click no llega al input del chat.

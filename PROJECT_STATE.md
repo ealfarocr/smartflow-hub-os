@@ -1,5 +1,44 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 P0 QA media — panel copiable y detector que explica (2026-09-10, c833c47)
+
+**Evidencia física:** Chrome, no embebido, showPicker sí. Aparecen POINTERCANCEL y
+TOQUE sobre elementos genéricos, con `control: "no hay controles en pantalla"`
+aunque la tarjeta QA estaba visible.
+
+**Diagnóstico del detector:** no fallaba. Busca los controles del **chat** (📎 📷),
+no los de la tarjeta de prueba. Si no encuentra ninguno con tamaño es que el
+composer no estaba dibujado: con la lista de conversaciones abierta (en el
+teléfono la lista y el chat se alternan), con la ventana de 24 h vencida o
+grabando. Ahora lo dice con palabras y registra `CHAT_STATE` en cada cambio.
+Lectura de producción a las 04:20 UTC: la única conversación tenía la ventana
+abierta (21,4 h desde el último mensaje del cliente; vence cerca de las 06:40 UTC).
+
+### Cambios (en producción, `hosting:app`, bundle `index-RBO5RG2Y.js`)
+
+- "COPIA DEL CLIP DEL CHAT" → **"📎 PROBAR CLIP AISLADO"**.
+- **📋 COPIAR DIAGNÓSTICO**: copia el entorno (navegador, embebido, showPicker,
+  táctil, UA, pantalla), el estado del chat, los controles y todos los eventos
+  (hasta 80). Usa la Clipboard API y, si falla, `execCommand('copy')`; si también
+  falla, deja el texto listo para copiar a mano. Muestra "Diagnóstico copiado".
+- **🧹 LIMPIAR**: vacía el registro para arrancar una prueba nueva.
+- Más detalle por toque: `TOQUE` con tipo de puntero, zona (prueba nativa o app)
+  y rótulo del control. `CLIP_CLICK`/`CAMERA_CLICK` para los clicks en controles
+  del chat, y `POINTERCANCEL` con scroll, desplazamiento del viewport y zoom.
+- Sigue sin bloquear: el contenedor y los registros son pointer-events-none;
+  reciben toques solo la pastilla y los inputs de la prueba nativa.
+
+QA local: 49/49 contra el build de producción; "copiar" se verificó leyendo el
+portapapeles real del navegador. Tests: 290 unitarios + 42 de reglas.
+
+### Próximo paso exacto
+
+En el teléfono: **abrir la conversación** (no quedarse en la lista), tocar
+🧹 LIMPIAR, tocar los tres de PRUEBA MEDIA NATIVA, 📎 PROBAR CLIP AISLADO, el 📎 y
+el 📷 del chat, y DOM. Después tocar 📋 COPIAR DIAGNÓSTICO y pegar el texto en el
+chat con Claude. Si la ventana de 24 h ya venció, el composer no aparece: hace
+falta un mensaje nuevo del cliente para reabrirla.
+
 ## 🔶 P0 media final — prueba nativa aislada + auditoría del DOM (2026-09-10, 63b0b57)
 
 **Evidencia física:** Chrome, no embebido, showPicker sí, touch sí. En el
