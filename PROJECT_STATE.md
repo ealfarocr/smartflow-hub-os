@@ -1,5 +1,60 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 P0 media final — prueba nativa aislada + auditoría del DOM (2026-09-10, 63b0b57)
+
+**Evidencia física:** Chrome, no embebido, showPicker sí, touch sí. En el
+teléfono solo aparecen `TOQUE`, nunca `CLIP_TAP`/`PHOTO_TAP`/`VIDEO_TAP`: el click
+no llega al input del chat.
+
+### Qué quedó en producción (`hosting:app`, bundle `index-fxogJJZu.js`)
+
+- **PRUEBA MEDIA NATIVA** en el panel QA (`?qa=1`), fuera del chat: ABRIR GALERÍA,
+  TOMAR FOTO y GRABAR VIDEO como `<input type=file>` nativos visibles, sin overlay,
+  showPicker ni click programático. Registran `QA_*_TAP`, `QA_*_CHANGE` y
+  `QA_*_DIALOG_OPENED` con listeners nativos. Hay además una **COPIA DEL CLIP DEL
+  CHAT** (el mismo componente, fuera del chat) que registra `QA_CHATCOPY_*`. Lo
+  que se elige entra al pipeline de subida del composer.
+- **Auditoría del DOM:** los controles del chat llevan `data-media-control` y
+  `data-media-input`. Cada toque registra coordenadas, el elemento en ese punto,
+  el control más cercano (DENTRO o a N px) y `<CONTROL>_AUDIT` (renderizado,
+  input, deshabilitado, rect, elemento en el punto, pointer-events, z-index).
+  También `CLICK`, `POINTERCANCEL` y `*_COVERED_BY`. El botón **DOM** de la
+  pastilla audita todos los controles sin tocarlos (`CONTROL_RENDERED`, `DOM_*`).
+- **Panel sobre la zona de mensajes**: no tapa la barra superior (cerrar sesión),
+  la cabecera del chat (Tomar) ni el composer. La tarjeta se pliega con "prueba".
+- **Clip, foto y video del chat**: activación nativa pura, el mismo patrón que la
+  prueba nativa. Sin showPicker, sin preventDefault, sin click().
+
+### Verificado en local (build de producción contra emuladores)
+
+46/46: prueba nativa (galería, foto, video), copia del clip, clip/foto/video del
+chat con su `_TAP` nativo, pipeline completo hasta ATTACHMENT_READY en todos, y
+DOM_AUDIT (el clip y la cámara reciben su propio toque). El seed ahora replica
+la conversación real (sin `source`, envíos `failed`). Tests: 279 unitarios + 42
+de reglas.
+
+### Aviso operativo
+
+La única conversación real de USADITOS tiene la ventana de 24 h abierta desde
+hace 17 h (vence esta noche). Con la ventana vencida el chat no muestra el
+composer: aparece "Reactivar chat", que requiere plantillas de Meta. Las
+conversaciones nuevas que entren mañana sí traen el composer.
+
+### Próximo paso exacto (prueba física decisiva, una sola ronda)
+
+En el teléfono, con `?qa=1` ya recordado, abrir la conversación:
+1. En la tarjeta PRUEBA MEDIA NATIVA, tocar "Elegir archivos" de ABRIR GALERÍA,
+   después TOMAR FOTO y GRABAR VIDEO. Después, COPIA DEL CLIP DEL CHAT.
+2. Tocar el 📎 y el 📷 del chat.
+3. Tocar **DOM** y mandar una captura del panel.
+
+Lectura:
+- Si el nativo no abre: el problema es del teléfono o del navegador; la causa
+  queda en el registro.
+- Si el nativo abre y la copia no: el problema es el patrón del control.
+- Si la nativa y la copia abren pero el clip del chat no: la causa es la
+  ubicación, y `CLIP_AUDIT`/`DOM_CLIP` dicen qué recibe el toque.
+
 ## ✅ P0 GO-LIVE — puesto del vendedor reproducido y cerrado en QA local (2026-09-10)
 
 **Cambio de método:** en vez de micro-pruebas en el teléfono, el puesto completo

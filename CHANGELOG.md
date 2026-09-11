@@ -1,6 +1,21 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-10 — Prueba media nativa aislada y auditoría del DOM (63b0b57)
+
+- evidencia fisica: solo TOQUE, nunca CLIP_TAP — el click no llega al input del chat.
+- feat(QA): PRUEBA MEDIA NATIVA fuera del chat (galeria/foto/video, input nativo
+  visible) + COPIA DEL CLIP DEL CHAT fuera del chat; QA_*_TAP/CHANGE/DIALOG_OPENED
+  con listeners nativos; lo elegido entra al pipeline del composer.
+- feat(QA): data-media-control/data-media-input; auditoria por toque (<CONTROL>_AUDIT:
+  renderizado, input, deshabilitado, rect, elemento en el punto, pointer-events,
+  z-index), CLICK y POINTERCANCEL globales, boton DOM (CONTROL_RENDERED, DOM_*).
+- fix: panel QA sobre la zona de mensajes (no tapa barra superior, cabecera ni composer).
+- fix: clip/foto/video del chat con activacion nativa pura (sin showPicker,
+  preventDefault ni click programatico) — mismo patron que la prueba nativa.
+- test: QA local 46/46 contra build de produccion; 279 unit + 42 rules.
+  Deploy hosting:app, bundle index-fxogJJZu.js verificado.
+
 ## 2026-09-10 — Puesto del vendedor reproducido en QA local y cerrado (9722be0)
 
 - feat(QA): scripts/qa_seller_seed.mjs + scripts/qa_seller_workstation.mjs + .env.qalocal
