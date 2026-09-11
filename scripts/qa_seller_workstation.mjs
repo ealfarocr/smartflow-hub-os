@@ -68,7 +68,7 @@ await page.emulate({
   userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-A546E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36',
 });
 const origin = new URL(BASE).origin;
-await browser.defaultBrowserContext().overridePermissions(origin, ['microphone', 'camera']);
+await browser.defaultBrowserContext().overridePermissions(origin, ['microphone', 'camera', 'clipboard-read', 'clipboard-sanitized-write']);
 
 const consoleErrors = [];
 await page.evaluateOnNewDocument(() => {
@@ -303,6 +303,34 @@ try {
   const domCam = dom.find((e) => e.step === 'DOM_CAMERA')?.data;
   record('DOM_AUDIT_OK', !!domClip?.loRecibeElInput && !!domCam?.loRecibeElInput && domClip?.deshabilitado === false,
     `clip: ${JSON.stringify(domClip)} · cámara: ${JSON.stringify(domCam)}`);
+
+  // ── C3. Copiar diagnóstico, limpiar y detector con la lista abierta ──
+  console.log('\n== C3. Panel QA: copiar / limpiar / detector ==');
+  const copyBtn = await $text('📋 COPIAR DIAGNÓSTICO', 'button', true);
+  await tap(copyBtn, 'copiar diagnóstico');
+  const copiedFeedback = await waitText('Diagnóstico copiado', 4000);
+  const copied = await page.evaluate(() => navigator.clipboard.readText()).catch((e) => `ERROR ${e.message}`);
+  const clipOk = ['Navegador:', 'showPicker:', 'Táctil:', 'Controles del chat: visibles: clip, camera', 'DOM_CLIP', 'CONTROL_RENDERED']
+    .every((s) => copied.includes(s));
+  record('COPY_DIAGNOSTIC_OK', copiedFeedback && clipOk, `aviso=${copiedFeedback} · portapapeles ${copied.length} caracteres · primera línea: ${copied.split('\n')[0]}`);
+  const clearBtn = await $text('🧹 LIMPIAR', 'button', true);
+  await tap(clearBtn, 'limpiar');
+  await sleep(300);
+  const afterClear = (await diag()).length;
+  record('CLEAR_DIAGNOSTIC_OK', afterClear === 0 && (await waitText('Registro limpio', 2000)), `eventos tras limpiar: ${afterClear}`);
+  // Con la LISTA abierta no hay composer: el detector debe decirlo con palabras.
+  const backBtn = await page.$('button[aria-label="Volver a las conversaciones"]');
+  await tap(backBtn, 'volver');
+  await sleep(400);
+  const listTitle = await page.waitForSelector('::-p-text(WhatsApp Business)');
+  await tap(listTitle, 'título de la lista');
+  await sleep(300);
+  const toqueLista = (await diagFull()).find((e) => e.step === 'TOQUE')?.data?.control || '';
+  const estadoLista = (await diagFull()).find((e) => e.step === 'CHAT_STATE')?.data?.conversacion || '';
+  record('CONTROL_DETECTION_FIXED', /no hay conversación abierta/.test(toqueLista) && /lista/.test(estadoLista), `TOQUE.control="${toqueLista}" · CHAT_STATE="${estadoLista}"`);
+  const conv1 = await page.waitForSelector('::-p-text(Cliente Prueba Uno)');
+  await tap(conv1, 'conversación');
+  await page.waitForSelector('textarea', { timeout: 8000 }).catch(() => {});
 
   // Enviar: Meta bloqueado (en el emulador no hay integración) → mensaje claro, sin logout.
   await clearDiag();

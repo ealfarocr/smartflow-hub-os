@@ -9,7 +9,8 @@
 // del paso y metadatos no sensibles (si el input existe, cuántos archivos).
 
 const QA_KEY = 'smartflow_qa';
-const MAX_EVENTS = 24;
+// El panel muestra los últimos 10; "Copiar diagnóstico" copia todos estos.
+const MAX_EVENTS = 80;
 
 export interface MediaDiagEvent {
   at: string;

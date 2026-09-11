@@ -143,10 +143,29 @@ describe('Prueba media nativa fuera del chat (?qa=1)', () => {
     expect(probe).not.toMatch(/showPicker|preventDefault|\.click\(\)|opacity-0/);
   });
 
-  it('registra TAP y CHANGE de cada prueba, y una copia del clip para comparar', () => {
+  it('registra TAP y CHANGE de cada prueba, y el clip aislado para comparar', () => {
     expect(panel).toContain('QA_${kind}_TAP');
     expect(panel).toContain('QA_${kind}_CHANGE');
     expect(panel).toContain('diag="QA_CHATCOPY"');
+  });
+
+  it('el clip aislado no se llama "copia" (parecía copiar al portapapeles)', () => {
+    expect(panel).toContain('PROBAR CLIP AISLADO');
+    expect(panel).not.toContain('COPIA DEL CLIP');
+  });
+
+  it('botones reales para copiar el diagnóstico y limpiar, con respaldo sin Clipboard API', () => {
+    expect(panel).toContain('📋 COPIAR DIAGNÓSTICO');
+    expect(panel).toContain('🧹 LIMPIAR');
+    expect(panel).toContain('navigator.clipboard.writeText');
+    expect(panel).toContain("document.execCommand('copy')");
+    expect(panel).toContain('Diagnóstico copiado');
+  });
+
+  it('el detector explica por qué no hay controles del chat en vez de "no hay controles"', () => {
+    expect(panel).not.toContain("'no hay controles en pantalla'");
+    expect(panel).toContain('explainMissingControls');
+    expect(view).toContain('chat={{ conversacionAbierta: !!activeChat');
   });
 
   it('audita el DOM: renderizado, input, deshabilitado, rect, elemento en el punto, pointer-events y z-index', () => {

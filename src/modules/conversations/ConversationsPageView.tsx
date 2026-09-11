@@ -665,6 +665,7 @@ export const ConversationsPageView = () => {
       <MediaDiagPanel
         isSuperAdmin={!!user?.isSuperAdmin}
         onNativeFiles={activeChat ? (files, kind) => handleFilesSelected(files, kind === 'gallery' ? 'GALLERY' : kind === 'photo' ? 'PHOTO' : 'VIDEO') : undefined}
+        chat={{ conversacionAbierta: !!activeChat, ventana: activeChat ? windowInfo.status : null, grabando: isRecording }}
       />
 
       {/* ── Sidebar ── */}
