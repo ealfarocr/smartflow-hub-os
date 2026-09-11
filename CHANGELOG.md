@@ -1,6 +1,19 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-11 — La foto y el video de la cámara se perdían al volver (22a603a)
+
+- evidencia fisica: CLIP/PHOTO/VIDEO _TAP + _DIALOG_OPENED en Android. Apertura cerrada.
+- fix(causa reproducida): en Android el focus vuelve antes que el change; el focus
+  cerraba y DESMONTABA el menu de camara y el archivo llegaba a un input inexistente.
+  Menu siempre montado, oculto con CSS.
+- feat: fotos >1,5 MB se reducen a JPEG 2048 px antes del limite de 5 MB (8,1 -> 1,3 MB).
+- feat: uploadBytesResumable con _UPLOAD_PROGRESS; nombre seguro; MIME de respaldo.
+- feat(voz): VOICE_BLOB_CREATED y VOICE_ATTACHMENT_READY antes del intento a Meta.
+- feat(QA): registro en sessionStorage + PAGE_RELOADED_WHILE_PICKER_OPEN con aviso.
+- test: 306 unit + 42 rules; QA local 52/52 (foto 8 MB, video 15 MB, video 17 MB
+  rechazado con aviso, voz). Deploy hosting:app, bundle index-WA7mt1To.js.
+
 ## 2026-09-10 — Panel QA copiable y detector que explica (c833c47)
 
 - fix(UX): "COPIA DEL CLIP DEL CHAT" -> "PROBAR CLIP AISLADO".

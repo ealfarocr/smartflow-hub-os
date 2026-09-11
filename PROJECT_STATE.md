@@ -1,5 +1,67 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 P0 media — la foto y el video de la cámara se perdían al volver (2026-09-11, 22a603a)
+
+**Evidencia física (Android):** CLIP/PHOTO/VIDEO `_TAP` y `_DIALOG_OPENED` = YES,
+terminados en `_CANCEL`. La apertura queda **cerrada**: no se tocan layout,
+z-index, pointer-events, inputs ni el mecanismo de apertura.
+
+### Causa reproducida (ruta de cámara)
+
+En Android la ventana recupera el foco **antes** de que llegue el archivo
+(`change`). El `focus` cerraba el menú de cámara, React desmontaba los inputs de
+Tomar foto / Grabar video y el archivo llegaba a un input que ya no existía.
+Resultado: foto y video perdidos sin ningún evento. Se reprodujo en el QA local
+con ese orden; el build anterior pierde los dos archivos. **Fix:** el menú queda
+siempre montado y se oculta con CSS (`data-camera-menu`). La galería no pasaba
+por ese menú.
+
+### Pipeline de subida para teléfono
+
+- **Fotos de cámara** (3-8 MB; el límite de WhatsApp es 5 MB): se reducen a JPEG
+  de 2048 px antes de medir el límite. En el QA, 8,1 MB → 1,3 MB.
+- **Subida reanudable** (`uploadBytesResumable`): por partes, con reintento y
+  `_UPLOAD_PROGRESS` cada 25 %.
+- **Nombre seguro** para Storage y para la URL que descarga Meta, y MIME de
+  respaldo si el selector lo entrega vacío.
+- `_FILE_SELECTED` con nombre (seguro/ajustado), extensión, tipo y KB, sin
+  contenido. `_AUTH_OK` indica si hay usuario.
+- **Voz**: `VOICE_BLOB_CREATED` y `VOICE_ATTACHMENT_READY` **antes** del intento a
+  Meta. Si Meta rechaza, es el bloqueo externo.
+- **Registro QA en sessionStorage** (sobrevive a una recarga). Si Android cierra
+  la página con la cámara abierta (poca memoria), se registra
+  `PAGE_RELOADED_WHILE_PICKER_OPEN` y el vendedor recibe un aviso claro.
+
+QA local 52/52 contra el build de producción:
+- galería, foto de 8 MB y video de 15 MB (con avance de subida) llegan a
+  ATTACHMENT_READY;
+- un video de 17 MB se rechaza con "WhatsApp acepta máximo 16MB para video",
+  sin cerrar la sesión;
+- la voz llega a VOICE_ATTACHMENT_READY.
+
+Tests: 306 unitarios + 42 de reglas. Deploy de `hosting:app`, bundle
+`index-WA7mt1To.js` verificado.
+
+### Límites reales a comunicar
+
+- Video: WhatsApp acepta hasta 16 MB. Un video 1080p de más de ~7-8 s los supera
+  y se rechaza con aviso. Grabar clips cortos o bajar la calidad de la cámara.
+- HEIC (algunos Samsung/iPhone en galería): Chrome no lo decodifica, así que se
+  sube tal cual y WhatsApp puede rechazarlo.
+
+### Próximo paso exacto
+
+En el teléfono, con la conversación abierta y la ventana de 24 h vigente (o una
+conversación nueva si venció):
+1. 🧹 LIMPIAR.
+2. 📎 → elegir UNA foto de la galería.
+3. 📷 → Tomar foto → **aceptar**.
+4. 📷 → Grabar video de 3-5 s → **aceptar**.
+5. 🎤 → hablar 3 s → enviar.
+6. 📋 COPIAR DIAGNÓSTICO y pegarlo.
+
+Criterio: `*_ATTACHMENT_READY` en los cuatro. El rechazo de Meta después es externo.
+
 ## 🔶 P0 QA media — panel copiable y detector que explica (2026-09-10, c833c47)
 
 **Evidencia física:** Chrome, no embebido, showPicker sí. Aparecen POINTERCANCEL y
