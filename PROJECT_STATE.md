@@ -1,5 +1,71 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔴 P0 media — storage/unauthorized: falta un rol IAM en producción (2026-09-11, 8b2a7f0)
+
+**Evidencia física:** `VOICE_FAILED_AT {etapa: UPLOAD, codigo: storage/unauthorized}`
+con `AUTH_OK` y `TOKEN_REFRESH_OK`. Además `*_DIALOG_OPENED {via: blur}` seguido de
+`*_CANCEL`, **sin que se viera ningún selector**: el blur era un falso positivo.
+
+### Causa de storage/unauthorized (verificada, solo lectura)
+
+- Bucket real: `paneles-solares-bcs-mx.firebasestorage.app` (el de `.env`).
+- Reglas desplegadas en ese bucket: idénticas a `storage.rules` del repo
+  (release del 2026-07-30).
+- La regla de `chat-attachments/{tenantId}/…` exige
+  `firestore.exists(memberships/{uid}_{tenantId})`. Ese documento EXISTE para
+  eduardo pruebas (status active, Asesor Comercial).
+- **Falta el permiso:** la cuenta de servicio de Storage
+  `service-652296458641@gcp-sa-firebasestorage.iam.gserviceaccount.com` NO tiene
+  `roles/firebaserules.firestoreServiceAgent`. Sin ese rol, las Storage Rules no
+  pueden consultar Firestore y niegan la escritura. El Firebase CLI solo otorga
+  ese rol si alguien responde "sí" a una pregunta interactiva; en modo no
+  interactivo la salta en silencio (`lib/rulesDeploy.js`, `checkStorageRulesIamPermissions`).
+- Por eso el **Owner sí sube** (la regla lo reconoce por UID o email, sin
+  Firestore) y el **asesor no**. En el emulador pasaba porque no aplica IAM.
+- Afecta todas las rutas con `isTenantMember`: `chat-attachments` (escritura),
+  `whatsapp-media` (lectura de fotos y audios que mandan los clientes),
+  `quotes`, `logos`, `catalog`, `media-library`, `tenants/*/ai-agent`.
+
+**Fix (configuración de seguridad del proyecto; lo ejecuta Eduardo):**
+`npx firebase-tools deploy --only storage --project paneles-solares-bcs-mx` en
+una terminal interactiva, respondiendo **Y** a "Cloud Storage for Firebase needs
+an IAM Role to use cross-service rules. Grant the new role?". Vuelve a desplegar
+las mismas reglas y otorga el rol. Alternativa: consola de Google Cloud → IAM →
+Otorgar acceso → principal `service-652296458641@gcp-sa-firebasestorage.iam.gserviceaccount.com`
+→ rol "Firebase Rules Firestore Service Agent".
+
+No se pudo hacer una subida de producción con credenciales del asesor desde el
+entorno de Claude: firmar un token requiere `iam.serviceAccounts.signBlob` y no
+se tocaron permisos. La verificación es la nota de voz desde el teléfono.
+
+### Código (en producción, `hosting:app`, bundle `index-DbP0z_Kw.js`)
+
+- **Se eliminó DIALOG_OPENED.** Solo hechos: `_TAP`, `_PICKER_REQUESTED`,
+  `_WINDOW_BLUR`, `_PAGE_HIDDEN`, `_CHANGE {ms}` y el `cancel` nativo
+  `{ms, paginaOculta}`. Un cancel en menos de 1,2 s sin que la página se oculte
+  se marca "Chrome no pudo abrir el selector", y el vendedor recibe el aviso de
+  revisar los permisos de Cámara y de Fotos y videos de Chrome en Android.
+- **El menú de cámara ya no se cierra con focus**: se cierra con `change` o
+  `cancel` del input.
+- **La prueba nativa** registra los mismos hechos. El botón **DOM** compara las
+  propiedades del input del 📎 del chat con las de la prueba
+  (`DOM_DIFF_CLIP_VS_PRUEBA`).
+- **Subida:** `UPLOAD_START` con proyecto, bucket, ruta y operación. `AUTH_OK`
+  con rol, estado y si la membresía coincide con `{uid}_{tenantId}`.
+
+QA local 52/52. Tests: 308 unitarios + 42 de reglas.
+
+### Próximo paso exacto
+
+1. Eduardo otorga el rol (comando de arriba). Claude verifica el binding en solo lectura.
+2. En el teléfono: 🧹 LIMPIAR → 🎤 nota de voz → debe llegar `VOICE_UPLOAD_OK` y
+   `VOICE_ATTACHMENT_READY`.
+3. En la misma sesión: los tres de PRUEBA MEDIA NATIVA, y el 📎 y el 📷 del chat, y
+   después DOM. Si el `cancel` llega con "cerró casi al instante", el problema son
+   los permisos de Chrome en Android (Ajustes → Apps → Chrome → Permisos: Cámara
+   y Fotos y videos en "Permitir").
+4. 📋 COPIAR DIAGNÓSTICO.
+
 ## 🔶 P0 media — la foto y el video de la cámara se perdían al volver (2026-09-11, 22a603a)
 
 **Evidencia física (Android):** CLIP/PHOTO/VIDEO `_TAP` y `_DIALOG_OPENED` = YES,

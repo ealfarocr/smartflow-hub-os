@@ -1,6 +1,20 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-11 — storage/unauthorized: falta rol IAM; DIALOG_OPENED era falso positivo (8b2a7f0)
+
+- causa (solo lectura): la cuenta de servicio de Storage no tiene
+  roles/firebaserules.firestoreServiceAgent; las Storage Rules con firestore.exists()
+  niegan al asesor (el Owner pasa por UID/email). Reglas desplegadas = repo. El
+  CLI solo otorga el rol en modo interactivo. Fix: lo otorga Eduardo (ver PROJECT_STATE).
+- fix: se elimina DIALOG_OPENED por blur; hechos: TAP, PICKER_REQUESTED, WINDOW_BLUR,
+  PAGE_HIDDEN, CHANGE {ms}, cancel nativo {ms, paginaOculta}; cancel < 1,2 s = Chrome
+  no pudo abrir → aviso de permisos de Chrome en Android.
+- fix: menu de camara cierra con change/cancel, no con focus.
+- feat(QA): DOM_DIFF_CLIP_VS_PRUEBA; UPLOAD_START con bucket/ruta/operacion; AUTH_OK con
+  rol/estado/coincidencia de membresia.
+- test: 308 unit + 42 rules; QA local 52/52. Deploy hosting:app, bundle index-DbP0z_Kw.js.
+
 ## 2026-09-11 — La foto y el video de la cámara se perdían al volver (22a603a)
 
 - evidencia fisica: CLIP/PHOTO/VIDEO _TAP + _DIALOG_OPENED en Android. Apertura cerrada.
