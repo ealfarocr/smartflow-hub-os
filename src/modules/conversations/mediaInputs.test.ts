@@ -51,8 +51,25 @@ describe('El dedo toca directamente el input de archivo', () => {
     expect(bloque('VIDEO')).toContain('capture="environment"');
   });
 
-  it('el menú de cámara no se desmonta en el mismo toque que abre la cámara', () => {
-    expect(view).toContain("onClickCapture={() => window.addEventListener('focus'");
+  // Evidencia física: focus/blur llegan aunque el selector no se muestre. Nada
+  // del flujo (cerrar menú, limpiar, marcar cancelado) puede colgarse de ellos.
+  it('el menú de cámara se cierra solo con change o cancel del input, nunca con focus', () => {
+    expect(view).not.toContain("window.addEventListener('focus', () => setShowCameraChoice(false)");
+    expect(view.match(/onSettled=\{\(\) => setShowCameraChoice\(false\)\}/g)?.length).toBe(2);
+  });
+
+  it('DIALOG_OPENED ya no existe: el blur no prueba que se vio el selector', () => {
+    const codigo = target.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*\*)/.test(l)).join('\n');
+    expect(codigo).not.toContain('DIALOG_OPENED');
+    expect(panel).not.toMatch(/QA_\$\{kind\}_DIALOG_OPENED/);
+    expect(target).toContain('_PICKER_REQUESTED');
+    expect(target).toContain("el.addEventListener('cancel', onCancel)");
+  });
+
+  it('cancel casi instantáneo sin ocultar la página = Chrome no pudo abrir: aviso de permisos', () => {
+    expect(target).toContain('FAST_CANCEL_MS');
+    expect(view.match(/onFastCancel=\{warnPickerBlocked\}/g)?.length).toBe(3);
+    expect(view).toContain('permiso de Cámara y de Fotos y videos');
   });
 
   // QA local con el orden REAL de Android (focus antes que change): con el menú

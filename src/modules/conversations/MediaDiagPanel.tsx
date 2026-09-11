@@ -3,7 +3,7 @@ import {
   getMediaDiag, subscribeMediaDiag, clearMediaDiag, isQaModeEnabled, recordMediaDiag, describeEnvironment,
 } from '@/utils/mediaDiag';
 import { buildDiagnosticText, explainMissingControls, type ChatDiagState, type ControlsSnapshot } from '@/utils/mediaDiagReport';
-import { FileTapTarget, type MediaInputKind } from './FileTapTarget';
+import { FAST_CANCEL_MS, FileTapTarget, type MediaInputKind } from './FileTapTarget';
 
 /**
  * Descripción corta y no sensible de un elemento: etiqueta, tipo, marcas QA, 2
@@ -76,6 +76,27 @@ function auditControl(control: HTMLElement, x?: number, y?: number) {
 }
 
 /**
+ * Propiedades de un <input type=file> que pueden decidir si el navegador abre o
+ * no el selector. Se comparan las del 📎 del chat con las de la prueba nativa.
+ */
+function inputProps(el: HTMLInputElement) {
+  const cs = getComputedStyle(el);
+  let overflow = 'no';
+  let transform = 'no';
+  for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+    const s = getComputedStyle(n);
+    if (overflow === 'no' && /hidden|clip/.test(`${s.overflowX} ${s.overflowY}`)) overflow = describeTarget(n);
+    if (transform === 'no' && s.transform !== 'none') transform = describeTarget(n);
+  }
+  return {
+    type: el.type, accept: el.accept, capture: el.getAttribute('capture') || '-', multiple: el.multiple,
+    disabled: el.disabled, opacity: cs.opacity, position: cs.position, display: cs.display, visibility: cs.visibility,
+    pointerEvents: cs.pointerEvents, z: effectiveZ(el), dentroDeForm: !!el.form, dentroDeLabel: !!el.closest('label'),
+    ancestroOverflow: overflow, ancestroTransform: transform, rect: rectText(el.getBoundingClientRect()),
+  };
+}
+
+/**
  * Copia al portapapeles con respaldo. 1) Clipboard API (https + gesto del
  * usuario). 2) textarea temporal + execCommand('copy'), para navegadores o
  * contextos donde la API no está. Si los dos fallan devuelve false y el panel
@@ -118,28 +139,46 @@ const NativeProbe = ({ label, kind, accept, capture, multiple, onFiles }: {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // Mismos hechos que el control del chat (FileTapTarget), para comparar en la
+    // misma sesión. Sin DIALOG_OPENED: el blur no prueba que se vio el selector.
+    let tapAt = 0;
+    let hidden = false;
+    const since = () => (tapAt ? Date.now() - tapAt : -1);
     const onClick = () => {
+      tapAt = Date.now();
+      hidden = false;
       recordMediaDiag(`QA_${kind}_TAP`);
-      let reported = false;
-      const opened = (how: string) => { if (!reported) { reported = true; recordMediaDiag(`QA_${kind}_DIALOG_OPENED`, { via: how }); } };
-      window.addEventListener('blur', () => opened('blur'), { once: true });
-      document.addEventListener('visibilitychange', () => { if (document.hidden) opened('hidden'); }, { once: true });
+      recordMediaDiag(`QA_${kind}_PICKER_REQUESTED`, { via: 'activación nativa' });
+    };
+    const onVisibility = () => {
+      if (tapAt && document.hidden && !hidden) { hidden = true; recordMediaDiag(`QA_${kind}_PAGE_HIDDEN`, { ms: since() }); }
     };
     const onChange = () => {
       const f = el.files;
-      recordMediaDiag(`QA_${kind}_CHANGE`, { archivos: f?.length ?? 0, tipo: f?.[0]?.type || '-', kb: f?.[0] ? Math.round(f[0].size / 1024) : 0 });
+      recordMediaDiag(`QA_${kind}_CHANGE`, { archivos: f?.length ?? 0, tipo: f?.[0]?.type || '-', kb: f?.[0] ? Math.round(f[0].size / 1024) : 0, ms: since() });
+      tapAt = 0;
       if (f?.length) onFilesRef.current?.(f);
       // El valor se limpia después: el pipeline ya tomó los File.
       setTimeout(() => { el.value = ''; }, 0);
     };
-    const onCancel = () => recordMediaDiag(`QA_${kind}_CANCEL`);
+    const onCancel = () => {
+      const ms = since();
+      const instant = ms >= 0 && ms < FAST_CANCEL_MS && !hidden;
+      recordMediaDiag(`QA_${kind}_CANCEL`, {
+        ms, paginaOculta: hidden,
+        ...(instant ? { lectura: 'cerró casi al instante sin mostrarse: Chrome no pudo abrir el selector (permisos de Chrome en Android)' } : {}),
+      });
+      tapAt = 0;
+    };
     el.addEventListener('click', onClick);
     el.addEventListener('change', onChange);
     el.addEventListener('cancel', onCancel);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       el.removeEventListener('click', onClick);
       el.removeEventListener('change', onChange);
       el.removeEventListener('cancel', onCancel);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [kind]);
 
@@ -287,6 +326,17 @@ export const MediaDiagPanel = ({ isSuperAdmin, onNativeFiles, chat }: {
     });
     document.querySelectorAll<HTMLElement>('[data-media-control]')
       .forEach((c) => recordMediaDiag(`DOM_${(c.dataset.mediaControl || 'x').toUpperCase()}`, auditControl(c)));
+    // DIFF 📎 del chat vs ABRIR GALERÍA de la prueba nativa: solo lo que cambia.
+    const chatInput = document.querySelector<HTMLInputElement>('input[data-media-input="gallery"]');
+    const qaInput = document.querySelector<HTMLInputElement>('input[data-qa-native="GALLERY"]');
+    if (chatInput && qaInput) {
+      const a = inputProps(chatInput) as Record<string, unknown>;
+      const b = inputProps(qaInput) as Record<string, unknown>;
+      const diff = Object.fromEntries(Object.keys(a).filter((k) => k !== 'rect' && a[k] !== b[k]).map((k) => [k, `chat=${a[k]} · prueba=${b[k]}`]));
+      recordMediaDiag('DOM_DIFF_CLIP_VS_PRUEBA', Object.keys(diff).length ? diff : { iguales: true });
+    } else {
+      recordMediaDiag('DOM_DIFF_CLIP_VS_PRUEBA', { falta: !chatInput ? '📎 del chat no está en pantalla' : 'tarjeta de prueba plegada' });
+    }
   };
 
   const showFeedback = (msg: string) => {

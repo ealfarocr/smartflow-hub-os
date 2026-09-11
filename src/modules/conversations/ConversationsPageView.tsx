@@ -395,7 +395,14 @@ export const ConversationsPageView = () => {
       const { storage, auth } = await import('@/lib/firebase');
       const user = auth.currentUser;
       if (!user) throw Object.assign(new Error('Sin sesión activa'), { code: 'auth/no-current-user' });
-      recordMediaDiag(`${diag}_AUTH_OK`, { usuario: 'presente' });
+      // La Storage Rule de chat-attachments busca memberships/{uid}_{tenantId}:
+      // se anota si la membresía activa tiene justamente ese ID, más rol y estado.
+      recordMediaDiag(`${diag}_AUTH_OK`, {
+        usuario: 'presente',
+        rol: activeMembership?.role,
+        estado: activeMembership?.status,
+        membresiaEsperada: activeMembership?.id === `${user.uid}_${activeMembership?.tenantId}` ? 'coincide' : 'NO coincide',
+      });
       etapa = 'TOKEN_REFRESH';
       await user.getIdToken();
       recordMediaDiag(`${diag}_TOKEN_REFRESH_OK`);
@@ -403,7 +410,11 @@ export const ConversationsPageView = () => {
       const path = `chat-attachments/${activeMembership!.tenantId}/${Date.now()}-${safeName}`;
       const storageRef = ref(storage, path);
       const contentType = mimeFor(file);
-      recordMediaDiag(`${diag}_UPLOAD_START`, { kb: Math.round(file.size / 1024), tipo: contentType });
+      recordMediaDiag(`${diag}_UPLOAD_START`, {
+        kb: Math.round(file.size / 1024), tipo: contentType,
+        proyecto: storage.app.options.projectId, bucket: storageRef.bucket, ruta: storageRef.fullPath,
+        operacion: 'uploadBytesResumable',
+      });
       await new Promise<void>((resolve, reject) => {
         let lastBucket = 0;
         uploadBytesResumable(storageRef, file, { contentType }).on('state_changed', (snap) => {
@@ -421,7 +432,13 @@ export const ConversationsPageView = () => {
       recordMediaDiag(`${diag}_DOWNLOAD_URL_OK`);
       return url;
     } catch (err) {
-      recordMediaDiag(`${diag}_FAILED_AT`, { etapa, codigo: errorCodeOf(err) || 'sin-codigo' });
+      const codigo = errorCodeOf(err) || 'sin-codigo';
+      recordMediaDiag(`${diag}_FAILED_AT`, {
+        etapa, codigo,
+        // storage/unauthorized con sesión viva = la Storage Rule negó la escritura.
+        // No es la sesión (AUTH_OK y TOKEN_REFRESH_OK ya pasaron).
+        ...(codigo === 'storage/unauthorized' && etapa === 'UPLOAD' ? { lectura: 'la regla de Storage negó la escritura con la sesión viva' } : {}),
+      });
       throw err;
     }
   };
@@ -551,6 +568,14 @@ export const ConversationsPageView = () => {
         setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'error' } : m));
         handleSellerError('upload', err);
       });
+  };
+
+  // El selector se cerró casi al instante sin mostrarse (ver FAST_CANCEL_MS): en
+  // Android es Chrome sin permiso de Cámara o de Fotos y videos. Se le dice al
+  // vendedor dónde se arregla, una sola vez por ráfaga.
+  const warnPickerBlocked = () => {
+    if (!shouldNotify('picker-blocked')) return;
+    addToast('¿No se abrió la cámara o la galería? Revisá que Chrome tenga permiso de Cámara y de Fotos y videos en los Ajustes del teléfono.', 'info');
   };
 
   const handleFilesSelected = (fileList: FileList, source: 'PHOTO' | 'VIDEO' | 'GALLERY' | 'ATTACH') => {
@@ -1253,6 +1278,7 @@ ${plantilla}` : plantilla);
                         multiple
                         title="Fotos y videos"
                         onFiles={files => handleFilesSelected(files, 'GALLERY')}
+                        onFastCancel={warnPickerBlocked}
                         className={`w-9 h-9 shrink-0 ${isRecording ? 'hidden' : ''}`}>
                         <span className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-xl pointer-events-none">
                           <Paperclip className="w-4 h-4" />
@@ -1260,14 +1286,13 @@ ${plantilla}` : plantilla);
                       </FileTapTarget>
                       {/* CÁMARA — un icono con dos opciones: Tomar foto y Grabar video,
                           cada una con su propio input capture="environment" que el dedo
-                          toca directamente. El menú se cierra cuando la ventana recupera
-                          el foco al volver de la cámara.
+                          toca directamente.
 
-                          El menú queda SIEMPRE MONTADO y se oculta con CSS: en Android el
-                          foco vuelve ANTES de que llegue el archivo (change). Antes el menú
-                          se desmontaba con ese foco, el input de Tomar foto / Grabar video
-                          desaparecía del DOM y la foto o el video se perdían sin ningún
-                          evento (reproducido en el QA local con el orden real). */}
+                          El menú queda SIEMPRE MONTADO y se oculta con CSS, y se cierra
+                          recién cuando el input avisa que terminó (change o cancel), nunca
+                          con focus/blur: en Android el foco vuelve ANTES de que llegue el
+                          archivo. Antes el menú se desmontaba con ese foco y la foto o el
+                          video se perdían sin ningún evento (reproducido en el QA local). */}
                       <div data-media-control="camera" className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
                         <button type="button" onClick={() => { mediaUi('CAMERA_MENU_TAP'); setShowCameraChoice(v => !v); }}
                           title="Cámara"
@@ -1275,7 +1300,6 @@ ${plantilla}` : plantilla);
                           <Camera className="w-4 h-4" />
                         </button>
                           <div
-                            onClickCapture={() => window.addEventListener('focus', () => setShowCameraChoice(false), { once: true })}
                             data-camera-menu={showCameraChoice ? 'abierto' : 'cerrado'}
                             className={`absolute bottom-full left-0 mb-2 w-40 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden ${showCameraChoice ? '' : 'hidden'}`}>
                             <FileTapTarget
@@ -1285,7 +1309,9 @@ ${plantilla}` : plantilla);
                               accept="image/*"
                               capture="environment"
                               title="Tomar foto"
-                              onFiles={files => handleFilesSelected(files, 'PHOTO')}>
+                              onFiles={files => handleFilesSelected(files, 'PHOTO')}
+                              onSettled={() => setShowCameraChoice(false)}
+                              onFastCancel={warnPickerBlocked}>
                               <span className="w-full px-4 py-3 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 pointer-events-none">
                                 <Camera className="w-3.5 h-3.5" /> Tomar foto
                               </span>
@@ -1306,6 +1332,8 @@ ${plantilla}` : plantilla);
                                 }));
                                 return handleFilesSelected(files, 'VIDEO');
                               }}
+                              onSettled={() => setShowCameraChoice(false)}
+                              onFastCancel={warnPickerBlocked}
                               className="border-t border-slate-100 dark:border-slate-700">
                               <span className="w-full px-4 py-3 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 pointer-events-none">
                                 <Play className="w-3.5 h-3.5" /> Grabar video
