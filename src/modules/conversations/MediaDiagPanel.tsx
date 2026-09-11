@@ -199,6 +199,65 @@ const NativeProbe = ({ label, kind, accept, capture, multiple, onFiles }: {
 };
 
 /**
+ * GALERÍA pidiendo el selector con input.showPicker() dentro del toque: si Chrome
+ * se niega, lanza un error con nombre y motivo (NotAllowedError, SecurityError…)
+ * — el único camino que devuelve un error EXPLÍCITO en lugar de un cancel mudo.
+ */
+const ShowPickerProbe = ({ onFiles }: { onFiles?: (files: FileList) => void }) => {
+  const ref = useRef<HTMLInputElement | null>(null);
+  const tapAt = useRef(0);
+  const onFilesRef = useRef(onFiles);
+  useEffect(() => { onFilesRef.current = onFiles; }, [onFiles]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const since = () => (tapAt.current ? Date.now() - tapAt.current : -1);
+    const onChange = () => {
+      recordMediaDiag('QA_SHOWPICKER_CHANGE', { archivos: el.files?.length ?? 0, ms: since() });
+      if (el.files?.length) onFilesRef.current?.(el.files);
+      tapAt.current = 0;
+      setTimeout(() => { el.value = ''; }, 0);
+    };
+    const onCancel = () => { recordMediaDiag('QA_SHOWPICKER_CANCEL', { ms: since() }); tapAt.current = 0; };
+    el.addEventListener('change', onChange);
+    el.addEventListener('cancel', onCancel);
+    return () => { el.removeEventListener('change', onChange); el.removeEventListener('cancel', onCancel); };
+  }, []);
+  const open = () => {
+    const el = ref.current;
+    if (!el) return;
+    tapAt.current = Date.now();
+    recordMediaDiag('QA_SHOWPICKER_TAP');
+    if (typeof el.showPicker !== 'function') { recordMediaDiag('QA_SHOWPICKER_ERROR', { nombre: 'sin showPicker en este navegador' }); return; }
+    try {
+      el.showPicker();
+      recordMediaDiag('QA_SHOWPICKER_RETURNED');
+    } catch (err) {
+      const e = err as { name?: string; message?: string };
+      recordMediaDiag('QA_SHOWPICKER_ERROR', { nombre: e.name, detalle: e.message?.slice(0, 120) });
+    }
+  };
+  return (
+    <div className="flex items-center gap-1.5 rounded bg-white/10 px-1.5 py-1">
+      <button type="button" onClick={open} className="w-24 shrink-0 text-left font-bold text-fuchsia-300">GALERÍA (showPicker)</button>
+      <input ref={ref} type="file" accept="image/*,video/*" data-qa-native="SHOWPICKER" className="min-w-0 flex-1 text-[10px] text-white" />
+    </div>
+  );
+};
+
+/** Permisos del SITIO (no los de la app Chrome en Android, que la web no puede leer). */
+async function sitePermissions(): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const name of ['camera', 'microphone']) {
+    try {
+      const st = await navigator.permissions.query({ name: name as PermissionName });
+      out[name === 'camera' ? 'camaraSitio' : 'microfonoSitio'] = st.state;
+    } catch { out[name === 'camera' ? 'camaraSitio' : 'microfonoSitio'] = 'no disponible'; }
+  }
+  return out;
+}
+
+/**
  * Panel de diagnóstico multimedia visible en el teléfono (?qa=1 o SuperAdmin).
  *
  * OBSERVA, NO PARTICIPA. Va sobre la zona de MENSAJES, a media altura: no tapa
@@ -232,6 +291,13 @@ export const MediaDiagPanel = ({ isSuperAdmin, onNativeFiles, chat }: {
   const probeRef = useRef<HTMLDivElement | null>(null);
   const chatRef = useRef(chat);
   useEffect(() => { chatRef.current = chat; }, [chat]);
+
+  // Una vez por carga: en qué contenedor corre la página y los permisos del sitio.
+  useEffect(() => {
+    if (!enabled) return;
+    recordMediaDiag('ENV', { contenedor: env.container, displayMode: env.displayMode, marcas: env.brands, ...(env.referrerApp ? { abiertaPor: env.referrerApp } : {}) });
+    sitePermissions().then((p) => recordMediaDiag('PERMISOS_SITIO', p));
+  }, [enabled, env]);
 
   // Cada cambio de estado del chat queda en el registro: si alguien toca "el
   // clip" con la lista abierta o con la ventana vencida, se ve por qué no está.
@@ -400,6 +466,7 @@ export const MediaDiagPanel = ({ isSuperAdmin, onNativeFiles, chat }: {
           <NativeProbe label="ABRIR GALERÍA" kind="GALLERY" accept="image/*,video/*" multiple onFiles={deliver('gallery')} />
           <NativeProbe label="TOMAR FOTO" kind="PHOTO" accept="image/*" capture="environment" onFiles={deliver('photo')} />
           <NativeProbe label="GRABAR VIDEO" kind="VIDEO" accept="video/*" capture="environment" onFiles={deliver('video')} />
+          <ShowPickerProbe onFiles={deliver('gallery')} />
           {/* El MISMO control del clip del chat (FileTapTarget), pero fuera del chat. */}
           <FileTapTarget diag="QA_CHATCOPY" accept="image/*,video/*" multiple title="Probar clip aislado" onFiles={deliver('gallery')}
             className="rounded bg-white/10">
@@ -413,6 +480,7 @@ export const MediaDiagPanel = ({ isSuperAdmin, onNativeFiles, chat }: {
           <div className="text-amber-300">
             {env.browser}{env.embedded ? ` · EMBEBIDO: ${env.embedded}` : ' · no embebido'} · showPicker: {env.showPickerApi ? 'sí' : 'no'} · táctil: {env.touch ? 'sí' : 'no'}
           </div>
+          <div className="text-amber-300">Contenedor: {env.container}</div>
           {events.length === 0 && <div className="text-slate-400">Abrí una conversación y tocá la prueba nativa, o el 📎 / 📷 del chat…</div>}
           {events.slice(0, 10).map((e, i) => (
             <div key={i} className="whitespace-normal break-all leading-tight">

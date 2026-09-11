@@ -57,6 +57,7 @@ export function buildDiagnosticText(r: DiagnosticReportInput): string {
     `Navegador: ${r.env.browser} · Embebido: ${r.env.embedded ?? 'no'} · showPicker: ${yesNo(r.env.showPickerApi)}` +
     ` · Táctil: ${yesNo(r.env.touch)} (${r.env.maxTouchPoints} puntos) · PWA instalada: ${yesNo(r.env.standalonePwa)}`,
   );
+  lines.push(`Contenedor: ${r.env.container} · display-mode: ${r.env.displayMode} · marcas: ${r.env.brands}${r.env.referrerApp ? ` · abierta por ${r.env.referrerApp}` : ''}`);
   lines.push(`Pantalla: ${r.viewport.w}x${r.viewport.h} @${r.viewport.dpr}x${r.viewport.visualH ? ` · visible ${r.viewport.visualH}px de alto` : ''}`);
   lines.push(`UA: ${r.env.userAgent}`);
   if (r.chat) {

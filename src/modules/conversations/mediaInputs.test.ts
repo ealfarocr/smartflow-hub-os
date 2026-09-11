@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeEnvironment } from '@/utils/mediaDiag';
+import { describeContainer, describeEnvironment } from '@/utils/mediaDiag';
 
 // Los selectores de archivo del chat. Historia de por qué están así:
 //  1. Los <input type="file"> tenían className="hidden" (display:none): en
@@ -98,6 +98,23 @@ describe('El panel QA reconoce el navegador del teléfono', () => {
     expect(env.embedded).toBe('WebView de Android');
   });
 
+  // La app no tiene manifest de PWA: "standalone" en el teléfono significa que la
+  // abrió otra cosa que una pestaña de Chrome. Un WebView se delata por Client Hints.
+  it('distingue pestaña, app instalada, TWA y WebView disfrazado de Chrome', () => {
+    const ua = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36';
+    expect(describeContainer({ ua, brands: ['Google Chrome 128'], displayMode: 'browser', referrer: '' })).toBe('pestaña del navegador');
+    expect(describeContainer({ ua, brands: ['Google Chrome 128'], displayMode: 'standalone', referrer: '' })).toMatch(/app instalada/);
+    expect(describeContainer({ ua, brands: [], displayMode: 'standalone', referrer: 'android-app://com.ejemplo.app/' })).toMatch(/TWA com\.ejemplo\.app/);
+    expect(describeContainer({ ua, brands: ['Android WebView 128'], displayMode: 'standalone', referrer: '' })).toBe('WebView dentro de otra app');
+  });
+
+  it('la prueba con showPicker() captura el error explícito', () => {
+    expect(panel).toContain('QA_SHOWPICKER_ERROR');
+    expect(panel).toContain('QA_SHOWPICKER_RETURNED');
+    expect(panel).toContain("recordMediaDiag('ENV'");
+    expect(panel).toContain("recordMediaDiag('PERMISOS_SITIO'");
+  });
+
   it('Samsung Internet y Opera se nombran bien', () => {
     expect(describeEnvironment('Mozilla/5.0 (Linux; Android 14) SamsungBrowser/25.0 Chrome/121 Mobile Safari/537.36').browser).toBe('Samsung Internet');
     expect(describeEnvironment('Mozilla/5.0 (Linux; Android 14) Chrome/128 Mobile Safari/537.36 OPR/84.0').browser).toBe('Opera');
@@ -164,7 +181,7 @@ describe('Prueba media nativa fuera del chat (?qa=1)', () => {
     expect(panel).toContain('label="ABRIR GALERÍA" kind="GALLERY" accept="image/*,video/*"');
     expect(panel).toContain('label="TOMAR FOTO" kind="PHOTO" accept="image/*" capture="environment"');
     expect(panel).toContain('label="GRABAR VIDEO" kind="VIDEO" accept="video/*" capture="environment"');
-    const probe = panel.slice(panel.indexOf('const NativeProbe'), panel.indexOf('export const MediaDiagPanel'));
+    const probe = panel.slice(panel.indexOf('const NativeProbe'), panel.indexOf(' * GALERÍA pidiendo el selector'));
     expect(probe).not.toMatch(/showPicker|preventDefault|\.click\(\)|opacity-0/);
   });
 

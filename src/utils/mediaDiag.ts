@@ -138,6 +138,45 @@ export interface DeviceEnvironment {
   touch: boolean;
   maxTouchPoints: number;
   showPickerApi: boolean;
+  /** display-mode que reporta el navegador: browser, standalone, minimal-ui, fullscreen. */
+  displayMode: string;
+  /** Marcas de Client Hints (userAgentData.brands). Un WebView dice "Android WebView"
+   *  aunque su user agent se haga pasar por Chrome. */
+  brands: string;
+  /** android-app://<paquete> cuando la abre una TWA (app de Android que envuelve el sitio). */
+  referrerApp: string | null;
+  /** En qué corre realmente la página, en palabras. */
+  container: string;
+}
+
+export interface ContainerSignals {
+  ua: string;
+  brands: string[];
+  displayMode: string;
+  referrer: string;
+}
+
+/**
+ * Dónde corre de verdad la página. La app NO tiene manifest de PWA, así que un
+ * "display-mode: standalone" significa que la abrió otra cosa que una pestaña de
+ * Chrome: un acceso directo en modo app, una TWA o el WebView de otra app. Eso
+ * importa porque en un WebView el selector de archivos solo aparece si la app que
+ * lo envuelve lo implementa; si no, el input recibe el toque y se cancela solo.
+ */
+export function describeContainer(s: ContainerSignals): string {
+  if (s.brands.some((b) => /Android WebView/i.test(b)) || /; wv\)/.test(s.ua)) return 'WebView dentro de otra app';
+  if (s.referrer.startsWith('android-app://')) return `app de Android (TWA ${s.referrer.replace('android-app://', '').split('/')[0]})`;
+  if (s.displayMode !== 'browser') return `app instalada / acceso directo (${s.displayMode})`;
+  return 'pestaña del navegador';
+}
+
+function currentDisplayMode(): string {
+  try {
+    for (const m of ['fullscreen', 'standalone', 'minimal-ui', 'window-controls-overlay']) {
+      if (window.matchMedia?.(`(display-mode: ${m})`).matches) return m;
+    }
+  } catch { /* sin matchMedia */ }
+  return 'browser';
 }
 
 /**
@@ -175,12 +214,30 @@ export function describeEnvironment(ua: string = typeof navigator !== 'undefined
   let touch = false;
   let maxTouchPoints = 0;
   let showPickerApi = false;
+  let displayMode = 'browser';
+  let brands: string[] = [];
+  let referrer = '';
   try {
     standalonePwa = typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)').matches;
     touch = typeof window !== 'undefined' && 'ontouchstart' in window;
     maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints || 0 : 0;
     showPickerApi = typeof HTMLInputElement !== 'undefined' && 'showPicker' in HTMLInputElement.prototype;
+    if (typeof window !== 'undefined') {
+      displayMode = currentDisplayMode();
+      referrer = document.referrer || '';
+      const uaData = (navigator as unknown as { userAgentData?: { brands?: { brand: string; version: string }[] } }).userAgentData;
+      brands = (uaData?.brands || []).map((b) => `${b.brand} ${b.version}`).filter((b) => !/Not.?A.?Brand/i.test(b));
+    }
   } catch { /* entorno sin DOM */ }
 
-  return { userAgent: ua, browser, embedded, standalonePwa, touch, maxTouchPoints, showPickerApi };
+  const webviewByBrand = brands.some((b) => /Android WebView/i.test(b));
+  return {
+    userAgent: ua, browser,
+    embedded: embedded ?? (webviewByBrand ? 'WebView de Android' : null),
+    standalonePwa, touch, maxTouchPoints, showPickerApi,
+    displayMode,
+    brands: brands.join(', ') || '(sin Client Hints)',
+    referrerApp: referrer.startsWith('android-app://') ? referrer.split('/').slice(0, 3).join('/') : null,
+    container: describeContainer({ ua, brands, displayMode, referrer }),
+  };
 }

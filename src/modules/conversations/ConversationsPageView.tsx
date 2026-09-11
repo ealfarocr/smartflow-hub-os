@@ -33,7 +33,7 @@ import {
   errorCodeOf, outboundRejectionMessage, SESSION_DEAD_MESSAGE, type SellerErrorLayer,
 } from '@/utils/sellerErrors';
 import { isAdminRole } from '@/utils/permissions';
-import { consumePickerReload, recordMediaDiag } from '@/utils/mediaDiag';
+import { consumePickerReload, describeEnvironment, recordMediaDiag } from '@/utils/mediaDiag';
 import { extensionOf, mimeFor, prepareImage, safeFileName } from '@/utils/mediaPrep';
 import { MediaDiagPanel } from './MediaDiagPanel';
 import { FileTapTarget } from './FileTapTarget';
@@ -573,9 +573,15 @@ export const ConversationsPageView = () => {
   // El selector se cerró casi al instante sin mostrarse (ver FAST_CANCEL_MS): en
   // Android es Chrome sin permiso de Cámara o de Fotos y videos. Se le dice al
   // vendedor dónde se arregla, una sola vez por ráfaga.
+  // Si la app corre como acceso directo / app instalada / WebView (no en una
+  // pestaña de Chrome), lo primero es probar en Chrome directo.
   const warnPickerBlocked = () => {
     if (!shouldNotify('picker-blocked')) return;
-    addToast('¿No se abrió la cámara o la galería? Revisá que Chrome tenga permiso de Cámara y de Fotos y videos en los Ajustes del teléfono.', 'info');
+    const permisos = 'Ajustes → Aplicaciones → Chrome → Permisos → Cámara y Fotos y videos en "Permitir".';
+    const enPestana = describeEnvironment().container === 'pestaña del navegador';
+    addToast(enPestana
+      ? `¿No se abrió la cámara o la galería? Revisá que Chrome tenga permiso de Cámara y de Fotos y videos: ${permisos}`
+      : `¿No se abrió la cámara o la galería? Abrí hub.smartflow-suite.com directamente en Chrome (no desde el ícono). Si sigue igual: ${permisos}`, 'info');
   };
 
   const handleFilesSelected = (fileList: FileList, source: 'PHOTO' | 'VIDEO' | 'GALLERY' | 'ATTACH') => {
