@@ -660,7 +660,12 @@ export const ConversationsPageView = () => {
   return (
     <div className="h-full md:h-[calc(100vh-8rem)] flex overflow-hidden rounded-2xl shadow-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
 
-      <MediaDiagPanel isSuperAdmin={!!user?.isSuperAdmin} />
+      {/* La prueba nativa del panel QA entrega sus archivos al mismo pipeline de
+          subida del chat: si abre, el adjunto aparece en el composer igual. */}
+      <MediaDiagPanel
+        isSuperAdmin={!!user?.isSuperAdmin}
+        onNativeFiles={activeChat ? (files, kind) => handleFilesSelected(files, kind === 'gallery' ? 'GALLERY' : kind === 'photo' ? 'PHOTO' : 'VIDEO') : undefined}
+      />
 
       {/* ── Sidebar ── */}
       <div className={`${activeChat ? 'hidden md:flex' : 'flex'} w-full md:w-72 flex-col border-r border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900`}>
@@ -1193,6 +1198,8 @@ ${plantilla}` : plantilla);
                           el selector de medios y no la cámara. */}
                       <FileTapTarget
                         diag="CLIP"
+                        control="clip"
+                        inputKind="gallery"
                         accept="image/*,video/*"
                         multiple
                         title="Fotos y videos"
@@ -1206,7 +1213,7 @@ ${plantilla}` : plantilla);
                           cada una con su propio input capture="environment" que el dedo
                           toca directamente. El menú no se desmonta en el mismo toque: se
                           cierra cuando la ventana recupera el foco al volver de la cámara. */}
-                      <div className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
+                      <div data-media-control="camera" className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
                         <button type="button" onClick={() => { mediaUi('CAMERA_MENU_TAP'); setShowCameraChoice(v => !v); }}
                           title="Cámara"
                           className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors disabled:opacity-40">
@@ -1218,6 +1225,8 @@ ${plantilla}` : plantilla);
                             className="absolute bottom-full left-0 mb-2 w-40 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden">
                             <FileTapTarget
                               diag="PHOTO"
+                              control="photo"
+                              inputKind="photo"
                               accept="image/*"
                               capture="environment"
                               title="Tomar foto"
@@ -1231,6 +1240,8 @@ ${plantilla}` : plantilla);
                                 Se usa la cámara nativa del teléfono, igual que para la foto. */}
                             <FileTapTarget
                               diag="VIDEO"
+                              control="video"
+                              inputKind="video"
                               accept="video/*"
                               capture="environment"
                               title="Grabar video"

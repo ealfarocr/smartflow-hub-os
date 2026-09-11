@@ -119,16 +119,22 @@ const FEATURES = {
     { id: 'qa-conv-1', name: 'Cliente Prueba Uno', text: 'Hola, ¿tienen el sofá disponible?', minutesAgo: 5 },
     { id: 'qa-conv-2', name: 'Cliente Prueba Dos', text: 'Buenas, quiero info de la refri', minutesAgo: 12 },
   ];
-  for (const c of convs) {
+  for (const [i, c] of convs.entries()) {
     const at = TS.fromMillis(now - c.minutesAgo * 60000);
+    // La primera replica la forma de la conversación real de USADITOS: sin campo
+    // `source` y con envíos del asesor que Meta rechazó (status 'failed').
     await db.collection('conversations').doc(c.id).set({
-      tenantId: TA, contactName: c.name, source: 'whatsapp', phoneRaw: '88887777', phoneE164: '+50688887777',
+      tenantId: TA, contactName: c.name, ...(i === 0 ? {} : { source: 'whatsapp' }), phoneRaw: '88887777', phoneE164: '+50688887777',
       phoneSearchKey: '88887777', lastMessage: c.text, lastMessageDate: at, lastInboundDate: at,
       lastMessageSender: 'lead', unreadCount: 1, advisorId: '', status: 'active', updatedAt: at,
     });
-    await db.collection('conversations').doc(c.id).collection('messages').add({
-      text: c.text, sender: 'lead', direction: 'inbound', timestamp: at, type: 'text',
-    });
+    const msgs = db.collection('conversations').doc(c.id).collection('messages');
+    await msgs.add({ text: c.text, sender: 'lead', direction: 'inbound', timestamp: at, type: 'text' });
+    if (i === 0) {
+      await msgs.add({ text: 'Hola, sí lo tenemos', sender: 'advisor', direction: 'outbound', timestamp: TS.fromMillis(now - 4 * 60000), type: 'text', status: 'failed' });
+      await msgs.add({ text: '¿Te mando fotos?', sender: 'advisor', direction: 'outbound', timestamp: TS.fromMillis(now - 3 * 60000), type: 'text', status: 'failed' });
+      await msgs.add({ text: 'Sí, por favor', sender: 'lead', direction: 'inbound', timestamp: TS.fromMillis(now - 2 * 60000), type: 'text' });
+    }
   }
   // Conversación de OTRO negocio: el asesor no debe verla nunca.
   await db.collection('conversations').doc('qa-conv-ajena').set({

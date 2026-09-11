@@ -95,31 +95,63 @@ describe('El panel QA observa, no participa', () => {
     expect(raiz).toContain('pointer-events-none');
   });
 
-  it('solo la pastilla de control recibe toques, y sus toques no se registran como TOQUE', () => {
+  it('solo la pastilla y la prueba nativa reciben toques; los toques de la pastilla no se registran', () => {
     expect(panel).toContain('pointer-events-auto');
-    expect(panel).toContain('path.includes(pillRef.current)');
+    expect(panel).toContain('composedPath().includes(pillRef.current)');
+  });
+
+  it('va sobre los mensajes: ni barra superior, ni cabecera del chat, ni composer; ocupa poco', () => {
+    const raiz = panel.slice(panel.indexOf('<div className="fixed'), panel.indexOf('>', panel.indexOf('<div className="fixed')));
+    expect(raiz).toContain('top-[26%]');
+    expect(raiz).not.toMatch(/bottom-|top-1\b/);
+    expect(panel).toContain('max-h-[18vh]');
   });
 
   it('detecta cuando otro elemento tapa un control multimedia', () => {
     expect(panel).toContain('_COVERED_BY');
-    expect(target).toContain('data-media-target={diag}');
+    expect(target).toContain('data-media-control={control}');
+    expect(target).toContain('data-media-input={inputKind}');
   });
 });
 
-describe('showPicker se pide dentro del mismo gesto', () => {
-  const onClick = target.slice(target.indexOf('const onClick'), target.indexOf('return (', target.indexOf('const onClick')));
-
-  it('se llama a input.showPicker() cuando existe', () => {
-    expect(onClick).toContain('input.showPicker()');
+// Evidencia física: en el teléfono solo aparecían TOQUE, nunca CLIP_TAP. El
+// control del chat queda con el MISMO patrón que la prueba nativa: el dedo toca
+// el input y el navegador lo abre solo. Nada de showPicker/preventDefault/click().
+describe('Activación nativa pura del input del chat', () => {
+  it('sin showPicker, sin preventDefault y sin click programático', () => {
+    // Solo el código: el comentario de la cabecera nombra justamente lo que no se usa.
+    const codigo = target.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*\*)/.test(l)).join('\n');
+    expect(codigo).not.toMatch(/showPicker|preventDefault|\.click\(\)/);
   });
 
-  it('no hay nada asíncrono entre el toque y el selector', () => {
-    expect(onClick).not.toMatch(/setTimeout|await |\.then\(|requestAnimationFrame/);
+  it('el click se escucha con un listener NATIVO (no depende de React)', () => {
+    expect(target).toContain("el.addEventListener('click', onClick)");
   });
 
-  it('si showPicker falla, queda la activación nativa como respaldo', () => {
-    expect(onClick).toContain('_SHOWPICKER_ERROR');
-    expect(onClick).toContain('nativeFallbackRef.current = true');
+  it('los controles del chat llevan sus marcas de auditoría', () => {
+    ['control="clip"', 'inputKind="gallery"', 'control="photo"', 'inputKind="photo"', 'control="video"', 'inputKind="video"', 'data-media-control="camera"']
+      .forEach((m) => expect(view).toContain(m));
+  });
+});
+
+describe('Prueba media nativa fuera del chat (?qa=1)', () => {
+  it('galería, foto y video con input nativo mínimo', () => {
+    expect(panel).toContain('label="ABRIR GALERÍA" kind="GALLERY" accept="image/*,video/*"');
+    expect(panel).toContain('label="TOMAR FOTO" kind="PHOTO" accept="image/*" capture="environment"');
+    expect(panel).toContain('label="GRABAR VIDEO" kind="VIDEO" accept="video/*" capture="environment"');
+    const probe = panel.slice(panel.indexOf('const NativeProbe'), panel.indexOf('export const MediaDiagPanel'));
+    expect(probe).not.toMatch(/showPicker|preventDefault|\.click\(\)|opacity-0/);
+  });
+
+  it('registra TAP y CHANGE de cada prueba, y una copia del clip para comparar', () => {
+    expect(panel).toContain('QA_${kind}_TAP');
+    expect(panel).toContain('QA_${kind}_CHANGE');
+    expect(panel).toContain('diag="QA_CHATCOPY"');
+  });
+
+  it('audita el DOM: renderizado, input, deshabilitado, rect, elemento en el punto, pointer-events y z-index', () => {
+    ['CONTROL_RENDERED', 'renderizado', 'deshabilitado', 'rect', 'enElPunto', 'peInput', 'z:', 'CLICK', 'POINTERCANCEL']
+      .forEach((m) => expect(panel).toContain(m));
   });
 });
 

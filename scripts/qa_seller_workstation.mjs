@@ -143,7 +143,7 @@ const $text = async (text, root = 'button', exact = false) => {
   return null;
 };
 
-async function chooserFlow(label, input, file, { expectAccept, expectCapture, expectMultiple, diagPrefix }) {
+async function chooserFlow(label, input, file, { expectAccept, expectCapture, expectMultiple, diagPrefix, tapStep }) {
   await clearDiag();
   let chooser = null;
   try {
@@ -156,7 +156,10 @@ async function chooserFlow(label, input, file, { expectAccept, expectCapture, ex
   const attrs = await input.evaluate((el) => ({ accept: el.accept, capture: el.getAttribute('capture'), multiple: el.multiple }));
   const detail = attrs ? `accept=${attrs.accept} capture=${attrs.capture || '-'} multiple=${attrs.multiple}` : '';
   const attrsOk = !attrs || (attrs.accept === expectAccept && (attrs.capture || null) === expectCapture && attrs.multiple === expectMultiple);
-  record(`${label}_OPENS_OK`, attrsOk, detail);
+  // El click tiene que haber llegado AL input (listener nativo) — es lo que en
+  // el teléfono nunca aparecía.
+  const tapSeen = !tapStep || (await diag()).includes(tapStep);
+  record(`${label}_OPENS_OK`, attrsOk && tapSeen, `${detail}${tapStep ? ` ${tapStep}:${tapSeen ? 'ok' : 'x'}` : ''}`);
   await chooser.accept([file]);
   const ready = await waitStep(`${diagPrefix}_ATTACHMENT_READY`, 20000);
   const steps = await diag();
@@ -238,6 +241,11 @@ try {
   const conv = await page.waitForSelector('::-p-text(Cliente Prueba Uno)');
   await tap(conv, 'conversación');
   await page.waitForSelector('textarea', { timeout: 8000 }).catch(() => {});
+  // La tarjeta de PRUEBA MEDIA NATIVA del modo QA va arriba y tapa la cabecera
+  // del chat (Tomar): se pliega para el flujo normal y se usa en la fase C2.
+  const toggleProbe = async () => { const b = await $text('prueba', 'button', true); if (b) { await tap(b, 'prueba'); await sleep(300); } };
+  await page.screenshot({ path: join(OUT_DIR, 'chat-modo-qa.png') }).catch(() => {});
+  if (await page.$('[data-qa-probe]')) await toggleProbe();
   const tomar = await $text('Tomar');
   if (tomar) {
     await tap(tomar, 'Tomar');
@@ -247,33 +255,54 @@ try {
 
   // ── C. MEDIA ─────────────────────────────────────────────────────────
   console.log('\n== C. Media ==');
-  const clip = await page.waitForSelector('[data-media-target="CLIP"] input[type=file]');
-  await chooserFlow('CLIP', clip, files.jpg, { expectAccept: 'image/*,video/*', expectCapture: null, expectMultiple: true, diagPrefix: 'CLIP' });
+  const clip = await page.waitForSelector('[data-media-input="gallery"]');
+  await chooserFlow('CLIP', clip, files.jpg, { expectAccept: 'image/*,video/*', expectCapture: null, expectMultiple: true, diagPrefix: 'CLIP', tapStep: 'CLIP_TAP' });
   results.GALLERY_IMAGE_OK = results.CLIP_UPLOAD_OK;
-  const clip2 = await page.$('[data-media-target="CLIP"] input[type=file]');
-  await chooserFlow('CLIP_PNG', clip2, files.png, { expectAccept: 'image/*,video/*', expectCapture: null, expectMultiple: true, diagPrefix: 'CLIP' });
-  const clip3 = await page.$('[data-media-target="CLIP"] input[type=file]');
-  await chooserFlow('CLIP_VIDEO', clip3, files.mp4, { expectAccept: 'image/*,video/*', expectCapture: null, expectMultiple: true, diagPrefix: 'CLIP' });
+  const clip2 = await page.$('[data-media-input="gallery"]');
+  await chooserFlow('CLIP_PNG', clip2, files.png, { expectAccept: 'image/*,video/*', expectCapture: null, expectMultiple: true, diagPrefix: 'CLIP', tapStep: 'CLIP_TAP' });
+  const clip3 = await page.$('[data-media-input="gallery"]');
+  await chooserFlow('CLIP_VIDEO', clip3, files.mp4, { expectAccept: 'image/*,video/*', expectCapture: null, expectMultiple: true, diagPrefix: 'CLIP', tapStep: 'CLIP_TAP' });
 
   const openCameraMenu = async () => {
     const cam = await page.waitForSelector('button[title="Cámara"]');
     await tap(cam, 'cámara');
-    await page.waitForSelector('[data-media-target="PHOTO"] input[type=file]', { timeout: 4000 });
+    await page.waitForSelector('[data-media-input="photo"]', { timeout: 4000 });
   };
   await openCameraMenu();
-  const photo = await page.$('[data-media-target="PHOTO"] input[type=file]');
-  await chooserFlow('CAMERA_PHOTO', photo, files.jpg, { expectAccept: 'image/*', expectCapture: 'environment', expectMultiple: false, diagPrefix: 'PHOTO' });
+  const photo = await page.$('[data-media-input="photo"]');
+  await chooserFlow('CAMERA_PHOTO', photo, files.jpg, { expectAccept: 'image/*', expectCapture: 'environment', expectMultiple: false, diagPrefix: 'PHOTO', tapStep: 'PHOTO_TAP' });
   // Al volver de la cámara la ventana recupera el foco y el menú se cierra.
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await sleep(300);
   await openCameraMenu();
-  const video = await page.$('[data-media-target="VIDEO"] input[type=file]');
-  await chooserFlow('CAMERA_VIDEO', video, files.mp4, { expectAccept: 'video/*', expectCapture: 'environment', expectMultiple: false, diagPrefix: 'VIDEO' });
+  const video = await page.$('[data-media-input="video"]');
+  await chooserFlow('CAMERA_VIDEO', video, files.mp4, { expectAccept: 'video/*', expectCapture: 'environment', expectMultiple: false, diagPrefix: 'VIDEO', tapStep: 'VIDEO_TAP' });
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
 
   const previews = await page.evaluate(() => document.querySelectorAll('form .w-16.h-16').length);
   const errores = await page.evaluate(() => document.querySelectorAll('form .w-16.h-16 .bg-red-500\\/70').length);
   record('ATTACHMENT_READY_OK', previews >= 5 && errores === 0, `previews=${previews} conError=${errores}`);
+
+  // ── C2. PRUEBA MEDIA NATIVA (fuera del chat) + copia del clip + DOM ──
+  console.log('\n== C2. Prueba nativa del panel QA ==');
+  await toggleProbe();
+  const nat = (k) => page.$(`input[data-qa-native="${k}"]`);
+  await chooserFlow('QA_NATIVE_GALLERY', await nat('GALLERY'), files.jpg, { expectAccept: 'image/*,video/*', expectCapture: null, expectMultiple: true, diagPrefix: 'CLIP', tapStep: 'QA_GALLERY_TAP' });
+  await chooserFlow('QA_NATIVE_PHOTO', await nat('PHOTO'), files.jpg, { expectAccept: 'image/*', expectCapture: 'environment', expectMultiple: false, diagPrefix: 'PHOTO', tapStep: 'QA_PHOTO_TAP' });
+  await chooserFlow('QA_NATIVE_VIDEO', await nat('VIDEO'), files.mp4, { expectAccept: 'video/*', expectCapture: 'environment', expectMultiple: false, diagPrefix: 'VIDEO', tapStep: 'QA_VIDEO_TAP' });
+  const copy = await page.$('[data-qa-probe] input[type=file]:not([data-qa-native])');
+  await chooserFlow('QA_CHATCOPY', copy, files.png, { expectAccept: 'image/*,video/*', expectCapture: null, expectMultiple: true, diagPrefix: 'CLIP', tapStep: 'QA_CHATCOPY_TAP' });
+  await toggleProbe();
+  // Foto del DOM desde la pastilla: el clip y la cámara reciben su propio toque.
+  await clearDiag();
+  const domBtn = await $text('DOM', 'button', true);
+  await tap(domBtn, 'DOM');
+  await sleep(300);
+  const dom = await diagFull();
+  const domClip = dom.find((e) => e.step === 'DOM_CLIP')?.data;
+  const domCam = dom.find((e) => e.step === 'DOM_CAMERA')?.data;
+  record('DOM_AUDIT_OK', !!domClip?.loRecibeElInput && !!domCam?.loRecibeElInput && domClip?.deshabilitado === false,
+    `clip: ${JSON.stringify(domClip)} · cámara: ${JSON.stringify(domCam)}`);
 
   // Enviar: Meta bloqueado (en el emulador no hay integración) → mensaje claro, sin logout.
   await clearDiag();
@@ -383,6 +412,9 @@ try {
 
   // ── F. ESTABILIDAD ───────────────────────────────────────────────────
   console.log('\n== F. Estabilidad ==');
+  // La tarjeta de prueba vuelve abierta al remontar la página; en la lista de
+  // conversaciones quedaría sobre los contactos, así que se pliega.
+  if (await page.$('[data-qa-probe]')) await toggleProbe();
   const soakEnd = Date.now() + SOAK_MIN * 60000;
   let vueltas = 0, soakFail = '';
   do {
@@ -394,7 +426,7 @@ try {
       if (!c) { soakFail = `no aparece ${name}`; break; }
       await tap(c, name);
       await page.waitForSelector('textarea', { timeout: 8000 }).catch(() => {});
-      const cl = await page.$('[data-media-target="CLIP"] input[type=file]');
+      const cl = await page.$('[data-media-input="gallery"]');
       await clearDiag();
       const [ch] = await Promise.all([page.waitForFileChooser({ timeout: 6000 }).catch(() => null), tap(cl, 'clip')]);
       if (!ch) { soakFail = `clip no abrió en la vuelta ${vueltas}`; break; }
