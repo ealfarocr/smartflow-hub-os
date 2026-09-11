@@ -33,7 +33,8 @@ import {
   errorCodeOf, outboundRejectionMessage, SESSION_DEAD_MESSAGE, type SellerErrorLayer,
 } from '@/utils/sellerErrors';
 import { isAdminRole } from '@/utils/permissions';
-import { recordMediaDiag } from '@/utils/mediaDiag';
+import { consumePickerReload, recordMediaDiag } from '@/utils/mediaDiag';
+import { extensionOf, mimeFor, prepareImage, safeFileName } from '@/utils/mediaPrep';
 import { MediaDiagPanel } from './MediaDiagPanel';
 import { FileTapTarget } from './FileTapTarget';
 import { AudioMessagePlayer } from './components/AudioMessagePlayer';
@@ -141,6 +142,15 @@ export const ConversationsPageView = () => {
   // primer tap todavía está esperando el permiso de micrófono (diálogo nativo).
   const isStartingRecorderRef           = useRef(false);
   const cancelPendingStartRef           = useRef(false);
+
+  // Android cerró la página mientras la cámara o la galería estaban abiertas
+  // (pasa en teléfonos con poca memoria): ese archivo ya no va a llegar. Se le
+  // dice al vendedor qué pasó en vez de dejarlo esperando una foto que no vuelve.
+  useEffect(() => {
+    const r = consumePickerReload();
+    if (r) addToast('El teléfono cerró la página mientras usabas la cámara o la galería. Probá de nuevo; si se repite, cerrá otras apps.', 'info');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!activeMembership?.tenantId) return;
@@ -375,22 +385,36 @@ export const ConversationsPageView = () => {
   // en QUÉ etapa y con qué código — para no volver a adivinar si fue la sesión,
   // la Rule de Storage o la red. getIdToken() sin forzar renueva el token solo si
   // venció: después de horas con la app abierta, la subida sale con uno vigente.
-  const uploadToStorage = async (file: File, diag: string): Promise<string> => {
+  // Subida REANUDABLE (uploadBytesResumable): en datos móviles un video de 10 MB
+  // en un solo request se cortaba sin reintento; así sube por partes, reintenta
+  // solo y reporta el avance (<diag>_UPLOAD_PROGRESS cada 25 %).
+  const uploadToStorage = async (file: File, diag: string, safeName: string): Promise<string> => {
     let etapa = 'AUTH';
     try {
-      const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+      const { ref, uploadBytesResumable, getDownloadURL } = await import('firebase/storage');
       const { storage, auth } = await import('@/lib/firebase');
       const user = auth.currentUser;
       if (!user) throw Object.assign(new Error('Sin sesión activa'), { code: 'auth/no-current-user' });
-      recordMediaDiag(`${diag}_AUTH_OK`);
+      recordMediaDiag(`${diag}_AUTH_OK`, { usuario: 'presente' });
       etapa = 'TOKEN_REFRESH';
       await user.getIdToken();
       recordMediaDiag(`${diag}_TOKEN_REFRESH_OK`);
       etapa = 'UPLOAD';
-      const path = `chat-attachments/${activeMembership!.tenantId}/${Date.now()}-${file.name}`;
+      const path = `chat-attachments/${activeMembership!.tenantId}/${Date.now()}-${safeName}`;
       const storageRef = ref(storage, path);
-      recordMediaDiag(`${diag}_UPLOAD_START`, { kb: Math.round(file.size / 1024), tipo: file.type || '(vacío)' });
-      await uploadBytes(storageRef, file, { contentType: file.type });
+      const contentType = mimeFor(file);
+      recordMediaDiag(`${diag}_UPLOAD_START`, { kb: Math.round(file.size / 1024), tipo: contentType });
+      await new Promise<void>((resolve, reject) => {
+        let lastBucket = 0;
+        uploadBytesResumable(storageRef, file, { contentType }).on('state_changed', (snap) => {
+          const pct = snap.totalBytes ? Math.floor((snap.bytesTransferred / snap.totalBytes) * 100) : 0;
+          const bucket = Math.floor(pct / 25) * 25;
+          if (bucket > lastBucket && bucket < 100) {
+            lastBucket = bucket;
+            recordMediaDiag(`${diag}_UPLOAD_PROGRESS`, { pct: bucket });
+          }
+        }, reject, () => resolve());
+      });
       recordMediaDiag(`${diag}_UPLOAD_OK`);
       etapa = 'DOWNLOAD_URL';
       const url = await getDownloadURL(storageRef);
@@ -449,13 +473,18 @@ export const ConversationsPageView = () => {
   const addPendingMedia = (file: File, source: 'PHOTO' | 'VIDEO' | 'GALLERY' | 'ATTACH') => {
     debugAttach(`${source}_FILE_RECEIVED`, { name: file.name, size: file.size, type: file.type });
     const diag = source === 'GALLERY' ? 'CLIP' : source;
-    recordMediaDiag(`${diag}_FILE_SELECTED`, { kb: Math.round(file.size / 1024), tipo: file.type || '(vacío)' });
+    const kind = classifyFile(file);
+    const limit = MEDIA_SIZE_LIMITS[kind];
+    // Solo metadatos: nunca el contenido ni el nombre original completo.
+    const safeName = safeFileName(file.name, mimeFor(file));
+    recordMediaDiag(`${diag}_FILE_SELECTED`, {
+      nombre: safeName === file.name ? 'seguro' : 'ajustado', ext: extensionOf(safeName),
+      tipo: file.type || `(vacío → ${mimeFor(file)})`, kb: Math.round(file.size / 1024),
+    });
     if (!activeMembership?.tenantId) {
       debugAttach(`${source}_ABORTED_NO_TENANT`);
       return;
     }
-    const kind = classifyFile(file);
-    const limit = MEDIA_SIZE_LIMITS[kind];
     // Instrumentación TEMPORAL solo-video: el reporte es que un video corto (10-20s) sigue
     // disparando el mensaje de límite. classifyFile() ya cubre video/mp4|quicktime|3gpp|webm
     // (vía startsWith('video/'), cualquier subtipo cae ahí) y usa extensión como respaldo, así
@@ -477,28 +506,44 @@ export const ConversationsPageView = () => {
         origin: source === 'VIDEO' ? 'camera' : source === 'GALLERY' ? 'gallery' : source,
       });
     }
-    if (file.size > limit) {
-      debugAttach(`${source}_REJECTED_TOO_LARGE`, { size: file.size, kind });
-      recordMediaDiag(`${diag}_REJECTED_TOO_LARGE`, { mb: +(file.size / 1048576).toFixed(1), tipo: kind });
-      addToast(`El archivo pesa ${(file.size / 1048576).toFixed(1)}MB. WhatsApp acepta máximo ${(limit / 1048576).toFixed(0)}MB para ${MEDIA_KIND_LABEL[kind]}.`, 'error');
-      return;
-    }
+    const rejectTooLarge = (size: number) => {
+      debugAttach(`${source}_REJECTED_TOO_LARGE`, { size, kind });
+      recordMediaDiag(`${diag}_REJECTED_TOO_LARGE`, { mb: +(size / 1048576).toFixed(1), tipo: kind });
+      addToast(`El archivo pesa ${(size / 1048576).toFixed(1)}MB. WhatsApp acepta máximo ${(limit / 1048576).toFixed(0)}MB para ${MEDIA_KIND_LABEL[kind]}.`, 'error');
+    };
+    // Las imágenes se miden DESPUÉS de comprimir (ver prepareImage): una foto de
+    // cámara de 6 MB queda en menos de 1 MB. Video y audio no se recomprimen.
+    if (kind !== 'image' && file.size > limit) { rejectTooLarge(file.size); return; }
 
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const localPreviewUrl = URL.createObjectURL(file);
-    setPendingMedia(prev => [...prev, { id, localPreviewUrl, filename: file.name, kind, status: 'uploading', remoteUrl: null }]);
+    setPendingMedia(prev => [...prev, { id, localPreviewUrl, filename: safeName, kind, status: 'uploading', remoteUrl: null }]);
     if (kind === 'video') debugAttach('VIDEO_PENDING_ADDED', { id, name: file.name, sizeMB: +(file.size / 1048576).toFixed(2) });
 
     // Se devuelve la promesa (no se usa acá) para que el <input> pueda esperar a que el
     // archivo termine de leerse antes de resetear su value — limpiarlo antes puede invalidar
     // el File en algunos navegadores móviles (mismo cuidado que ya se aplicaba acá).
     if (kind === 'video') debugAttach('VIDEO_UPLOAD_START', { id, name: file.name });
-    return uploadToStorage(file, diag)
-      .then(url => {
-        debugAttach(`${source}_ATTACHMENT_CREATED`, { url, name: file.name });
-        recordMediaDiag(`${diag}_ATTACHMENT_READY`, { tipo: kind });
+    const prepared = kind === 'image'
+      ? prepareImage(file).then((r) => {
+          if (r.compressed) recordMediaDiag(`${diag}_IMAGE_COMPRESSED`, { antesKb: r.beforeKb, despuesKb: r.afterKb });
+          else if (r.reason !== 'liviana') recordMediaDiag(`${diag}_IMAGE_AS_IS`, { motivo: r.reason });
+          return r.file;
+        })
+      : Promise.resolve(file);
+    return prepared
+      .then(async (toUpload) => {
+        if (toUpload.size > limit) {
+          rejectTooLarge(toUpload.size);
+          setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'error' } : m));
+          return;
+        }
+        const uploadName = toUpload === file ? safeName : safeFileName(toUpload.name, mimeFor(toUpload));
+        const url = await uploadToStorage(toUpload, diag, uploadName);
+        debugAttach(`${source}_ATTACHMENT_CREATED`, { url, name: uploadName });
+        recordMediaDiag(`${diag}_ATTACHMENT_READY`, { tipo: kind, kb: Math.round(toUpload.size / 1024) });
         if (kind === 'video') debugAttach('VIDEO_UPLOAD_SUCCESS', { id, mediaUrl: url });
-        setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'ready', remoteUrl: url } : m));
+        setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'ready', remoteUrl: url, filename: uploadName } : m));
       })
       .catch(err => {
         debugAttach(`${source}_UPLOAD_ERROR`, err);
@@ -604,10 +649,13 @@ export const ConversationsPageView = () => {
       // la interfaz no parezca congelada.
       await new Promise((r) => setTimeout(r, 0));
       const file = await recorder.stop();
-      voiceLog('VOICE_BLOB', { kb: Math.round(file.size / 1024), tipo: file.type });
+      voiceLog('VOICE_BLOB_CREATED', { kb: Math.round(file.size / 1024), tipo: file.type });
       if (file.size < 1200) { addToast('La nota de voz quedó muy corta.', 'info'); return; }
       etapa = 'upload';
-      const url = await uploadToStorage(file, 'VOICE'); // VOICE_UPLOAD_START … VOICE_DOWNLOAD_URL_OK
+      const url = await uploadToStorage(file, 'VOICE', safeFileName(file.name, mimeFor(file))); // VOICE_UPLOAD_START … VOICE_DOWNLOAD_URL_OK
+      // El audio ya está listo en SmartFlow ANTES de intentar Meta: si WhatsApp
+      // rechaza después, es el bloqueo externo, no la nota de voz.
+      voiceLog('VOICE_ATTACHMENT_READY', { kb: Math.round(file.size / 1024) });
       etapa = 'send';
       voiceLog('VOICE_SEND');
       reportOutboundResult(await sendMessage(activeConversation, '', 'advisor', activeMembership.tenantId, url, file.name));
@@ -1212,18 +1260,24 @@ ${plantilla}` : plantilla);
                       </FileTapTarget>
                       {/* CÁMARA — un icono con dos opciones: Tomar foto y Grabar video,
                           cada una con su propio input capture="environment" que el dedo
-                          toca directamente. El menú no se desmonta en el mismo toque: se
-                          cierra cuando la ventana recupera el foco al volver de la cámara. */}
+                          toca directamente. El menú se cierra cuando la ventana recupera
+                          el foco al volver de la cámara.
+
+                          El menú queda SIEMPRE MONTADO y se oculta con CSS: en Android el
+                          foco vuelve ANTES de que llegue el archivo (change). Antes el menú
+                          se desmontaba con ese foco, el input de Tomar foto / Grabar video
+                          desaparecía del DOM y la foto o el video se perdían sin ningún
+                          evento (reproducido en el QA local con el orden real). */}
                       <div data-media-control="camera" className={`relative shrink-0 ${isRecording ? 'hidden' : ''}`}>
                         <button type="button" onClick={() => { mediaUi('CAMERA_MENU_TAP'); setShowCameraChoice(v => !v); }}
                           title="Cámara"
                           className="w-9 h-9 flex items-center justify-center bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 rounded-xl transition-colors disabled:opacity-40">
                           <Camera className="w-4 h-4" />
                         </button>
-                        {showCameraChoice && (
                           <div
                             onClickCapture={() => window.addEventListener('focus', () => setShowCameraChoice(false), { once: true })}
-                            className="absolute bottom-full left-0 mb-2 w-40 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden">
+                            data-camera-menu={showCameraChoice ? 'abierto' : 'cerrado'}
+                            className={`absolute bottom-full left-0 mb-2 w-40 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-30 overflow-hidden ${showCameraChoice ? '' : 'hidden'}`}>
                             <FileTapTarget
                               diag="PHOTO"
                               control="photo"
@@ -1258,7 +1312,6 @@ ${plantilla}` : plantilla);
                               </span>
                             </FileTapTarget>
                           </div>
-                        )}
                       </div>
 
                       {/* Área central: texto (reposo) · grabando */}

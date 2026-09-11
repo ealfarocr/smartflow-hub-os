@@ -48,6 +48,12 @@ const files = {
   mp4: join(OUT_DIR, 'VID_20260910_101600.mp4'),
 };
 writeFileSync(files.jpg, JPG); writeFileSync(files.png, PNG); writeFileSync(files.mp4, MP4);
+// Videos de cámara reales pesan: 15 MB (entra, muestra el avance de la subida
+// reanudable) y 17 MB (pasa el límite de 16 MB de WhatsApp: aviso claro).
+files.mp4_15mb = join(OUT_DIR, 'VID_20260911_091500.mp4');
+files.mp4_17mb = join(OUT_DIR, 'VID_20260911_091700.mp4');
+writeFileSync(files.mp4_15mb, Buffer.concat([MP4.subarray(0, 24), Buffer.alloc(15 * 1024 * 1024, 7)]));
+writeFileSync(files.mp4_17mb, Buffer.concat([MP4.subarray(0, 24), Buffer.alloc(17 * 1024 * 1024, 7)]));
 
 const results = {};
 const notes = [];
@@ -69,6 +75,22 @@ await page.emulate({
 });
 const origin = new URL(BASE).origin;
 await browser.defaultBrowserContext().overridePermissions(origin, ['microphone', 'camera', 'clipboard-read', 'clipboard-sanitized-write']);
+
+// Foto de cámara realista (4000x3000, más de 5 MB): la codifica el propio Chromium.
+await page.goto('about:blank');
+const bigJpgB64 = await page.evaluate(async () => {
+  const c = document.createElement('canvas'); c.width = 4000; c.height = 3000;
+  const ctx = c.getContext('2d'); const img = ctx.createImageData(4000, 3000); const d = img.data;
+  for (let i = 0; i < d.length; i += 4) { d[i] = Math.random() * 255; d[i + 1] = (i >> 6) % 255; d[i + 2] = Math.random() * 255; d[i + 3] = 255; }
+  ctx.putImageData(img, 0, 0);
+  const b = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9));
+  const buf = new Uint8Array(await b.arrayBuffer()); let out = '';
+  for (let i = 0; i < buf.length; i += 0x8000) out += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  return btoa(out);
+});
+files.bigJpg = join(OUT_DIR, 'IMG_20260911_090000.jpg');
+writeFileSync(files.bigJpg, Buffer.from(bigJpgB64, 'base64'));
+console.log(`foto de cámara de prueba: ${(Buffer.from(bigJpgB64, 'base64').length / 1048576).toFixed(1)} MB`);
 
 const consoleErrors = [];
 await page.evaluateOnNewDocument(() => {
@@ -143,7 +165,7 @@ const $text = async (text, root = 'button', exact = false) => {
   return null;
 };
 
-async function chooserFlow(label, input, file, { expectAccept, expectCapture, expectMultiple, diagPrefix, tapStep }) {
+async function chooserFlow(label, input, file, { expectAccept, expectCapture, expectMultiple, diagPrefix, tapStep, focusFirst }) {
   await clearDiag();
   let chooser = null;
   try {
@@ -160,6 +182,9 @@ async function chooserFlow(label, input, file, { expectAccept, expectCapture, ex
   // el teléfono nunca aparecía.
   const tapSeen = !tapStep || (await diag()).includes(tapStep);
   record(`${label}_OPENS_OK`, attrsOk && tapSeen, `${detail}${tapStep ? ` ${tapStep}:${tapSeen ? 'ok' : 'x'}` : ''}`);
+  // Orden REAL de Android al volver de la cámara: la ventana recupera el foco
+  // ANTES de que llegue el archivo (change). Se reproduce ese orden.
+  if (focusFirst) { await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await sleep(150); }
   await chooser.accept([file]);
   const ready = await waitStep(`${diagPrefix}_ATTACHMENT_READY`, 20000);
   const steps = await diag();
@@ -266,22 +291,38 @@ try {
   const openCameraMenu = async () => {
     const cam = await page.waitForSelector('button[title="Cámara"]');
     await tap(cam, 'cámara');
-    await page.waitForSelector('[data-media-input="photo"]', { timeout: 4000 });
+    // El menú está siempre montado (oculto con CSS): se espera a que esté ABIERTO.
+    await page.waitForSelector('[data-camera-menu="abierto"]', { timeout: 4000 });
   };
   await openCameraMenu();
   const photo = await page.$('[data-media-input="photo"]');
-  await chooserFlow('CAMERA_PHOTO', photo, files.jpg, { expectAccept: 'image/*', expectCapture: 'environment', expectMultiple: false, diagPrefix: 'PHOTO', tapStep: 'PHOTO_TAP' });
+  await chooserFlow('CAMERA_PHOTO', photo, files.bigJpg, { expectAccept: 'image/*', expectCapture: 'environment', expectMultiple: false, diagPrefix: 'PHOTO', tapStep: 'PHOTO_TAP', focusFirst: true });
+  const comp = (await diagFull()).find((e) => e.step === 'PHOTO_IMAGE_COMPRESSED')?.data;
+  record('PHOTO_COMPRESSED_OK', !!comp && comp.despuesKb < 5 * 1024, comp ? `${comp.antesKb} KB → ${comp.despuesKb} KB` : 'no se comprimió');
   // Al volver de la cámara la ventana recupera el foco y el menú se cierra.
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await sleep(300);
   await openCameraMenu();
   const video = await page.$('[data-media-input="video"]');
-  await chooserFlow('CAMERA_VIDEO', video, files.mp4, { expectAccept: 'video/*', expectCapture: 'environment', expectMultiple: false, diagPrefix: 'VIDEO', tapStep: 'VIDEO_TAP' });
+  await chooserFlow('CAMERA_VIDEO', video, files.mp4_15mb, { expectAccept: 'video/*', expectCapture: 'environment', expectMultiple: false, diagPrefix: 'VIDEO', tapStep: 'VIDEO_TAP', focusFirst: true });
+  const prog = (await diagFull()).filter((e) => e.step === 'VIDEO_UPLOAD_PROGRESS').map((e) => e.data?.pct);
+  record('VIDEO_UPLOAD_PROGRESS_OK', prog.length > 0, `avance: ${prog.reverse().join('% → ')}%`);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
 
   const previews = await page.evaluate(() => document.querySelectorAll('form .w-16.h-16').length);
   const errores = await page.evaluate(() => document.querySelectorAll('form .w-16.h-16 .bg-red-500\\/70').length);
   record('ATTACHMENT_READY_OK', previews >= 5 && errores === 0, `previews=${previews} conError=${errores}`);
+
+  // Video de 17 MB (más que el límite de WhatsApp): aviso claro, sin subir, sin salir de la sesión.
+  await clearDiag(); await collectToasts();
+  const clipBig = await page.$('[data-media-input="gallery"]');
+  const [chBig] = await Promise.all([page.waitForFileChooser({ timeout: 6000 }), tap(clipBig, 'clip')]);
+  await chBig.accept([files.mp4_17mb]);
+  await sleep(1500);
+  const tBig = await collectToasts();
+  const stBig = await diag();
+  record('MEDIA_TOO_LARGE_IS_CLEAR', stBig.includes('CLIP_REJECTED_TOO_LARGE') && !stBig.includes('CLIP_UPLOAD_START')
+    && tBig.some((t) => t.includes('máximo 16MB para video')) && (await path()) === '/conversaciones', tBig.join(' | '));
 
   // ── C2. PRUEBA MEDIA NATIVA (fuera del chat) + copia del clip + DOM ──
   console.log('\n== C2. Prueba nativa del panel QA ==');
@@ -350,11 +391,11 @@ try {
   await sleep(2500);
   const stopBtn = await page.$('button[title="Enviar nota de voz"]');
   if (stopBtn) await tap(stopBtn, 'enviar nota');
-  const blob = await waitStep('VOICE_BLOB', 15000);
-  const upl = await waitStep('VOICE_UPLOAD_OK', 20000);
+  const blob = await waitStep('VOICE_BLOB_CREATED', 15000);
+  const upl = await waitStep('VOICE_ATTACHMENT_READY', 20000);
   const vs = await diag();
   record('VOICE_RECORD_OK', vs.includes('VOICE_TAP') && vs.includes('MIC_PERMISSION_OK') && recording && vs.includes('RECORDER_STOP') && blob,
-    ['VOICE_TAP', 'MIC_PERMISSION_OK', 'RECORDER_START', 'RECORDER_STOP', 'VOICE_BLOB'].map((s) => `${s}:${vs.includes(s) ? 'ok' : 'x'}`).join(' '));
+    ['VOICE_TAP', 'MIC_PERMISSION_OK', 'RECORDER_START', 'RECORDER_STOP', 'VOICE_BLOB_CREATED', 'VOICE_ATTACHMENT_READY'].map((s) => `${s}:${vs.includes(s) ? 'ok' : 'x'}`).join(' '));
   record('VOICE_UPLOAD_OK', upl, vs.filter((s) => s.startsWith('VOICE_')).join(','));
   await sleep(2500);
   record('NO_UNEXPECTED_LOGOUT_AFTER_VOICE', (await path()) === '/conversaciones');

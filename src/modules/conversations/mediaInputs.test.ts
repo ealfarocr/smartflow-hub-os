@@ -54,6 +54,14 @@ describe('El dedo toca directamente el input de archivo', () => {
   it('el menú de cámara no se desmonta en el mismo toque que abre la cámara', () => {
     expect(view).toContain("onClickCapture={() => window.addEventListener('focus'");
   });
+
+  // QA local con el orden REAL de Android (focus antes que change): con el menú
+  // desmontado por el focus, la foto y el video se perdían sin ningún evento.
+  it('el menú de cámara queda SIEMPRE montado y se oculta con CSS', () => {
+    expect(view).not.toContain('{showCameraChoice && (');
+    expect(view).toContain("${showCameraChoice ? '' : 'hidden'}");
+    expect(view).toContain('data-camera-menu=');
+  });
 });
 
 describe('El panel QA reconoce el navegador del teléfono', () => {
@@ -204,6 +212,30 @@ describe('Nada fijo tapa los controles del chat en el teléfono', () => {
   });
 });
 
+describe('Subida desde el teléfono: reanudable, con avance y fotos reducidas', () => {
+  it('sube por partes con reintento y reporta el avance', () => {
+    expect(view).toContain('uploadBytesResumable');
+    expect(view).toContain('_UPLOAD_PROGRESS');
+    expect(view).not.toMatch(/\buploadBytes\(/);
+  });
+
+  it('las fotos se reducen antes de medir el límite de 5 MB', () => {
+    expect(view).toContain('prepareImage(file)');
+    expect(view).toContain("kind !== 'image' && file.size > limit");
+    expect(view).toContain('_IMAGE_COMPRESSED');
+  });
+
+  it('nombre seguro y MIME de respaldo en la subida', () => {
+    expect(view).toContain('safeFileName(');
+    expect(view).toContain('contentType = mimeFor(file)');
+  });
+
+  it('la nota de voz queda lista (ATTACHMENT_READY) ANTES del intento a Meta', () => {
+    expect(view.indexOf("voiceLog('VOICE_ATTACHMENT_READY'")).toBeGreaterThan(-1);
+    expect(view.indexOf("voiceLog('VOICE_ATTACHMENT_READY'")).toBeLessThan(view.indexOf("voiceLog('VOICE_SEND')"));
+  });
+});
+
 describe('Cada etapa de subida queda marcada en el panel QA', () => {
   it('auth, token, subida, URL y adjunto listo', () => {
     ['_AUTH_OK', '_TOKEN_REFRESH_OK', '_UPLOAD_START', '_UPLOAD_OK', '_DOWNLOAD_URL_OK', '_FAILED_AT', '_ATTACHMENT_READY', '_FILE_SELECTED']
@@ -211,7 +243,7 @@ describe('Cada etapa de subida queda marcada en el panel QA', () => {
   });
 
   it('la nota de voz separa grabación, subida y envío', () => {
-    ['VOICE_TAP', 'MIC_PERMISSION_OK', 'RECORDER_START', 'RECORDER_STOP', 'VOICE_BLOB', "uploadToStorage(file, 'VOICE')", "etapa = 'send'"]
+    ['VOICE_TAP', 'MIC_PERMISSION_OK', 'RECORDER_START', 'RECORDER_STOP', 'VOICE_BLOB_CREATED', "uploadToStorage(file, 'VOICE'", 'VOICE_ATTACHMENT_READY', "etapa = 'send'"]
       .forEach((s) => expect(view).toContain(s));
   });
 });

@@ -55,7 +55,9 @@ function snapshotControls(): ControlsSnapshot {
  */
 function auditControl(control: HTMLElement, x?: number, y?: number) {
   const r = control.getBoundingClientRect();
-  const input = control.querySelector<HTMLElement>('[data-media-input]') ?? control.querySelector<HTMLElement>('button');
+  // Solo hijos DIRECTOS: el 📷 contiene el menú (siempre montado) con los inputs
+  // de Tomar foto / Grabar video; lo que se audita del 📷 es su propio botón.
+  const input = control.querySelector<HTMLElement>(':scope > [data-media-input]') ?? control.querySelector<HTMLElement>(':scope > button');
   const px = x ?? r.left + r.width / 2;
   const py = y ?? r.top + r.height / 2;
   const top = document.elementFromPoint(px, py);

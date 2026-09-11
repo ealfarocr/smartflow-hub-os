@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { recordMediaDiag } from '@/utils/mediaDiag';
+import { clearPickerOpen, markPickerOpen, recordMediaDiag } from '@/utils/mediaDiag';
 
 export type MediaControl = 'clip' | 'photo' | 'video';
 export type MediaInputKind = 'gallery' | 'photo' | 'video';
@@ -51,6 +51,11 @@ export const FileTapTarget = ({
         accept: el.accept,
         capture: el.getAttribute('capture') || 'ninguno',
       });
+      // Marca de "selector abierto" para detectar si Android recarga la página
+      // mientras la cámara está abierta. Si la página NO se recargó, la ventana
+      // recupera el foco y la marca se borra (con margen para que llegue el change).
+      markPickerOpen(diag);
+      window.addEventListener('focus', () => setTimeout(clearPickerOpen, 5000), { once: true });
       let reported = false;
       const opened = (how: string) => {
         if (reported) return;
@@ -60,7 +65,7 @@ export const FileTapTarget = ({
       window.addEventListener('blur', () => opened('blur'), { once: true });
       document.addEventListener('visibilitychange', () => { if (document.hidden) opened('hidden'); }, { once: true });
     };
-    const onCancel = () => recordMediaDiag(`${diag}_CANCEL`);
+    const onCancel = () => { clearPickerOpen(); recordMediaDiag(`${diag}_CANCEL`); };
     el.addEventListener('click', onClick);
     el.addEventListener('cancel', onCancel);
     return () => {
@@ -83,6 +88,7 @@ export const FileTapTarget = ({
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
         onChange={async (e) => {
           const files = e.target.files;
+          clearPickerOpen();
           recordMediaDiag(`${diag}_CHANGE`, { archivos: files?.length ?? 0 });
           if (files?.length) await onFiles(files);
           e.target.value = '';

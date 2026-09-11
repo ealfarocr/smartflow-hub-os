@@ -18,13 +18,68 @@ export interface MediaDiagEvent {
   data?: Record<string, unknown>;
 }
 
-let events: MediaDiagEvent[] = [];
+// El registro se guarda también en sessionStorage (solo esta pestaña, solo
+// metadatos): si Android cierra la página mientras la cámara está abierta —pasa
+// en teléfonos con poca memoria— el diagnóstico sobrevive a la recarga.
+const STORE_KEY = 'smartflow_media_diag';
+const PICKER_KEY = 'smartflow_picker_open';
+
+function loadStored(): MediaDiagEvent[] {
+  try {
+    const raw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORE_KEY) : null;
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.slice(0, MAX_EVENTS) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persist(): void {
+  try { sessionStorage.setItem(STORE_KEY, JSON.stringify(events)); } catch { /* sin almacenamiento: queda en memoria */ }
+}
+
+let events: MediaDiagEvent[] = loadStored();
 const listeners = new Set<() => void>();
 
 export function recordMediaDiag(step: string, data?: Record<string, unknown>): void {
   const at = new Date().toLocaleTimeString('es-CR', { hour12: false });
   events = [{ at, step, data }, ...events].slice(0, MAX_EVENTS);
+  persist();
   listeners.forEach((l) => l());
+}
+
+/**
+ * Selector o cámara abiertos: se anota en sessionStorage y se borra cuando
+ * vuelve el archivo o se cancela. Si al arrancar la app la marca sigue ahí, la
+ * página se recargó mientras el selector estaba abierto: Android la cerró
+ * (falta de memoria) y ese archivo no va a llegar.
+ */
+export function markPickerOpen(control: string): void {
+  try { sessionStorage.setItem(PICKER_KEY, JSON.stringify({ control, at: Date.now() })); } catch { /* sin almacenamiento */ }
+}
+
+export function clearPickerOpen(): void {
+  try { sessionStorage.removeItem(PICKER_KEY); } catch { /* sin almacenamiento */ }
+}
+
+let reloadedDuringPicker: { control: string; segundos: number } | null = null;
+
+function detectReloadDuringPicker(): void {
+  try {
+    const raw = sessionStorage.getItem(PICKER_KEY);
+    if (!raw) return;
+    sessionStorage.removeItem(PICKER_KEY);
+    const { control, at } = JSON.parse(raw) as { control: string; at: number };
+    reloadedDuringPicker = { control, segundos: Math.round((Date.now() - at) / 1000) };
+    recordMediaDiag('PAGE_RELOADED_WHILE_PICKER_OPEN', reloadedDuringPicker);
+  } catch { /* marca ilegible: se ignora */ }
+}
+
+/** Una sola vez: el chat avisa al vendedor que la cámara cerró la página. */
+export function consumePickerReload(): { control: string; segundos: number } | null {
+  const r = reloadedDuringPicker;
+  reloadedDuringPicker = null;
+  return r;
 }
 
 export function getMediaDiag(): MediaDiagEvent[] {
@@ -45,6 +100,7 @@ export function subscribeMediaDiag(listener: () => void): () => void {
 
 export function clearMediaDiag(): void {
   events = [];
+  persist();
   listeners.forEach((l) => l());
 }
 
@@ -70,6 +126,7 @@ export function isQaModeEnabled(search: string = typeof window !== 'undefined' ?
  */
 export function captureQaFlagFromUrl(): void {
   isQaModeEnabled();
+  detectReloadDuringPicker();
 }
 
 export interface DeviceEnvironment {
