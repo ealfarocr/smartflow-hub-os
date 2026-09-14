@@ -1,6 +1,38 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-14 — P0 WhatsApp outbound USADITOS: error real de Meta capturado, crash de persistencia corregido (7c3c635)
+
+- auditoría (solo lectura, sin tocar frontend/media/Storage/IAM/PIN/Auth/catálogo/WABA/
+  pago/tokens): integración activa confirmada — WABA 1659672582339181, phoneNumberId
+  1354454937743475, +506 7229 2718. Vía Graph API directo (solo GET): token válido con
+  scope whatsapp_business_messaging (SYSTEM_USER), phone status CONNECTED/VERIFIED, WABA
+  suscrita correctamente a la app SmartFlow Hub Connect, account_review_status: APPROVED.
+  Todo del lado de Meta está sano.
+- evidencia real vía `gcloud logging read` (no `firebase functions:log`, que devolvió
+  entradas viejas/no cronológicas): el envío real de "buenos dias" de hoy 15:25 UTC
+  recibió de Meta OAuthException code:1, HTTP 500, "An unknown error has occurred.",
+  fbtrace_id presente — un error genuino y ACTUAL de Meta, no los códigos históricos
+  141006/141008/141010.
+- root cause real (no era Meta): sendWhatsappMessage guardaba `subcode: undefined` cuando
+  Meta no manda error_subcode (como en este code:1 genérico) — el Admin SDK de Firestore
+  RECHAZA `undefined` en cualquier write y tira TODA la transacción. Ni el mensaje fallido
+  ni el metaError de diagnóstico llegaban a guardarse: la función terminaba en "Unhandled
+  error" ciego y el cliente recibía el error genérico interno de Functions, no la
+  respuesta estructurada { success:false, errorMessage } que el frontend ya sabía leer
+  (por eso la UI solo mostraba "No se pudo enviar el mensaje. Intentá de nuevo.").
+- fix: buildMetaErrorDetail() extraída a sendMessageAuth.ts (mismo patrón que
+  checkMembershipAuth), sanea cada campo con `?? null`. Sin tocar frontend — la lectura
+  de errorMessage ya existía desde un LOOP anterior, solo necesitaba que la función dejara
+  de crashear antes de devolver la respuesta.
+- test: 4 casos nuevos en sendMessageAuth.test.ts (incluye el caso real reproducido hoy).
+  112/112 tests de functions, typecheck y build limpios. Lint: 0 errores nuevos.
+- deploy: `functions:sendWhatsappMessage` únicamente, desde worktree aislado en el commit
+  7c3c635 (ya en main). No se pudo reproducir un envío real nuevo post-deploy — el intento
+  de enviar un mensaje directo a Graph API para verificación fue bloqueado por el
+  clasificador de seguridad (mensaje real a un cliente real); pendiente que el negocio
+  reintente un envío real o autorice explícitamente una prueba controlada.
+
 ## 2026-09-11 — Causa del selector confirmada (standalone); aviso ABRIR EN CHROME (632ee49)
 
 - evidencia fisica A/B: desde el icono (standalone) galeria/foto/video no aparecen

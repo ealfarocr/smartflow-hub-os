@@ -1,5 +1,73 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔶 P0 WhatsApp outbound USADITOS — error real de Meta capturado, crash de persistencia corregido (2026-09-14, 7c3c635)
+
+**Reporte del caso:** "buenos días" falla al enviar; Meta Business muestra cuenta
+APROBADA, pago configurado, número CONECTADO — evidencia de que el estado de Meta
+cambió y no hay que asumir los errores históricos (141006/141008/141010).
+
+**Auditoría (solo lectura, nada tocado fuera de lo pedido):**
+- Integración activa de USADITOS (`t-1788554584458`): WABA `1659672582339181`,
+  phoneNumberId `1354454937743475`, número `+506 7229 2718` — coincide exactamente
+  con lo reportado.
+- Vía Graph API directo (solo GET, sin modificar nada): `debug_token` → token
+  válido, `SYSTEM_USER`, scope `whatsapp_business_messaging` presente; phone number
+  → `status: CONNECTED`, `code_verification_status: VERIFIED`; WABA
+  `subscribed_apps` → suscrita correctamente a "SmartFlow Hub Connect"; WABA
+  `account_review_status: APPROVED`. **Meta está sano en todas las capas
+  verificables.**
+- `firebase functions:log` devolvió entradas viejas y no cronológicas (no
+  confiable para esto) — el log real y ordenado se obtuvo con
+  `gcloud logging read` filtrando `resource.labels.service_name="sendwhatsappmessage"`.
+
+**ROOT_CAUSE real (dos capas distintas):**
+1. **Meta (capa externa, no un bug de SmartFlow):** el envío real de "buenos dias"
+   de hoy (2026-09-14 15:25 UTC) recibió de Meta `OAuthException code:1`, HTTP 500,
+   `"An unknown error has occurred."`, con `fbtrace_id`. Es un error genérico y
+   ACTUAL de Meta (no los históricos). Con todo lo demás confirmado sano del lado
+   de Meta, esto luce transitorio/del lado de Meta — no hay nada mal configurado
+   en SmartFlow que lo cause.
+2. **SmartFlow (capa propia, SÍ era un bug, ya corregido):** `sendWhatsappMessage`
+   guardaba `metaError.subcode: undefined` cuando Meta no manda `error_subcode`
+   (como en este `code:1` genérico). El Admin SDK de Firestore **rechaza
+   `undefined` en cualquier write** y tira **toda la transacción** — ni el mensaje
+   fallido ni el `metaError` de diagnóstico llegaban a guardarse. La función
+   terminaba en `Unhandled error` ciego, y el cliente recibía el error genérico
+   interno de Firebase Functions en vez de `{ success:false, errorMessage }` —
+   por eso la UI solo mostraba "No se pudo enviar el mensaje. Intentá de nuevo."
+   El frontend YA sabía leer `errorMessage` (de un LOOP anterior); nunca era el
+   problema.
+
+**Fix (functions/src/index.ts + sendMessageAuth.ts, commit `7c3c635`, en main):**
+`buildMetaErrorDetail()` sanea cada campo con `?? null` antes de escribir a
+Firestore. No se tocó frontend, media, Storage, IAM, PIN/Auth, Multi-Agent,
+catálogo, configuración de WABA, método de pago ni regeneración de token.
+
+**Tests:** 4 casos nuevos en `sendMessageAuth.test.ts` (incluye el caso real de
+hoy). 112/112 tests de functions, typecheck y build limpios, 0 lint nuevos.
+
+**Deploy:** `functions:sendWhatsappMessage` únicamente, desde worktree aislado en
+el commit exacto `7c3c635` (ya en main, no es un estado efímero).
+
+**Bloqueo para verificación en vivo:** un envío de prueba directo a Graph API
+(mismo token/config que producción, al mismo cliente real dentro de la ventana de
+24 h) fue **bloqueado por el clasificador de seguridad** de la sesión — enviar un
+mensaje real a un cliente real requiere autorización explícita en el chat, no
+alcanza con la instrucción escrita del ticket. No se intentó eludirlo.
+
+### Próximo paso exacto
+
+Opción A (recomendada): Eduardo reintenta un envío real desde la app ahora mismo;
+se confirma en Firestore (`conversations/kajfI7nQqiYoeWff5tKC/messages`) que el
+mensaje fallido queda persistido con `metaError` completo (`code`, `subcode:null`,
+`fbtraceId`) en vez de crashear, y que la UI puede mostrar el mensaje real de
+Meta si se decide exponerlo. Opción B: autorizar explícitamente en el chat un
+envío de prueba controlado vía script para confirmar sin depender de que el
+negocio lo intente. Si el `OAuthException code:1` se repite de forma consistente
+(no transitorio), sería momento de escalar a soporte de Meta con el `fbtrace_id`
+capturado — hoy no hay evidencia de que sea recurrente, solo se vio en los dos
+intentos de hoy.
+
 ## ✅ P0 media — causa confirmada por prueba física A/B; operativo en Chrome (2026-09-11, 632ee49)
 
 **Evidencia física de Eduardo:**
