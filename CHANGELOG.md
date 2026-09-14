@@ -1,6 +1,22 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-14 — P0 WhatsApp outbound USADITOS: fix verificado en producción; bloqueo confirmado del lado de Meta
+
+- verificación post-deploy: envío real "Prueba SmartFlow Meta 01" (11:31:34 AM CR).
+  Firestore guardó `status:"failed"` con `metaError` completo
+  (`{httpStatus:500,type:"OAuthException",code:1,subcode:null,fbtraceId:"ALvfaLHBfdjM2FqGvm5xWzi"}`)
+  — sin crash. `gcloud logging read` confirma cero entradas `severity>=ERROR` en
+  esa ventana. SMARTFLOW_FUNCTION_FIXED = YES.
+- pero el mismo `OAuthException code:1` volvió a aparecer — tercera vez, dos días
+  distintos, tres `fbtrace_id` distintos, con token/phone/WABA/cuenta confirmados
+  sanos en todas las capas verificables. META_ERROR_PERSISTS = YES: el bloqueo
+  actual es 100% de Meta, no queda código de SmartFlow por cambiar para esto.
+- next: escalar a soporte de Meta/WhatsApp Business citando WABA
+  1659672582339181, phone 1354454937743475 y los 4 fbtrace_id acumulados
+  (AFVPOKJS5dQKL2AQ03xW_MJ, Aa5fmtGO2Lg-GvECTz15NS6, Aosj6mgEU-FaB_PJA5SycIU,
+  ALvfaLHBfdjM2FqGvm5xWzi).
+
 ## 2026-09-14 — P0 WhatsApp outbound USADITOS: error real de Meta capturado, crash de persistencia corregido (7c3c635)
 
 - auditoría (solo lectura, sin tocar frontend/media/Storage/IAM/PIN/Auth/catálogo/WABA/

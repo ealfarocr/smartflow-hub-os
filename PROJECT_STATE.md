@@ -1,5 +1,33 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔴 P0 WhatsApp outbound USADITOS — fix de SmartFlow VERIFICADO; bloqueo ahora es 100% de Meta (2026-09-14, 7c3c635)
+
+**Verificación post-deploy (envío real "Prueba SmartFlow Meta 01", 11:31:34 AM CR):**
+confirmado en Firestore (`conversations/kajfI7nQqiYoeWff5tKC/messages/GQFQxC6V5jVtcoHqTVBr`)
+y correlacionado con `gcloud logging read` — la función **ya no crashea**: guardó
+`status:"failed"` con `metaError` completo
+(`{httpStatus:500,type:"OAuthException",code:1,subcode:null,fbtraceId:"ALvfaLHBfdjM2FqGvm5xWzi"}`),
+cero entradas `severity>=ERROR` en el log de esa ventana. **SMARTFLOW_FUNCTION_FIXED.**
+
+Pero el mismo `OAuthException code:1` volvió a aparecer — van **tres** intentos con
+el mismo error en al menos dos días distintos (2026-09-09 y 2026-09-14), cada uno
+con su propio `fbtrace_id`. Con token/phone/WABA/cuenta confirmados sanos en
+todas las capas verificables desde acá, este bloqueo es **de Meta, no de
+SmartFlow** — no hay más código que cambiar de este lado por este error.
+
+### Próximo paso exacto
+
+Escalar a soporte de Meta/WhatsApp Business (Business Manager → Meta Business
+Help Center, o el canal de partner técnico) citando WABA `1659672582339181`,
+phone `1354454937743475`, y los `fbtrace_id`: `AFVPOKJS5dQKL2AQ03xW_MJ`,
+`Aa5fmtGO2Lg-GvECTz15NS6`, `Aosj6mgEU-FaB_PJA5SycIU`, `ALvfaLHBfdjM2FqGvm5xWzi`.
+Meta puede resolver internamente la causa exacta detrás de un `code:1` genérico
+usando esos trace IDs — no es visible desde la respuesta de la API. No hay
+acción de código pendiente en SmartFlow para este P0.
+
+<details>
+<summary>Historial de la investigación (auditoría, root cause, fix — 2026-09-14)</summary>
+
 ## 🔶 P0 WhatsApp outbound USADITOS — error real de Meta capturado, crash de persistencia corregido (2026-09-14, 7c3c635)
 
 **Reporte del caso:** "buenos días" falla al enviar; Meta Business muestra cuenta
@@ -55,18 +83,13 @@ el commit exacto `7c3c635` (ya en main, no es un estado efímero).
 mensaje real a un cliente real requiere autorización explícita en el chat, no
 alcanza con la instrucción escrita del ticket. No se intentó eludirlo.
 
-### Próximo paso exacto
+### Próximo paso exacto (superado — ver el resumen arriba, fuera del collapse)
 
-Opción A (recomendada): Eduardo reintenta un envío real desde la app ahora mismo;
-se confirma en Firestore (`conversations/kajfI7nQqiYoeWff5tKC/messages`) que el
-mensaje fallido queda persistido con `metaError` completo (`code`, `subcode:null`,
-`fbtraceId`) en vez de crashear, y que la UI puede mostrar el mensaje real de
-Meta si se decide exponerlo. Opción B: autorizar explícitamente en el chat un
-envío de prueba controlado vía script para confirmar sin depender de que el
-negocio lo intente. Si el `OAuthException code:1` se repite de forma consistente
-(no transitorio), sería momento de escalar a soporte de Meta con el `fbtrace_id`
-capturado — hoy no hay evidencia de que sea recurrente, solo se vio en los dos
-intentos de hoy.
+~~Opción A: Eduardo reintenta un envío real desde la app...~~ — hecho, ver
+verificación arriba. El resultado fue `OAuthException code:1` otra vez → se
+confirmó que el bloqueo es de Meta, no de SmartFlow.
+
+</details>
 
 ## ✅ P0 media — causa confirmada por prueba física A/B; operativo en Chrome (2026-09-11, 632ee49)
 
