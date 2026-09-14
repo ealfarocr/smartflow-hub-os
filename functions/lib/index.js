@@ -1991,13 +1991,9 @@ exports.sendWhatsappMessage = (0, https_1.onCall)({
             // code/subcode/type/fbtrace_id, cada fallo real había que ir a
             // reconstruirlo a mano desde Cloud Logging. Ahora queda en el propio
             // documento del mensaje.
-            metaErrorDetail = {
-                httpStatus: metaResponse.status,
-                type: bodyData.error?.type,
-                code: bodyData.error?.code,
-                subcode: bodyData.error?.error_subcode,
-                fbtraceId: bodyData.error?.fbtrace_id,
-            };
+            // Ver buildMetaErrorDetail (sendMessageAuth.ts) — P0 USADITOS
+            // 2026-09-14: un campo undefined acá tiraba abajo toda la transacción.
+            metaErrorDetail = (0, sendMessageAuth_1.buildMetaErrorDetail)(metaResponse.status, bodyData.error);
             console.error('[Diagnostic] Meta API Error:', JSON.stringify({ tenantId, phoneNumberId, to: messagePayload.to, ...metaErrorDetail, message: bodyData.error?.message }));
             throw new Error(bodyData.error?.message || 'Error en respuesta de Meta Graph API');
         }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkMembershipAuth, checkConversationTenantMatch } from './sendMessageAuth';
+import { checkMembershipAuth, checkConversationTenantMatch, buildMetaErrorDetail } from './sendMessageAuth';
 
 describe('checkMembershipAuth — fix outbound SuperAdmin (LOOP)', () => {
   it('1. SuperAdmin sin membership activa -> ALLOW', () => {
@@ -50,6 +50,40 @@ describe('checkConversationTenantMatch — guard cross-tenant (se preserva, apli
     expect(membershipStep.allowed).toBe(true); // pasa el checkpoint 1 (bypass)
     const tenantStep = checkConversationTenantMatch('t-otro-negocio', 't-usaditos');
     expect(tenantStep).toBe(false); // pero el checkpoint 2 lo bloquea igual
+  });
+});
+
+describe('buildMetaErrorDetail — P0 USADITOS 2026-09-14: subcode ausente no debe crashear la persistencia', () => {
+  it('Meta manda error_subcode -> se preserva tal cual', () => {
+    const detail = buildMetaErrorDetail(400, { type: 'OAuthException', code: 190, error_subcode: 463, fbtrace_id: 'abc123' });
+    expect(detail).toEqual({ httpStatus: 400, type: 'OAuthException', code: 190, subcode: 463, fbtraceId: 'abc123' });
+  });
+
+  it('reproduce el caso real de hoy: OAuthException code:1 sin error_subcode -> subcode:null, nunca undefined', () => {
+    const detail = buildMetaErrorDetail(500, { type: 'OAuthException', code: 1, fbtrace_id: 'Aosj6mgEU-FaB_PJA5SycIU' });
+    expect(detail.subcode).toBe(null);
+    expect(detail.subcode).not.toBe(undefined);
+    expect(detail).toEqual({ httpStatus: 500, type: 'OAuthException', code: 1, subcode: null, fbtraceId: 'Aosj6mgEU-FaB_PJA5SycIU' });
+  });
+
+  it('bodyData.error viene undefined (respuesta HTTP sin cuerpo de error parseable) -> todos los campos quedan null, nunca undefined', () => {
+    const detail = buildMetaErrorDetail(500, undefined);
+    expect(Object.values(detail)).not.toContain(undefined);
+    expect(detail).toEqual({ httpStatus: 500, type: null, code: null, subcode: null, fbtraceId: null });
+  });
+
+  it('ningún campo del resultado es undefined bajo ninguna combinación — es justamente lo que Firestore rechaza', () => {
+    const cases = [
+      { type: 'X', code: 1 },
+      { code: 1, error_subcode: 2 },
+      {},
+    ];
+    for (const c of cases) {
+      const detail = buildMetaErrorDetail(500, c);
+      for (const v of Object.values(detail)) {
+        expect(v).not.toBe(undefined);
+      }
+    }
   });
 });
 

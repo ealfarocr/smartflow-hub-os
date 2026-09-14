@@ -20,7 +20,7 @@ import {
   PIN_MAX_ATTEMPTS, PIN_LOCKOUT_MS, hashPin, verifyPinHash, generatePin, normalizeLoginHandle,
   PIN_LOGIN_GENERIC_ERROR, DUMMY_PIN_SALT, DUMMY_PIN_HASH,
 } from './pinAuth';
-import { checkMembershipAuth, checkConversationTenantMatch } from './sendMessageAuth';
+import { checkMembershipAuth, checkConversationTenantMatch, buildMetaErrorDetail, MetaErrorDetail } from './sendMessageAuth';
 import { checkVendorPinAuth, checkPinLoginAllowed } from './vendorPinAuth';
 import { shouldApplyStatusUpdate } from './messageStatusUpdate';
 import { checkTenantAdminAuth } from './tenantAdminAuth';
@@ -2034,7 +2034,7 @@ export const sendWhatsappMessage = onCall({
   // NUNCA el access token ni el App Secret — se persiste en Firestore para que
   // un fallo real (como el de USADITOS) sea diagnosticable sin tener que ir a
   // Cloud Logging cada vez. null cuando el envío es exitoso.
-  let metaErrorDetail: { httpStatus: number; type?: string; code?: number; subcode?: number; fbtraceId?: string } | null = null;
+  let metaErrorDetail: MetaErrorDetail | null = null;
 
   try {
     console.log(`Enviando mensaje HTTP a Meta para tenant ${tenantId}...`);
@@ -2111,13 +2111,9 @@ export const sendWhatsappMessage = onCall({
       // code/subcode/type/fbtrace_id, cada fallo real había que ir a
       // reconstruirlo a mano desde Cloud Logging. Ahora queda en el propio
       // documento del mensaje.
-      metaErrorDetail = {
-        httpStatus: metaResponse.status,
-        type: bodyData.error?.type,
-        code: bodyData.error?.code,
-        subcode: bodyData.error?.error_subcode,
-        fbtraceId: bodyData.error?.fbtrace_id,
-      };
+      // Ver buildMetaErrorDetail (sendMessageAuth.ts) — P0 USADITOS
+      // 2026-09-14: un campo undefined acá tiraba abajo toda la transacción.
+      metaErrorDetail = buildMetaErrorDetail(metaResponse.status, bodyData.error);
       console.error('[Diagnostic] Meta API Error:', JSON.stringify({ tenantId, phoneNumberId, to: messagePayload.to, ...metaErrorDetail, message: bodyData.error?.message }));
       throw new Error(bodyData.error?.message || 'Error en respuesta de Meta Graph API');
     }

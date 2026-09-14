@@ -46,3 +46,34 @@ export function checkMembershipAuth(input: MembershipAuthInput): MembershipAuthR
 export function checkConversationTenantMatch(conversationTenantId: string, requestedTenantId: string): boolean {
   return conversationTenantId === requestedTenantId;
 }
+
+export interface MetaErrorDetail {
+  httpStatus: number;
+  type: string | null;
+  code: number | null;
+  subcode: number | null;
+  fbtraceId: string | null;
+}
+
+/**
+ * Sanea el error crudo de Meta Graph API antes de persistirlo en Firestore.
+ * El Admin SDK RECHAZA cualquier campo `undefined` en un write y tira TODA
+ * la transacción (no solo ese campo) — Meta no siempre manda error_subcode
+ * (p.ej. OAuthException code:1, el genérico "An unknown error has
+ * occurred"), así que sin este saneo ese campo quedaba `undefined` y el
+ * mensaje fallido ni siquiera llegaba a guardarse (P0 USADITOS
+ * 2026-09-14: la función terminaba en "Unhandled error" en vez de devolver
+ * el detalle real). `null` sí es un valor válido para Firestore.
+ */
+export function buildMetaErrorDetail(
+  httpStatus: number,
+  error: { type?: string; code?: number; error_subcode?: number; fbtrace_id?: string } | undefined
+): MetaErrorDetail {
+  return {
+    httpStatus,
+    type: error?.type ?? null,
+    code: error?.code ?? null,
+    subcode: error?.error_subcode ?? null,
+    fbtraceId: error?.fbtrace_id ?? null,
+  };
+}
