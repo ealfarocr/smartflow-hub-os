@@ -1,5 +1,41 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔴 P0 WhatsApp outbound USADITOS — causa exacta confirmada: WABA BLOCKED por error 141008 (2026-09-14, auditoría final solo lectura)
+
+**Fuente:** `GET /{phone}?fields=...,health_status` (Graph v21.0, solo lectura, tokens
+de producción leídos de Firestore sin imprimirse). Una auditoría intermedia de hoy
+concluyó por error que "no existe un campo `can_send_message`" — sí existe dentro de
+`health_status` y es el que da la respuesta.
+
+| Entidad | USADITOS (falla) | Poder Ancestral (envía OK) |
+|---|---|---|
+| **total** | **BLOCKED** | LIMITED |
+| PHONE_NUMBER | LIMITED (display name sin aprobar) | AVAILABLE |
+| **WABA** | **BLOCKED — 141008 "The WABA status is not active." → contactar soporte de WhatsApp** | AVAILABLE |
+| BUSINESS | LIMITED — 141010 sin verificación | LIMITED — 141010 (idéntico, no bloquea) |
+| APP 26569977219364152 | AVAILABLE | AVAILABLE |
+
+- El error de pago 141006 que aparecía el 2026-09-09 **ya no aparece**: el método de
+  pago quedó resuelto. Lo único que bloquea ahora es 141008 a nivel de WABA.
+- Business verification (141010) queda **descartada** como causa: el tenant que envía
+  tiene el mismo error y su WABA está AVAILABLE.
+- Token: el APP entity está AVAILABLE y el mismo token lee phone/health sin problema;
+  el token no es la causa (tipo SYSTEM_USER "Usaditosapi", emitido en el Embedded
+  Signup del 2026-09-09).
+- `OAuthException code:1` en `/messages` es solo cómo Meta expone ese bloqueo de WABA.
+- Hallazgo lateral (fuera de alcance, no tocado): integraciones activas `t-alpha` y
+  `zapaterasdesanjos` tienen tokens inválidos (190/467 y 190/460).
+
+### Próximo paso exacto
+
+Eduardo abre ticket en Meta Business Support (Business `484626874413322`) pidiendo
+**activar la WABA `1659672582339181`**, citando textualmente `health_status` →
+`WABA can_send_message: BLOCKED, error_code 141008 "The WABA status is not active."`,
+phone `1354454937743475`, y los `fbtrace_id` `AFVPOKJS5dQKL2AQ03xW_MJ`,
+`Aa5fmtGO2Lg-GvECTz15NS6`, `Aosj6mgEU-FaB_PJA5SycIU`, `ALvfaLHBfdjM2FqGvm5xWzi`.
+Tras la respuesta de Meta: repetir el mismo GET de `health_status` (solo lectura) y
+enviar prueba real únicamente si `WABA` pasa a `AVAILABLE`. Sin cambios de código.
+
 ## 🔴 P0 WhatsApp outbound USADITOS — fix de SmartFlow VERIFICADO; bloqueo ahora es 100% de Meta (2026-09-14, 7c3c635)
 
 **Verificación post-deploy (envío real "Prueba SmartFlow Meta 01", 11:31:34 AM CR):**
@@ -15,7 +51,7 @@ con su propio `fbtrace_id`. Con token/phone/WABA/cuenta confirmados sanos en
 todas las capas verificables desde acá, este bloqueo es **de Meta, no de
 SmartFlow** — no hay más código que cambiar de este lado por este error.
 
-### Próximo paso exacto
+### Próximo paso exacto (superado — ver la auditoría final arriba, ahora con el código 141008)
 
 Escalar a soporte de Meta/WhatsApp Business (Business Manager → Meta Business
 Help Center, o el canal de partner técnico) citando WABA `1659672582339181`,

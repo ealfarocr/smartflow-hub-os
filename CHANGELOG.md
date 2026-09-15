@@ -1,6 +1,20 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-14 — P0 WhatsApp outbound USADITOS: auditoría final, causa exacta 141008 (Claude Code, solo lectura)
+
+- `GET /{phone}?fields=status,account_mode,...,health_status` (Graph v21.0) sobre todas
+  las integraciones WhatsApp activas, tokens leídos de Firestore sin imprimirse. Sin
+  envíos, sin escrituras, sin deploy.
+- USADITOS: `health_status.can_send_message: BLOCKED`; entidad WABA `1659672582339181`
+  BLOCKED con `141008 "The WABA status is not active."` (Meta indica contactar soporte).
+  El 141006 de pago del 2026-09-09 ya no aparece.
+- Poder Ancestral (envía OK): WABA AVAILABLE; tiene el mismo 141010 de Business sin
+  verificar → descartado como causa. APP AVAILABLE en ambos → token/app descartados.
+- Corrige la auditoría intermedia del mismo día que afirmaba que no existía un flag
+  `can_send_message` en Graph.
+- Lateral, no tocado: `t-alpha` y `zapaterasdesanjos` con tokens inválidos (190).
+- Resultado: sin problema de configuración local; requiere que Meta active la WABA.
 ## 2026-09-14 — P0 WhatsApp outbound USADITOS: fix verificado en producción; bloqueo confirmado del lado de Meta
 
 - verificación post-deploy: envío real "Prueba SmartFlow Meta 01" (11:31:34 AM CR).
