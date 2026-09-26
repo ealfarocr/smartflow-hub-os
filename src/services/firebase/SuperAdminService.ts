@@ -24,6 +24,12 @@ export interface WhatsappNumberInfo {
   error?: string;
 }
 
+/** Resultado de consultar los números: el mapa + si la consulta pudo completarse. */
+export interface WhatsappNumbersResult {
+  numbers: Record<string, WhatsappNumberInfo>;
+  lookupFailed: boolean;
+}
+
 export interface CreateTenantInput {
   name: string;
   ownerEmail: string;
@@ -114,17 +120,20 @@ export const SuperAdminService = {
    * cachea el número legible en la integración.
    * Mapa: tenantId → WhatsappNumberInfo
    */
-  getWhatsAppNumbers: async (): Promise<Record<string, WhatsappNumberInfo>> => {
+  getWhatsAppNumbers: async (): Promise<WhatsappNumbersResult> => {
     try {
       const fn = httpsCallable<unknown, { numbers: Record<string, WhatsappNumberInfo> }>(
         functions,
         'getWhatsappNumbers'
       );
       const res = await fn({});
-      return res.data?.numbers || {};
+      return { numbers: res.data?.numbers || {}, lookupFailed: false };
     } catch (error) {
+      // Un fallo acá (backend caído, permisos, red) NO significa que los tenants
+      // estén desconectados: devolver el mapa vacío a secas haría que la UI los
+      // mostrara como "no conectados" y ofreciera reconectar integraciones vivas.
       console.error("Error en SuperAdminService.getWhatsAppNumbers:", error);
-      return {};
+      return { numbers: {}, lookupFailed: true };
     }
   },
 

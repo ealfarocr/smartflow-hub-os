@@ -47,6 +47,7 @@ export const TenantsListView = () => {
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
   const [waNumbers, setWaNumbers] = useState<Record<string, WhatsappNumberInfo>>({});
   const [isLoadingNumbers, setIsLoadingNumbers] = useState(false);
+  const [waLookupFailed, setWaLookupFailed] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
@@ -78,10 +79,12 @@ export const TenantsListView = () => {
   const loadWhatsAppNumbers = async () => {
     setIsLoadingNumbers(true);
     try {
-      const numbers = await SuperAdminService.getWhatsAppNumbers();
+      const { numbers, lookupFailed } = await SuperAdminService.getWhatsAppNumbers();
       setWaNumbers(numbers);
+      setWaLookupFailed(lookupFailed);
     } catch (e) {
       console.error(e);
+      setWaLookupFailed(true);
     } finally {
       setIsLoadingNumbers(false);
     }
@@ -330,7 +333,21 @@ export const TenantsListView = () => {
                         return <span className="text-[10px] font-bold text-slate-300 dark:text-slate-600">Cargando…</span>;
                       }
 
-                      const waStatus = deriveStatusFromSuperAdminEntry(wa);
+                      const waStatus = deriveStatusFromSuperAdminEntry(wa, waLookupFailed);
+
+                      // El backend no respondió: el estado real es desconocido.
+                      // Nunca ofrecer "Conectar" acá — relanzaría Embedded Signup
+                      // sobre integraciones que probablemente están vivas.
+                      if (waStatus === 'UNKNOWN') {
+                        return (
+                          <span
+                            className="text-[9px] font-black text-slate-400 uppercase tracking-wide"
+                            title="No se pudo leer el estado de WhatsApp (el backend no respondió). No indica que el negocio esté desconectado."
+                          >
+                            {WHATSAPP_STATUS_LABEL.UNKNOWN}
+                          </span>
+                        );
+                      }
 
                       if (waStatus === 'CONNECTED') {
                         return (
@@ -499,7 +516,8 @@ export const TenantsListView = () => {
               const activeTools = (Object.entries(tenant.features || {}) as [keyof TenantFeatures, boolean][])
                 .filter(([, v]) => v);
               const wa = waNumbers[tenant.id];
-              const apiLabel = wa?.displayPhoneNumber || (wa?.phoneNumberId ? `ID: ${wa.phoneNumberId}` : '—');
+              const apiLabel = wa?.displayPhoneNumber
+                || (wa?.phoneNumberId ? `ID: ${wa.phoneNumberId}` : (waLookupFailed ? WHATSAPP_STATUS_LABEL.UNKNOWN : '—'));
 
               return (
                 <div key={tenant.id} className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-3.5">

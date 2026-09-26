@@ -2,13 +2,14 @@
  * Estado de conexión de WhatsApp de un tenant (LOOP maestro, Fase 4).
  * Fuente de verdad única: el documento real de `integrations`, nunca UI local.
  */
-export type WhatsAppConnectionStatus = 'NOT_CONNECTED' | 'PENDING' | 'CONNECTED' | 'ERROR';
+export type WhatsAppConnectionStatus = 'NOT_CONNECTED' | 'PENDING' | 'CONNECTED' | 'ERROR' | 'UNKNOWN';
 
 export const WHATSAPP_STATUS_LABEL: Record<WhatsAppConnectionStatus, string> = {
   NOT_CONNECTED: 'No conectado',
   PENDING: 'Configurando…',
   CONNECTED: 'Conectado',
   ERROR: 'Revisar conexión',
+  UNKNOWN: 'Revisar WhatsApp',
 };
 
 /**
@@ -37,12 +38,17 @@ export function deriveStatusFromIntegration(
  * Deriva el estado a partir de una entrada del mapa que devuelve la Cloud
  * Function getWhatsappNumbers (contexto Super Admin — ese mapa nunca incluye
  * accessToken por diseño, solo displayPhoneNumber/phoneNumberId/isActive/error).
- * Ausencia total de entrada para un tenantId significa NOT_CONNECTED.
+ * Ausencia total de entrada para un tenantId significa NOT_CONNECTED, pero SOLO
+ * si la consulta al backend realmente respondió. Si la Cloud Function falló
+ * (`lookupFailed`), el mapa llega vacío para TODOS los tenants y no se sabe nada
+ * del estado real: eso es UNKNOWN, no "no conectado" — mostrar ahí un botón de
+ * conectar invitaría a relanzar Embedded Signup sobre una integración viva.
  */
 export function deriveStatusFromSuperAdminEntry(
-  entry: { isActive?: boolean; phoneNumberId?: string | null; displayPhoneNumber?: string | null; error?: string } | null | undefined
+  entry: { isActive?: boolean; phoneNumberId?: string | null; displayPhoneNumber?: string | null; error?: string } | null | undefined,
+  lookupFailed = false
 ): WhatsAppConnectionStatus {
-  if (!entry) return 'NOT_CONNECTED';
+  if (!entry) return lookupFailed ? 'UNKNOWN' : 'NOT_CONNECTED';
   if (entry.error) return 'ERROR';
   if (entry.isActive && (entry.phoneNumberId || entry.displayPhoneNumber)) return 'CONNECTED';
   if (!entry.isActive && entry.phoneNumberId) return 'PENDING';
