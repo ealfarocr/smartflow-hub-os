@@ -1,6 +1,16 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-25/26 — Billing reactivado; panel QA de media sacado de producción
+
+- Verificación post-billing (solo lectura): sin errores `billing is disabled` tras
+  las 03:57 UTC; `whatsappWebhook` 200; callables responden 401 en vez de 500;
+  inbound de WhatsApp confirmado físicamente.
+- `8ec1d8c` — `MediaDiagPanel` ya no se enciende por `isSuperAdmin`; requiere `?qa=1`
+  explícito y la marca pasa de `localStorage` a `sessionStorage`, limpiando la vieja.
+  2 tests nuevos en `mediaInputs.test.ts`. 324/324, build OK, lint sin regresión.
+- Deploy: solo `hosting:app`. Verificado en el bundle publicado (`index-DtqRHt31.js`).
+- Sin cambios en Meta, tokens, webhook, ni datos de tenants.
 ## 2026-09-25 — SuperAdmin mostraba "Conectar WhatsApp" en tenants conectados: backend caído por billing
 
 - Auditoría del SuperAdmin global: la tabla deriva el estado de la callable

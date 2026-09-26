@@ -1,5 +1,37 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## ✅ Billing restaurado + panel QA fuera de producción (2026-09-25, commit 8ec1d8c)
+
+**Billing:** la cuenta "Pago de Firebase" fue reactivada. Último error
+`billing is disabled` a las 03:57 UTC del 2026-09-26; después, ninguno.
+`whatsappWebhook` responde **200**, `getWhatsappNumbers` y `sendWhatsappMessage`
+responden 401 UNAUTHENTICATED (runtime vivo), `tickpresence` volvió a 200/204.
+**Inbound de WhatsApp recuperado y verificado físicamente** ("Prueba SmartFlow 04").
+
+**Panel QA visible en producción (corregido):** las cajas grises sobre
+`/conversaciones` eran `MediaDiagPanel` (overlay `fixed top-[26%] left-2`, con
+los botones "prueba" y "DOM" y el registro de eventos). Se encendía con
+`isSuperAdmin || isQaModeEnabled()` → **cualquier SuperAdmin lo veía siempre**.
+Además la marca `?qa=1` vivía en `localStorage`, o sea encendida para siempre en
+ese navegador.
+
+Fix (`8ec1d8c`): se enciende solo con `?qa=1`, la marca vive en `sessionStorage`
+y al cargar se borra la marca vieja de `localStorage` (los equipos que ya la
+tenían dejan de ver el panel con un refresh, sin entrar con `?qa=0`). No se tocó
+el render de la conversación, el composer, ni la lógica de WhatsApp.
+Tests 324/324, build OK, lint 334 = baseline. Deploy: solo `hosting:app`.
+
+**USADITOS sigue igual del lado de Meta:** `health_status.can_send_message:
+BLOCKED`, WABA `1659672582339181` con error **141008** ("The WABA status is not
+active"). El billing no tenía relación con eso. Outbound sigue esperando a
+soporte de Meta.
+
+### Próximo paso exacto
+
+1. Eduardo abre `/conversaciones` con refresh duro (Ctrl+Shift+R) y confirma que
+   ya no hay cajas grises y que "Prueba SmartFlow 04" sigue visible.
+2. Seguir con el ticket de Meta por el 141008 (único bloqueo de outbound).
+
 ## 🔴 P0 INFRAESTRUCTURA — BILLING DESHABILITADO EN GOOGLE CLOUD: todo el backend caído (2026-09-25, commit 2e9ed0f)
 
 **Evidencia directa** (`gcloud logging read`, proyecto `paneles-solares-bcs-mx`):
