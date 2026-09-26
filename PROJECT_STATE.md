@@ -1,5 +1,54 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔴 P0 INFRAESTRUCTURA — BILLING DESHABILITADO EN GOOGLE CLOUD: todo el backend caído (2026-09-25, commit 2e9ed0f)
+
+**Evidencia directa** (`gcloud logging read`, proyecto `paneles-solares-bcs-mx`):
+`"The request failed because billing is disabled for this project."`, HTTP 500.
+Primera aparición en la ventana de retención: **2026-09-18 05:45 UTC**; sigue
+ocurriendo hoy. Servicios ya vistos fallando: `tickpresence` (566),
+`checksilentleads` (290), `checkwindowexpiry` (131), `accepttenantinvite`,
+`sendonboardingfollowups`, `checksubscriptionrenewals`, `getwhatsappnumbers`.
+
+- `whatsappWebhook` responde **500/503** → **no entra ningún mensaje de WhatsApp**.
+  Último entrante registrado en Firestore: **2026-09-15T03:48Z**.
+- Firestore y Hosting siguen vivos (deploy de hosting funcionó hoy); lo caído son
+  las Cloud Functions / Cloud Run.
+- **Esto no se arregla con código.** Solo Eduardo puede reactivar la facturación
+  en Google Cloud (cuenta de facturación cerrada o tarjeta rechazada).
+
+### Síntoma derivado ya corregido: SuperAdmin mostraba "CONECTAR WHATSAPP"
+
+La tabla de `/super-admin` depende de la callable `getWhatsappNumbers`, que hoy
+devuelve 500. `SuperAdminService.getWhatsAppNumbers` atrapaba el error y devolvía
+`{}` a secas, y `deriveStatusFromSuperAdminEntry` interpreta "sin entrada" como
+`NOT_CONNECTED` → todos los tenants (USADITOS incluido) aparecían como no
+conectados **con botón de Embedded Signup**, es decir invitando a reconectar una
+WABA viva. Los datos en Firestore están intactos: las 5 integraciones WhatsApp
+tienen `isActive:true`, `phoneNumberId`, WABA y token, y su `tenantId` coincide
+con un doc real de `tenants` (0 huérfanos).
+
+**Fix (commit `2e9ed0f`, desplegado solo a hosting):** el servicio ahora devuelve
+`{ numbers, lookupFailed }` y la vista renderiza el estado neutro **"Revisar
+WhatsApp"**, sin botón de conectar ni reconectar, cuando la consulta falla.
+Tests 322/322, build OK, 0 lint nuevos (334 en HEAD y 334 con el cambio).
+
+### Próximo paso exacto
+
+1. **Eduardo:** reactivar la facturación del proyecto `paneles-solares-bcs-mx` en
+   Google Cloud (Billing → vincular/reactivar cuenta, revisar el medio de pago).
+2. Cuando vuelva: `curl https://us-central1-paneles-solares-bcs-mx.cloudfunctions.net/whatsappWebhook`
+   debe dejar de dar 500, y `/super-admin` debe mostrar los números reales
+   (USADITOS → `50672292718`, CONECTADO) en vez de "Revisar WhatsApp".
+3. Recontar entrantes perdidos desde el 2026-09-15 y avisar a los negocios.
+4. Recién entonces retomar el P0 de Meta (WABA `1659672582339181` BLOCKED, 141008).
+
+### Pendiente de QA físico
+
+`/super-admin` requiere login del SuperAdmin; el agente no ingresa credenciales.
+Verificado que el bundle desplegado en `hub.smartflow-suite.com` **sí contiene**
+el estado nuevo ("Revisar WhatsApp" presente en `/assets/index-DMFlNMuI.js`).
+Falta la confirmación visual de Eduardo.
+
 ## 🔴 P0 WhatsApp outbound USADITOS — causa exacta confirmada: WABA BLOCKED por error 141008 (2026-09-14, auditoría final solo lectura)
 
 **Fuente:** `GET /{phone}?fields=...,health_status` (Graph v21.0, solo lectura, tokens

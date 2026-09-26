@@ -1,6 +1,21 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-25 — SuperAdmin mostraba "Conectar WhatsApp" en tenants conectados: backend caído por billing
+
+- Auditoría del SuperAdmin global: la tabla deriva el estado de la callable
+  `getWhatsappNumbers`; los datos de Firestore están sanos (5 integraciones activas,
+  `tenantId` de todas coincide con un tenant real, 0 huérfanos).
+- Causa raíz: `gcloud logging` muestra `"billing is disabled for this project"` (500)
+  desde 2026-09-18 05:45 UTC. Todas las Cloud Functions fallan, `whatsappWebhook`
+  incluido → sin inbound de WhatsApp desde 2026-09-15.
+- Defecto propio corregido (`2e9ed0f`): el servicio confundía "no pude consultar" con
+  "no conectado" y la UI ofrecía Embedded Signup sobre integraciones vivas. Ahora
+  `getWhatsAppNumbers` devuelve `{ numbers, lookupFailed }` y la vista muestra
+  "Revisar WhatsApp" sin botón de (re)conectar.
+- Tests: 322/322 (5 nuevos en `src/utils/whatsappStatus.test.ts`). Build OK. Lint sin
+  regresión (334 antes y después). Deploy: solo `hosting`, verificado en el bundle.
+- No se tocó Meta, ni tokens, ni datos de tenants. Nada de Embedded Signup ejecutado.
 ## 2026-09-14 — P0 WhatsApp outbound USADITOS: auditoría final, causa exacta 141008 (Claude Code, solo lectura)
 
 - `GET /{phone}?fields=status,account_mode,...,health_status` (Graph v21.0) sobre todas
