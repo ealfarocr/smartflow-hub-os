@@ -274,14 +274,16 @@ async function sitePermissions(): Promise<Record<string, string>> {
  *   - el patrón del control (si el nativo abre y el clip aislado no),
  *   - la ubicación dentro del chat (si los dos abren y el clip real no).
  */
-export const MediaDiagPanel = ({ isSuperAdmin, onNativeFiles, chat }: {
-  isSuperAdmin: boolean;
+export const MediaDiagPanel = ({ onNativeFiles, chat }: {
   onNativeFiles?: (files: FileList, kind: MediaInputKind) => void;
   /** Estado del chat, para explicar por qué 📎 / 📷 no están en pantalla. */
   chat?: ChatDiagState;
 }) => {
   const events = useSyncExternalStore(subscribeMediaDiag, getMediaDiag, getMediaDiag);
-  const [enabled] = useState(() => isSuperAdmin || isQaModeEnabled());
+  // Se enciende SOLO con la marca explícita de QA (?qa=1). Antes bastaba con ser
+  // SuperAdmin, y por eso el panel aparecía encima de /conversaciones en
+  // producción durante el uso normal, sin que nadie lo hubiera pedido.
+  const [enabled] = useState(() => isQaModeEnabled());
   const [open, setOpen] = useState(true);
   const [showProbe, setShowProbe] = useState(true);
   const [feedback, setFeedback] = useState<string | null>(null);

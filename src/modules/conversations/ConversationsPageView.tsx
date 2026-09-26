@@ -66,7 +66,7 @@ export const ConversationsPageView = () => {
     setActiveConversation, subscribeInbox, subscribeMessages,
     sendMessage, markAsRead, assignAgent, claimConversation, toggleBot, isLoadingInbox
   } = useConversationStore();
-  const { activeMembership, user } = useAuthStore();
+  const { activeMembership } = useAuthStore();
   const { whatsappTemplates, templates: quickTemplates, company } = useSettingsStore();
   const { leads } = useLeadStore();
   const [showQuickTemplates, setShowQuickTemplates] = useState(false);
@@ -753,7 +753,6 @@ export const ConversationsPageView = () => {
       {/* La prueba nativa del panel QA entrega sus archivos al mismo pipeline de
           subida del chat: si abre, el adjunto aparece en el composer igual. */}
       <MediaDiagPanel
-        isSuperAdmin={!!user?.isSuperAdmin}
         onNativeFiles={activeChat ? (files, kind) => handleFilesSelected(files, kind === 'gallery' ? 'GALLERY' : kind === 'photo' ? 'PHOTO' : 'VIDEO') : undefined}
         chat={{ conversacionAbierta: !!activeChat, ventana: activeChat ? windowInfo.status : null, grabando: isRecording }}
       />

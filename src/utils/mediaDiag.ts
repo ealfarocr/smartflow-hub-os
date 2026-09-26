@@ -4,9 +4,9 @@
 // necesitar chrome://inspect en cada ronda. Esto guarda los últimos eventos en
 // memoria y un panel flotante los muestra.
 //
-// Solo se ve con el modo QA activado (?qa=1 en la URL, que queda recordado en
-// este navegador) o para SuperAdmin. Nunca registra contenido: solo el nombre
-// del paso y metadatos no sensibles (si el input existe, cuántos archivos).
+// Solo se ve con el modo QA activado explícitamente (?qa=1 en la URL, recordado
+// solo en esa pestaña). Nunca se enciende solo por el rol del usuario. Nunca
+// registra contenido: solo el nombre del paso y metadatos no sensibles.
 
 const QA_KEY = 'smartflow_qa';
 // El panel muestra los últimos 10; "Copiar diagnóstico" copia todos estos.
@@ -104,13 +104,22 @@ export function clearMediaDiag(): void {
   listeners.forEach((l) => l());
 }
 
-/** ?qa=1 activa el modo y lo recuerda; ?qa=0 lo apaga. */
+/**
+ * ?qa=1 activa el modo en ESTA pestaña; ?qa=0 lo apaga.
+ *
+ * Vive en sessionStorage a propósito: antes se guardaba en localStorage y el
+ * panel quedaba encendido para siempre en ese navegador — un overlay de
+ * diagnóstico sobre la pantalla de conversaciones en producción, días después
+ * de la prueba. Se borra además la marca vieja persistente, para que los
+ * equipos que ya la tienen dejen de verlo sin tener que entrar con ?qa=0.
+ */
 export function isQaModeEnabled(search: string = typeof window !== 'undefined' ? window.location.search : ''): boolean {
+  try { localStorage.removeItem(QA_KEY); } catch { /* sin localStorage: nada que limpiar */ }
   try {
     const param = new URLSearchParams(search).get('qa');
-    if (param === '1') localStorage.setItem(QA_KEY, '1');
-    if (param === '0') localStorage.removeItem(QA_KEY);
-    return localStorage.getItem(QA_KEY) === '1';
+    if (param === '1') sessionStorage.setItem(QA_KEY, '1');
+    if (param === '0') sessionStorage.removeItem(QA_KEY);
+    return sessionStorage.getItem(QA_KEY) === '1';
   } catch {
     return false;
   }

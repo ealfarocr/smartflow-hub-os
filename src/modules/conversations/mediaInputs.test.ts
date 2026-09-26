@@ -135,6 +135,9 @@ describe('El panel QA reconoce el navegador del teléfono', () => {
 const panel = Object.values(
   import.meta.glob('/src/modules/conversations/MediaDiagPanel.tsx', { query: '?raw', import: 'default', eager: true }),
 )[0] as string;
+const diag = Object.values(
+  import.meta.glob('/src/utils/mediaDiag.ts', { query: '?raw', import: 'default', eager: true }),
+)[0] as string;
 const layout = Object.values(
   import.meta.glob('/src/components/layout/MainLayout.tsx', { query: '?raw', import: 'default', eager: true }),
 )[0] as string;
@@ -142,6 +145,20 @@ const layout = Object.values(
 // Evidencia física: con el panel QA anterior, los toques de la prueba caían
 // SOBRE EL PANEL (TOQUE registraba div.fixed / div.text-emerald) y nunca
 // llegaban al clip. El diagnóstico se contaminaba a sí mismo.
+describe('El panel QA no se cuela en producción', () => {
+  it('no se enciende por rol: nada de isSuperAdmin en la condición', () => {
+    expect(panel).toContain('useState(() => isQaModeEnabled())');
+    expect(panel).not.toContain('isSuperAdmin');
+  });
+
+  it('la marca de QA no es permanente: se guarda por pestaña, no en localStorage', () => {
+    expect(diag).toContain("sessionStorage.setItem(QA_KEY, '1')");
+    expect(diag).not.toContain("localStorage.setItem(QA_KEY");
+    // y limpia la marca vieja para los equipos que ya la tenían encendida
+    expect(diag).toContain('localStorage.removeItem(QA_KEY)');
+  });
+});
+
 describe('El panel QA observa, no participa', () => {
   it('el contenedor completo es transparente a los toques', () => {
     const raiz = panel.slice(panel.indexOf('<div className="fixed'), panel.indexOf('>', panel.indexOf('<div className="fixed')));
