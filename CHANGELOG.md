@@ -1,6 +1,19 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-30 — Auditoría solo lectura: ¿sirve +506 6148 5138 como número alterno?
+
+- El token de producción de USADITOS (SYSTEM_USER, scopes whatsapp_business_*) alcanza
+  UNA sola WABA (`1659672582339181`) y ahí hay UN solo número: +506 7229 2718. El 6148
+  no aparece con ningún token de SmartFlow (los otros tenants tampoco lo tienen).
+- `owned/client_whatsapp_business_accounts` del negocio 484626874413322 → error 200
+  (falta `business_management`): no se puede enumerar el inventario del negocio por API.
+- Clave técnica: el bloqueo 141008 es **de WABA**, no del número. Otro número dentro de
+  la MISMA WABA heredaría el bloqueo; solo sirve un número en una WABA sana distinta.
+- Ads: ninguna cuenta publicitaria cuelga del negocio de Usaditos; varias cuentas del
+  usuario están `UNSETTLED` (saldo pendiente) y otras `DISABLED`. Es un sistema distinto
+  al de mensajería: no explica ni causa el 141008.
+- Sin cambios, sin deploy, sin mensajes enviados.
 ## 2026-09-30 — Break-glass: el SuperAdmin puede rescatar el acceso de un usuario de tenant
 
 - Auditoría: `setVendorPin` → `checkVendorPinAuth` solo admitía al SuperAdmin para
