@@ -21,7 +21,7 @@ import {
   PIN_LOGIN_GENERIC_ERROR, DUMMY_PIN_SALT, DUMMY_PIN_HASH,
 } from './pinAuth';
 import { checkMembershipAuth, checkConversationTenantMatch, buildMetaErrorDetail, MetaErrorDetail } from './sendMessageAuth';
-import { checkVendorPinAuth, checkPinLoginAllowed } from './vendorPinAuth';
+import { checkVendorPinAuth, buildBreakGlassAuditEvent, checkPinLoginAllowed } from './vendorPinAuth';
 import { shouldApplyStatusUpdate } from './messageStatusUpdate';
 import { checkTenantAdminAuth } from './tenantAdminAuth';
 import {
@@ -2865,7 +2865,9 @@ async function normalizeCredentialLocation(
  */
 export const setVendorPin = onCall({ maxInstances: 10 }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Usuario no autenticado');
-  const { membershipId, loginHandle: requestedHandle } = request.data as { membershipId?: string; loginHandle?: string };
+  const { membershipId, loginHandle: requestedHandle, breakGlass } = request.data as {
+    membershipId?: string; loginHandle?: string; breakGlass?: boolean;
+  };
   if (!membershipId) throw new HttpsError('invalid-argument', 'Falta membershipId');
 
   const membershipRef = db.collection('memberships').doc(membershipId);
@@ -2903,6 +2905,9 @@ export const setVendorPin = onCall({ maxInstances: 10 }, async (request) => {
       : null,
     targetMembershipRole: membership.role,
     tenantHasActiveOwner: !activeOwnerSnap.empty,
+    // Solo cuenta si el caller ES SuperAdmin: checkVendorPinAuth exige ambas
+    // cosas, así que un tenant normal mandando breakGlass:true no consigue nada.
+    breakGlass: breakGlass === true,
   });
   if (!pinAuth.allowed) {
     throw new HttpsError('permission-denied', 'Solo un Owner/Admin activo de este negocio puede hacer esto.');
@@ -3054,7 +3059,30 @@ export const setVendorPin = onCall({ maxInstances: 10 }, async (request) => {
     }
   }
 
-  console.log('VENDOR_PIN_SET', { tenantId, membershipId, setBy: request.auth.uid, mode: transition.mode });
+  // Rescate del SuperAdmin: queda registrado en Firestore, no solo en el log de
+  // la función. Nunca guarda el código ni el hash — ver buildBreakGlassAuditEvent.
+  if (pinAuth.via === 'break-glass') {
+    try {
+      await db.collection('security_audit').add({
+        ...buildBreakGlassAuditEvent({
+          tenantId,
+          membershipId,
+          targetName: membership.name ?? null,
+          targetRole: membership.role ?? null,
+          performedByUid: request.auth.uid,
+          performedByEmail: callerUserSnap.data()?.email ?? null,
+          mode: transition.mode,
+        }),
+        at: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      // Un fallo de auditoría no puede dejar a la persona sin acceso, pero sí
+      // tiene que quedar visible en el log de la función.
+      console.error('VENDOR_PIN_BREAK_GLASS_AUDIT_FAILED', { tenantId, membershipId, error: (err as Error).message });
+    }
+  }
+
+  console.log('VENDOR_PIN_SET', { tenantId, membershipId, setBy: request.auth.uid, mode: transition.mode, via: pinAuth.via });
 
   return { pin, tenantId, loginHandle, mode: transition.mode };
 });

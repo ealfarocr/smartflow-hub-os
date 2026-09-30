@@ -167,8 +167,34 @@ export const UsersManagementView = () => {
   // PIN" dentro del modal de 🔗 (sin confirm — ya es una acción explícita
   // e intencional adentro de un modal que se abrió a propósito).
   const callSetVendorPin = async (id: string, name: string, tenantId: string) => {
-    const setVendorPin = httpsCallable<{ membershipId: string }, { pin: string; tenantId: string; loginHandle: string }>(getFunctions(), 'setVendorPin');
-    const result = await setVendorPin({ membershipId: id });
+    const setVendorPin = httpsCallable<{ membershipId: string; breakGlass?: boolean }, { pin: string; tenantId: string; loginHandle: string }>(getFunctions(), 'setVendorPin');
+    let result;
+    try {
+      result = await setVendorPin({ membershipId: id });
+    } catch (err) {
+      // Bloqueo administrativo: el único Owner activo del negocio es
+      // justamente quien perdió su código, así que nadie de adentro puede
+      // regenerárselo. El SuperAdmin global puede rescatarlo, pero como una
+      // acción aparte y confirmada — nunca como reintento automático.
+      const code = (err as { code?: string })?.code;
+      const esPermiso = code === 'functions/permission-denied' || code === 'permission-denied';
+      if (!esPermiso || !useAuthStore.getState().user?.isSuperAdmin) throw err;
+      const ok = window.confirm(
+        `RESCATE DE SUPERADMIN
+
+Ningún Owner/Admin activo de este negocio puede generar este acceso.
+
+` +
+        `Vas a generar un código nuevo para ${name} como SuperAdmin global.
+
+` +
+        `El código anterior deja de servir, se cierran sus sesiones abiertas y sus equipos de confianza tendrán que volver a validarse. Queda registrado en la bitácora de seguridad.
+
+¿Continuar?`,
+      );
+      if (!ok) throw err;
+      result = await setVendorPin({ membershipId: id, breakGlass: true });
+    }
     const { pin, loginHandle } = result.data;
     // FIX UX URGENTE: antes esto era un alert() — texto no seleccionable de
     // forma práctica, sin botones de copiar. VendorAccessModal deja copiar

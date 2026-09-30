@@ -2657,7 +2657,7 @@ async function normalizeCredentialLocation(existingRef, existingData, membership
 exports.setVendorPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
-    const { membershipId, loginHandle: requestedHandle } = request.data;
+    const { membershipId, loginHandle: requestedHandle, breakGlass } = request.data;
     if (!membershipId)
         throw new https_1.HttpsError('invalid-argument', 'Falta membershipId');
     const membershipRef = db.collection('memberships').doc(membershipId);
@@ -2694,6 +2694,9 @@ exports.setVendorPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
             : null,
         targetMembershipRole: membership.role,
         tenantHasActiveOwner: !activeOwnerSnap.empty,
+        // Solo cuenta si el caller ES SuperAdmin: checkVendorPinAuth exige ambas
+        // cosas, así que un tenant normal mandando breakGlass:true no consigue nada.
+        breakGlass: breakGlass === true,
     });
     if (!pinAuth.allowed) {
         throw new https_1.HttpsError('permission-denied', 'Solo un Owner/Admin activo de este negocio puede hacer esto.');
@@ -2836,7 +2839,30 @@ exports.setVendorPin = (0, https_1.onCall)({ maxInstances: 10 }, async (request)
             console.warn('VENDOR_PIN_REGEN_REVOKE_TOKENS_FAILED', { membershipId, error: err.message });
         }
     }
-    console.log('VENDOR_PIN_SET', { tenantId, membershipId, setBy: request.auth.uid, mode: transition.mode });
+    // Rescate del SuperAdmin: queda registrado en Firestore, no solo en el log de
+    // la función. Nunca guarda el código ni el hash — ver buildBreakGlassAuditEvent.
+    if (pinAuth.via === 'break-glass') {
+        try {
+            await db.collection('security_audit').add({
+                ...(0, vendorPinAuth_1.buildBreakGlassAuditEvent)({
+                    tenantId,
+                    membershipId,
+                    targetName: membership.name ?? null,
+                    targetRole: membership.role ?? null,
+                    performedByUid: request.auth.uid,
+                    performedByEmail: callerUserSnap.data()?.email ?? null,
+                    mode: transition.mode,
+                }),
+                at: firestore_1.FieldValue.serverTimestamp(),
+            });
+        }
+        catch (err) {
+            // Un fallo de auditoría no puede dejar a la persona sin acceso, pero sí
+            // tiene que quedar visible en el log de la función.
+            console.error('VENDOR_PIN_BREAK_GLASS_AUDIT_FAILED', { tenantId, membershipId, error: err.message });
+        }
+    }
+    console.log('VENDOR_PIN_SET', { tenantId, membershipId, setBy: request.auth.uid, mode: transition.mode, via: pinAuth.via });
     return { pin, tenantId, loginHandle, mode: transition.mode };
 });
 /**

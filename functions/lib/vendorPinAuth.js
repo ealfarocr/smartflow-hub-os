@@ -10,6 +10,7 @@
 // SuperAdmin cierra ese círculo, y SOLO ese.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkVendorPinAuth = checkVendorPinAuth;
+exports.buildBreakGlassAuditEvent = buildBreakGlassAuditEvent;
 exports.checkPinLoginAllowed = checkPinLoginAllowed;
 /**
  * Camino normal: el caller tiene una membership activa de Owner/Admin EN
@@ -27,12 +28,40 @@ exports.checkPinLoginAllowed = checkPinLoginAllowed;
 function checkVendorPinAuth(input) {
     if (input.callerMembership?.status === 'active' &&
         (input.callerMembership.role === 'Owner' || input.callerMembership.role === 'Admin')) {
-        return { allowed: true };
+        return { allowed: true, via: 'tenant-admin' };
     }
     if (input.isSuperAdmin && input.targetMembershipRole === 'Owner' && !input.tenantHasActiveOwner) {
-        return { allowed: true };
+        return { allowed: true, via: 'bootstrap' };
+    }
+    // Rescate del SuperAdmin (2026-09-30). El bootstrap de arriba se apaga apenas
+    // el tenant tiene UN Owner activo, y ahí aparece el bloqueo real reportado en
+    // USADITOS: el único Owner activo es justo quien perdió su código, nadie más
+    // puede regenerárselo y el SuperAdmin quedaba afuera. Esto no debilita la
+    // regla normal: exige SuperAdmin global Y un pedido explícito, sigue atado a
+    // UNA membership concreta (el llamador ya resolvió tenantId desde ese mismo
+    // doc, así que no hay forma de tocar otro tenant sin nombrarlo), y queda
+    // registrado como evento de auditoría.
+    if (input.isSuperAdmin && input.breakGlass === true) {
+        return { allowed: true, via: 'break-glass' };
     }
     return { allowed: false, reason: 'no-active-admin' };
+}
+/**
+ * Evento de auditoría del rescate. Pura a propósito: así un test puede
+ * garantizar que NUNCA lleva el código, el hash ni la salt — solo quién,
+ * a quién, en qué negocio y cuándo.
+ */
+function buildBreakGlassAuditEvent(input) {
+    return {
+        type: 'VENDOR_PIN_BREAK_GLASS',
+        tenantId: input.tenantId,
+        membershipId: input.membershipId,
+        targetName: input.targetName ?? null,
+        targetRole: input.targetRole ?? null,
+        performedByUid: input.performedByUid,
+        performedByEmail: input.performedByEmail ?? null,
+        mode: input.mode ?? null,
+    };
 }
 /**
  * LOOP — reutilización de teléfonos corporativos: loginWithPin nunca

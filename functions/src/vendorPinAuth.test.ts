@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkVendorPinAuth, checkPinLoginAllowed } from './vendorPinAuth';
+import { checkVendorPinAuth, checkPinLoginAllowed, buildBreakGlassAuditEvent } from './vendorPinAuth';
 
 describe('checkVendorPinAuth — bootstrap del primer Owner (LOOP DE EMERGENCIA)', () => {
   it('1. 0 Owners activos + SuperAdmin bootstrapeando un Owner -> ALLOW', () => {
@@ -88,6 +88,91 @@ describe('checkVendorPinAuth — bootstrap del primer Owner (LOOP DE EMERGENCIA)
       tenantHasActiveOwner: false,
     });
     expect(result.allowed).toBe(false);
+  });
+});
+
+describe('checkVendorPinAuth — rescate del SuperAdmin (break-glass, 2026-09-30)', () => {
+  // Caso real de USADITOS: EDUARDO ADMIN es Owner ACTIVO y perdió su código;
+  // el bootstrap no aplica (ya hay Owner activo) y nadie de adentro puede
+  // regenerarlo. El SuperAdmin global sí, pidiéndolo explícitamente.
+  const usaditos = {
+    isSuperAdmin: true,
+    callerMembership: null,
+    targetMembershipRole: 'Owner',
+    tenantHasActiveOwner: true,
+  } as const;
+
+  it('1. Owner/Admin activo del negocio puede regenerar por el camino normal', () => {
+    const r = checkVendorPinAuth({ ...usaditos, isSuperAdmin: false, callerMembership: { status: 'active', role: 'Owner' } });
+    expect(r.allowed).toBe(true);
+    expect(r.via).toBe('tenant-admin');
+  });
+
+  it('2. Usuario común del tenant NO puede, ni pidiendo el rescate', () => {
+    const r = checkVendorPinAuth({
+      ...usaditos,
+      isSuperAdmin: false,
+      callerMembership: { status: 'active', role: 'Asesor Comercial' },
+      breakGlass: true,
+    });
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toBe('no-active-admin');
+  });
+
+  it('3. SuperAdmin global CON pedido explícito -> ALLOW, marcado como break-glass', () => {
+    const r = checkVendorPinAuth({ ...usaditos, breakGlass: true });
+    expect(r.allowed).toBe(true);
+    expect(r.via).toBe('break-glass');
+  });
+
+  it('4. SuperAdmin SIN pedido explícito sigue bloqueado: nada de rescates por accidente', () => {
+    expect(checkVendorPinAuth({ ...usaditos }).allowed).toBe(false);
+    expect(checkVendorPinAuth({ ...usaditos, breakGlass: false }).allowed).toBe(false);
+  });
+
+  it('5. El rescate no cruza tenants: sin membership del tenant objetivo, la única vía es la explícita', () => {
+    // callerMembership viene de memberships/{uid}_{tenantIdObjetivo} y
+    // tenantId se lee del doc de la membership objetivo: apuntar a otro
+    // negocio exige nombrar una membership de ESE negocio.
+    const otroTenant = checkVendorPinAuth({ ...usaditos, breakGlass: true, targetMembershipRole: 'Asesor Comercial' });
+    expect(otroTenant.allowed).toBe(true);
+    expect(otroTenant.via).toBe('break-glass');
+    expect(checkVendorPinAuth({ ...usaditos, isSuperAdmin: false, breakGlass: true }).allowed).toBe(false);
+  });
+});
+
+describe('buildBreakGlassAuditEvent — qué queda registrado', () => {
+  const evento = buildBreakGlassAuditEvent({
+    tenantId: 't-1788554584458',
+    membershipId: 'Bw4GC41RiSQ1s3pw4RpypL2eEcz1_t-1788554584458',
+    targetName: 'EDUARDO ADMIN',
+    targetRole: 'Owner',
+    performedByUid: 'qsiEuc1lBWUOkjUQRiYvsRf3Syn2',
+    performedByEmail: 'superadmin@example.com',
+    mode: 'regenerate',
+  });
+
+  it('7. registra quién, a quién, en qué negocio y por qué vía', () => {
+    expect(evento.type).toBe('VENDOR_PIN_BREAK_GLASS');
+    expect(evento.tenantId).toBe('t-1788554584458');
+    expect(evento.membershipId).toBe('Bw4GC41RiSQ1s3pw4RpypL2eEcz1_t-1788554584458');
+    expect(evento.performedByUid).toBe('qsiEuc1lBWUOkjUQRiYvsRf3Syn2');
+    expect(evento.mode).toBe('regenerate');
+  });
+
+  it('8. nunca lleva código, hash ni salt', () => {
+    const claves = Object.keys(evento).join(' ').toLowerCase();
+    expect(claves).not.toMatch(/pin|hash|salt|secret|token/);
+    expect(JSON.stringify(evento).toLowerCase()).not.toMatch(/pinhash|pinsalt|secrethash/);
+  });
+
+  it('acepta campos ausentes sin inventar datos (null explícito, nunca undefined)', () => {
+    const minimo = buildBreakGlassAuditEvent({
+      tenantId: 't-x', membershipId: 'm-x', performedByUid: 'u-x', mode: 'attach',
+    });
+    expect(minimo.targetName).toBeNull();
+    expect(minimo.performedByEmail).toBeNull();
+    expect(Object.values(minimo).every((v) => v !== undefined)).toBe(true);
   });
 });
 

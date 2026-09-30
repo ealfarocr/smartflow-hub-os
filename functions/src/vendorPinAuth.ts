@@ -13,10 +13,17 @@ export interface VendorPinAuthInput {
   callerMembership: { status: string; role: string } | null;
   targetMembershipRole: string;
   tenantHasActiveOwner: boolean;
+  /**
+   * Rescate explícito del SuperAdmin global ("romper el vidrio"): lo pide la
+   * UI como una acción aparte y confirmada, nunca como reintento silencioso.
+   */
+  breakGlass?: boolean;
 }
 
 export interface VendorPinAuthResult {
   allowed: boolean;
+  /** Por qué camino se autorizó — 'break-glass' es el único que se audita. */
+  via?: 'tenant-admin' | 'bootstrap' | 'break-glass';
   reason?: 'no-active-admin';
 }
 
@@ -38,14 +45,55 @@ export function checkVendorPinAuth(input: VendorPinAuthInput): VendorPinAuthResu
     input.callerMembership?.status === 'active' &&
     (input.callerMembership.role === 'Owner' || input.callerMembership.role === 'Admin')
   ) {
-    return { allowed: true };
+    return { allowed: true, via: 'tenant-admin' };
   }
 
   if (input.isSuperAdmin && input.targetMembershipRole === 'Owner' && !input.tenantHasActiveOwner) {
-    return { allowed: true };
+    return { allowed: true, via: 'bootstrap' };
+  }
+
+  // Rescate del SuperAdmin (2026-09-30). El bootstrap de arriba se apaga apenas
+  // el tenant tiene UN Owner activo, y ahí aparece el bloqueo real reportado en
+  // USADITOS: el único Owner activo es justo quien perdió su código, nadie más
+  // puede regenerárselo y el SuperAdmin quedaba afuera. Esto no debilita la
+  // regla normal: exige SuperAdmin global Y un pedido explícito, sigue atado a
+  // UNA membership concreta (el llamador ya resolvió tenantId desde ese mismo
+  // doc, así que no hay forma de tocar otro tenant sin nombrarlo), y queda
+  // registrado como evento de auditoría.
+  if (input.isSuperAdmin && input.breakGlass === true) {
+    return { allowed: true, via: 'break-glass' };
   }
 
   return { allowed: false, reason: 'no-active-admin' };
+}
+
+export interface BreakGlassAuditInput {
+  tenantId: string;
+  membershipId: string;
+  targetName?: string | null;
+  targetRole?: string | null;
+  performedByUid: string;
+  performedByEmail?: string | null;
+  /** Transición que ejecutó setVendorPin: regenerate / attach / bootstrap. */
+  mode?: string | null;
+}
+
+/**
+ * Evento de auditoría del rescate. Pura a propósito: así un test puede
+ * garantizar que NUNCA lleva el código, el hash ni la salt — solo quién,
+ * a quién, en qué negocio y cuándo.
+ */
+export function buildBreakGlassAuditEvent(input: BreakGlassAuditInput): Record<string, unknown> {
+  return {
+    type: 'VENDOR_PIN_BREAK_GLASS',
+    tenantId: input.tenantId,
+    membershipId: input.membershipId,
+    targetName: input.targetName ?? null,
+    targetRole: input.targetRole ?? null,
+    performedByUid: input.performedByUid,
+    performedByEmail: input.performedByEmail ?? null,
+    mode: input.mode ?? null,
+  };
 }
 
 export interface PinLoginAllowedInput {

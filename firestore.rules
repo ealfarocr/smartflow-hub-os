@@ -480,5 +480,13 @@ service cloud.firestore {
     match /tenant_onboarding_states/{tenantId} {
       allow read, write: if false;
     }
+
+    // Bitácora de rescates de acceso (break-glass del SuperAdmin). La escribe
+    // solo el Admin SDK; el SuperAdmin puede leerla para revisarla. Nunca
+    // contiene códigos ni hashes.
+    match /security_audit/{eventId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
   }
 }
