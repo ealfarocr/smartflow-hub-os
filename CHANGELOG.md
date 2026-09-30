@@ -1,6 +1,17 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-09-30 — Break-glass: el SuperAdmin puede rescatar el acceso de un usuario de tenant
+
+- Auditoría: `setVendorPin` → `checkVendorPinAuth` solo admitía al SuperAdmin para
+  bootstrap (tenant sin Owner activo). Con un Owner activo bloqueado, lockout total.
+- `0f311a3` — tercer camino explícito (`breakGlass` + SuperAdmin), evento en
+  `security_audit`, regla nueva en firestore.rules, confirmación en la UI.
+- 9 tests nuevos en `functions/src/vendorPinAuth.test.ts` (incluye: usuario común no
+  puede aunque mande la bandera; SuperAdmin sin pedido explícito sigue bloqueado; el
+  evento nunca lleva código/hash/salt). 332/332 en total.
+- Deploy: `functions:setVendorPin`, `firestore:rules`, `hosting:app`. Sin tocar Meta,
+  WhatsApp, roles ni datos de tenants.
 ## 2026-09-25/26 — Billing reactivado; panel QA de media sacado de producción
 
 - Verificación post-billing (solo lectura): sin errores `billing is disabled` tras

@@ -1,5 +1,36 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔑 Rescate de acceso del SuperAdmin (break-glass) — desplegado (2026-09-30, commit 0f311a3)
+
+**Bloqueo administrativo en USADITOS:** EDUARDO ADMIN
+(`Bw4GC41RiSQ1s3pw4RpypL2eEcz1_t-1788554584458`, Owner, status `active`, con
+credencial y handle `eduardoadmin`) perdió su código. EDUARDO ALFARO
+(SuperAdmin global, uid `qsiEuc1lBWUOkjUQRiYvsRf3Syn2`) **no tiene membership en
+USADITOS**. El guard `checkVendorPinAuth` solo dejaba pasar al SuperAdmin cuando
+el tenant no tenía NINGÚN Owner activo — y acá el único Owner activo es
+justamente quien perdió el acceso. Nadie podía regenerarlo.
+
+**Fix (`0f311a3`):** tercer camino en `checkVendorPinAuth` — SuperAdmin global
+**+** `breakGlass: true` explícito. La UI solo lo ofrece si la llamada normal fue
+rechazada por permisos y quien opera es SuperAdmin, con confirmación que explica
+las consecuencias. Se registra en `security_audit` (regla nueva: lectura solo
+SuperAdmin, escritura solo Admin SDK) con `buildBreakGlassAuditEvent`, función
+pura que nunca incluye código, hash ni salt. La invalidación del código previo,
+de los secretos de dispositivo y de las sesiones abiertas ya existía en el camino
+`regenerate` y no se tocó.
+
+Tests 332/332 (9 nuevos), builds OK, lint sin regresión (front 334, functions 100).
+Deploy: `functions:setVendorPin`, `firestore:rules`, `hosting:app`.
+
+### Próximo paso exacto
+
+Eduardo entra a hub.smartflow-suite.com como SuperAdmin → USADITOS → Usuarios →
+EDUARDO ADMIN → generar acceso nuevo. La primera llamada va a fallar por permisos
+(es lo esperado) y aparece la confirmación de RESCATE DE SUPERADMIN; al aceptar,
+el código nuevo se muestra UNA vez en el modal de acceso. El agente no puede
+ejecutarlo: requiere su sesión autenticada.
+
+
 ## ✅ Billing restaurado + panel QA fuera de producción (2026-09-25, commit 8ec1d8c)
 
 **Billing:** la cuenta "Pago de Firebase" fue reactivada. Último error
