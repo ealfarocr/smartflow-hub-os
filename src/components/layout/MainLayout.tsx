@@ -15,6 +15,8 @@ import { CreateTenantModal } from '@/modules/superadmin/CreateTenantModal'
 import SupportAgent from '../support/SupportAgent'
 import { OnboardingBanner } from '../onboarding/OnboardingBanner'
 import { NotificationBell } from './NotificationBell'
+import { InboundSoundToggle } from './InboundSoundToggle'
+import { useInboundAlerts } from '@/hooks/useInboundAlerts'
 import { getEffectiveTools, ToolKey, isAdminRole } from '@/utils/permissions'
 import { filterNavigation } from './navigationAccess'
 
@@ -119,6 +121,9 @@ export const MainLayout = () => {
   
   // Activar rastreo de presencia y actividad
   usePresenceTracker();
+
+  // Sonido + contador en la pestaña para mensajes de WhatsApp entrantes (global).
+  useInboundAlerts();
 
   const userInitials = user?.name ? user.name.substring(0, 2).toUpperCase() : 'AD';
 
@@ -422,6 +427,7 @@ export const MainLayout = () => {
                 {userInitials}
               </span>
             </div>
+            <InboundSoundToggle />
             <NotificationBell />
             <button
               onClick={toggleTheme}
