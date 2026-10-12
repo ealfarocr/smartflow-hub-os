@@ -1,6 +1,30 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-12 — Alerta sonora global de mensajes WhatsApp entrantes
+
+- Agente: Claude Code. Commit `24821fd`; deploy solo `hosting:app`. Sin cambios en webhook, Meta, reglas ni Firestore.
+- Nuevos: `useInboundAlerts`, `inboundAlerts.ts`, `inboundSound.ts`, `InboundSoundToggle`; `MainLayout` los monta.
+- Validación: vitest 351/351 (19 nuevos: primer snapshot, repetición, outbound, reset de unread, recarga, tenants, roles, preferencia, autoplay), tsc OK, build OK, eslint sin errores nuevos.
+- No verificado: QA física en navegador con mensaje real.
+
+## 2026-10-12 — USADITOS CR: WhatsApp conectado (manual controlado)
+
+- Agente: Claude Code (script Admin SDK fuera del repo; sin cambios de código ni deploy; sin mensajes enviados).
+- Meta: app SmartFlow Hub Connect suscrita SOLO a la WABA `2093517247974916` (token dedicado SYSTEM_USER `usaditoscrapi`, permisos whatsapp_business_management/messaging).
+- Firestore: `integrations/YZFXfMJtwV91oEDqclVf` creado con `create()` para `t-1791700036682` (phoneNumberId `1395528163640894`, +1 229-800-2808, appSecret/verifyToken null, el webhook usa el secreto global). El token nuevo vive solo en ese doc y en un archivo local fuera del repo (`~/.aasg-secrets/`).
+- Validación: 1 integración WhatsApp para el clon; el webhook resuelve el phoneNumberId nuevo al clon; `integrations/C1lnMixK9riUA7HlQzPT` intacto (mismo updateTime, mismas huellas). Resultado: PASS.
+- No verificado: recepción real de un mensaje (firma con WHATSAPP_APP_SECRET global) ni envío.
+
+## 2026-10-11 — Clon operativo USADITOS CR (config + equipo) para contingencia de WhatsApp
+
+- Agente: Claude Code (script Admin SDK fuera del repo, solo `create()`; sin cambios de código ni deploy).
+- Nuevo tenant `t-1791700036682` "USADITOS CR": tenants + settings (pipeline, features, branding con logo copiado a su propia ruta, plantillas, comercial, cobros, Multi-Agente remapeado) + 10 memberships (mismos userId; los preparados con IDs nuevos).
+- NO se copió: integrations/credenciales, PIN hashes, handles, conversaciones, leads, mensajes, dedup, presencia, dispositivos, sesiones, logs, onboarding state.
+- `ownerEmail` se escribe DESPUÉS de crear el tenant a propósito: `onTenantCreatedAutomation` (onCreate) enviaría correo de bienvenida + factura y agendaría seguimientos.
+- Validación: origen intacto (18 docs, updateTime + hash, incl. `integrations/C1lnMixK9riUA7HlQzPT`); 0 docs del clon en 11 colecciones operativas; sin llaves de credenciales; sin onboarding state ni correos encolados. Resultado: PASS.
+- No verificado: login real de cada persona por UI (requiere sesión humana).
+
 ## 2026-09-30 — Auditoría solo lectura: ¿sirve +506 6148 5138 como número alterno?
 
 - El token de producción de USADITOS (SYSTEM_USER, scopes whatsapp_business_*) alcanza

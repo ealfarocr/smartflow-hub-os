@@ -1,5 +1,39 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔔 Alerta sonora global de WhatsApp — desplegada (2026-10-12, commit 24821fd)
+
+- `useInboundAlerts` (montado una vez en `MainLayout`): suscripción por tenant, detección por `lastInboundDate` (primer snapshot ignorado), beep Web Audio propio (`inboundSound.ts`, AudioContext compartido, se reanuda con el primer clic/tecla), botón "Sonido de mensajes" (ON por defecto, `localStorage` por usuario) y contador `(n)` en el título.
+- Quién recibe aviso: Owner/Admin todo el tenant; resto de roles solo `advisorId` propio + sin asignar si está en `multiAgentConfig.includedUserIds`. Las reglas y la lista de /conversaciones NO restringen lectura por asesor (todo miembro lee el tenant): el filtro es solo de aviso. No se mira `operationalStatus` (presencia).
+- SuperAdmin suplantando un negocio no recibe avisos. Sin FCM ni service worker: solo con SmartFlow abierto.
+- Tests 351/351 (19 nuevos), tsc y build OK, lint de archivos nuevos limpio. Deploy: solo `hosting:app`.
+- No verificado: QA física (pestaña en segundo plano, Chrome desktop, mensaje real de WhatsApp).
+
+### Próximo paso exacto
+
+Con USADITOS y USADITOS CR abiertos en Chrome: hacer clic una vez en la página, dejar la pestaña en segundo plano y escribir al número de WhatsApp desde un teléfono; debe sonar una vez y el título mostrar `(1) …`. Probar también con un Asesor (conversación suya vs. de otro).
+
+## 📲 USADITOS CR — WhatsApp conectado (2026-10-12)
+
+- `integrations/YZFXfMJtwV91oEDqclVf` (tenant `t-1791700036682`, +1 229-800-2808, WABA `2093517247974916`, phoneNumberId `1395528163640894`). Original USADITOS/+506 7229 2718 intacto.
+- Pendiente: prueba controlada (inbound real + respuesta dentro de la ventana de 24h). Display name "Usaditos CR" sigue en revisión de Meta (límite de mensajes bajo hasta su aprobación). El clon sigue `pending`; los PIN del equipo aún no se generaron en el clon.
+
+### Próximo paso exacto
+
+Desde un teléfono propio, escribir al +1 229-800-2808; comprobar que llega a USADITOS CR (no a USADITOS) y responder desde el CRM. Si el webhook devuelve 403, revisar `WHATSAPP_APP_SECRET` (rotación pendiente, paso 13 del checklist).
+
+## 🧬 USADITOS CR — clon de configuración y equipo (2026-10-11)
+
+- Tenant `t-1791700036682` creado como copia de `t-1788554584458` (solo config + equipo). Registro/huellas del clon: fuera del repo (scratchpad de la sesión).
+- Integración WhatsApp propia: **NO existe todavía** (0 docs en `integrations` para el clon). Destino: +1 229-800-2808, WABA `2093517247974916` (Meta Cloud API, propietaria SmartFlow Hub). El Phone Number ID sale del Embedded Signup.
+- USADITOS original y +506 7229 2718 (`integrations/C1lnMixK9riUA7HlQzPT`) verificados sin cambios.
+- Los 2 usuarios con PIN (EDUARDO ADMIN, eduardo pruebas) conservan su uid: acceden a ambos negocios con el TenantSwitcher. Sin handle/credencial propia en el clon: un Owner/SuperAdmin debe usar "Generar PIN" en USADITOS CR (modo `attach`, mantiene uid). Los 7 "prepared" y la invitación Owner por correo quedaron en el mismo estado que en el origen.
+- Estado `pending` y plan `enterprise` copiados tal cual del origen.
+- Sin deploy ni cambios de código.
+
+### Próximo paso exacto
+
+Embedded Signup de USADITOS CR (como SuperAdmin, impersonando el tenant) con la WABA `2093517247974916` y +1 229-800-2808. Verificar después que `integrations` tenga UN doc nuevo para el clon, que `C1lnMixK9riUA7HlQzPT` siga con el mismo `updateTime`, y que el webhook resuelva el nuevo `phoneNumberId` al clon.
+
 ## 🔑 Rescate de acceso del SuperAdmin (break-glass) — desplegado (2026-09-30, commit 0f311a3)
 
 **Bloqueo administrativo en USADITOS:** EDUARDO ADMIN
