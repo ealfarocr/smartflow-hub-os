@@ -1,6 +1,11 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-12 — Selector de turno: menú visible completo en móvil
+
+- Agente: Claude Code. Solo frontend (`OperationalStatusSelector`, nuevo `dropdownPosition.ts`); deploy solo `hosting:app`. Sin cambios de media, Functions ni Rules.
+- Validación: vitest 400/400, tsc+build OK. No verificado: QA física en Android.
+
 ## 2026-10-12 — Acceso por código: el negocio del enlace/servidor gana (fase 1, cliente)
 
 - Agente: Claude Code. Solo frontend (`PinAccessView`, nuevo `pinAccessTenant.ts`); deploy solo `hosting:app`. Sin cambios en Functions, Rules, ConversationService ni modelo de datos.

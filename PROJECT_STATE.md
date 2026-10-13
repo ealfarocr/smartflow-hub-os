@@ -1,5 +1,16 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 📱 Selector de turno responsive — desplegado (2026-10-12)
+
+- Bug: en móvil el menú del selector (`absolute right-0 w-48`) se recortaba por la izquierda (botón a ~110 px del borde; el layout tiene `overflow-hidden`).
+- Fix: portal a `document.body` + `fixed`, posición con `computeMenuPosition` (`src/utils/dropdownPosition.ts`: clamping a 8 px, ancho acotado, flip, `maxHeight` con scroll interno, `visualViewport`); cierra con clic fuera y Escape.
+- Validación: vitest 400/400 (8 nuevos), tsc+build OK. Deploy solo `hosting:app`. No verificado: QA física en Android.
+- Pendiente aparte: auditoría de media (video no llegó a Storage; subida de fotos lenta por la subida resumible) — sin cambios de código.
+
+### Próximo paso exacto
+
+QA física en Android Chrome (ancho angosto): abrir el selector del header y confirmar que el menú se ve completo. Luego repetir el video corto y copiar el panel QA.
+
 ## 🔐 Acceso por código multi-tenant — fix cliente fase 1 (2026-10-12)
 
 - Bug: `eduardo pruebas` (uid `nqjp…`) tiene membresías activas en USADITOS (`t-1788554584458`) y USADITOS CR (`t-1791700036682`). `loginWithPin` validaba y devolvía el negocio correcto, pero el cliente lo ignoraba y `authStore` caía en la primera membership (o en el negocio guardado).

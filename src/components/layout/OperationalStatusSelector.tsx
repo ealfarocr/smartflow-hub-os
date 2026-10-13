@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { computeMenuPosition, type MenuPosition } from '@/utils/dropdownPosition';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuthStore } from '@/stores/authStore';
@@ -38,6 +40,39 @@ export const OperationalStatusSelector = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<MenuPosition | null>(null);
+
+  // El menú va en un portal a document.body con position:fixed: el contenedor
+  // del layout tiene overflow-hidden y, en móvil, el botón queda cerca del borde
+  // izquierdo — un menú absolute right-0 de 192px se salía por ahí. Se mide el
+  // botón y se acota al viewport visible (visualViewport = sin la barra del
+  // navegador ni el teclado), con scroll interno si no cabe.
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const r = trigger.getBoundingClientRect();
+    const vv = window.visualViewport;
+    setMenuPos(computeMenuPosition(
+      { top: r.top, bottom: r.bottom, left: r.left, right: r.right },
+      { width: vv?.width ?? window.innerWidth, height: vv?.height ?? window.innerHeight },
+      { desiredWidth: 192, contentHeight: menuRef.current?.scrollHeight ?? STATUS_ORDER.length * 40 + 12 },
+    ));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    updateMenuPosition();
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+    window.visualViewport?.addEventListener('resize', updateMenuPosition);
+    return () => {
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+      window.visualViewport?.removeEventListener('resize', updateMenuPosition);
+    };
+  }, [isOpen, updateMenuPosition]);
 
   useEffect(() => {
     if (!user?.id || !activeMembership?.tenantId) return;
@@ -62,10 +97,18 @@ export const OperationalStatusSelector = () => {
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setIsOpen(false);
+      const target = e.target as Node;
+      // El menú vive en un portal: ya no es descendiente de containerRef.
+      if (containerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setIsOpen(false);
     };
+    const handleEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsOpen(false); };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, []);
 
   const handleSelect = async (next: OperationalStatus) => {
@@ -92,6 +135,9 @@ export const OperationalStatusSelector = () => {
   return (
     <div className="relative" ref={containerRef}>
       <button
+        ref={triggerRef}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
         onClick={() => setIsOpen((o) => !o)}
         disabled={isSaving}
         className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors disabled:opacity-50"
@@ -100,14 +146,21 @@ export const OperationalStatusSelector = () => {
         <span className="text-xs font-bold text-slate-700 dark:text-slate-200 hidden sm:inline">{meta.label}</span>
         <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
       </button>
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 py-1.5 z-50">
+      {isOpen && createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          style={menuPos
+            ? { position: 'fixed', top: menuPos.top, left: menuPos.left, width: menuPos.width, maxHeight: menuPos.maxHeight }
+            : { position: 'fixed', top: 0, left: 0, visibility: 'hidden' }}
+          className="overflow-y-auto overscroll-contain bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 py-1.5 z-[60]">
           {STATUS_ORDER.map((s) => {
             const meta = STATUS_META[s];
             const isActive = s === status;
             return (
               <button
                 key={s}
+                role="menuitem"
                 onClick={() => handleSelect(s)}
                 className={`w-full flex items-center gap-2.5 px-4 py-2 text-sm border-2 transition-colors active:scale-[0.98] ${
                   isActive
@@ -121,7 +174,8 @@ export const OperationalStatusSelector = () => {
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
