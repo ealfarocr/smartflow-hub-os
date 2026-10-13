@@ -1,5 +1,17 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔐 Acceso por código multi-tenant — fix cliente fase 1 (2026-10-12)
+
+- Bug: `eduardo pruebas` (uid `nqjp…`) tiene membresías activas en USADITOS (`t-1788554584458`) y USADITOS CR (`t-1791700036682`). `loginWithPin` validaba y devolvía el negocio correcto, pero el cliente lo ignoraba y `authStore` caía en la primera membership (o en el negocio guardado).
+- Fix (solo cliente): `PinAccessView` persiste en `psmx_active_tenant` el tenantId que devuelve el servidor ANTES de `signInWithCustomToken` (también en `loginWithDevice` y sesión viva) y verifica con `ensureActiveTenant`; el enlace `?h=&t=&n=` gana sobre la identidad recordada de otro negocio, que no se borra; la entrada rápida solo aplica si la identidad mostrada es la recordada. Helpers en `src/modules/auth/pinAccessTenant.ts`.
+- NO hecho a propósito: claims `tenantId`, cambios en Functions/Rules/ConversationService/clonación, fallback general de `authStore`. Riesgo estructural pendiente: el uid es compartido entre negocios clonados.
+- Validación: vitest 392/392 (21 nuevos, con `authStore` real), tsc+build OK, lint sin errores nuevos.
+- No verificado: QA física en teléfono.
+
+### Próximo paso exacto
+
+QA física con `eduardo pruebas`: (A) Chrome normal con identidad previa del original + enlace USADITOS CR => debe terminar en USADITOS CR; (B) incógnito + enlace USADITOS CR => USADITOS CR; (C) enlace del original => original. Confirmar por el inbox visible, no por la URL.
+
 ## 🕒 Impersonación sin turno + presencia vencida (2026-10-12)
 
 - Auditoría: el "Trabajando" vs "Fuera de turno" venía de dos sesiones distintas (ADMIN real en USADITOS vs SuperAdmin ALFARO impersonando, probablemente USADITOS CR sin `user_presence`). Datos correctos, sin fallos de escritura.

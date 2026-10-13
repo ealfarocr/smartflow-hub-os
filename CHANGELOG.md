@@ -1,6 +1,11 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-12 — Acceso por código: el negocio del enlace/servidor gana (fase 1, cliente)
+
+- Agente: Claude Code. Solo frontend (`PinAccessView`, nuevo `pinAccessTenant.ts`); deploy solo `hosting:app`. Sin cambios en Functions, Rules, ConversationService ni modelo de datos.
+- Validación: vitest 392/392 (21 nuevos), tsc+build OK, eslint sin errores nuevos. No verificado: QA física en teléfono.
+
 ## 2026-10-12 — Impersonación sin selector de turno + presencia vencida
 
 - Agente: Claude Code. Solo frontend. Nuevo `presenceStatus.ts` (`resolvePresenceStatus`, `resolveOperationalStatus`, `isImpersonatingTenant`); `MainLayout`, `usePresenceTracker`, `UsersManagementView` y `formatLastSeen` (export `toSafeDate`) ajustados.

@@ -4,6 +4,7 @@ import { signInWithCustomToken, signOut } from 'firebase/auth';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 import { auth } from '@/lib/firebase';
 import { useAuthStore, waitForSessionReady } from '@/stores/authStore';
+import { resolveAccessIdentity, isSameIdentity, persistValidatedTenant, ensureActiveTenant } from './pinAccessTenant';
 import { AuthService } from '@/services/AuthService';
 import {
   getOrCreateDeviceId,
@@ -46,15 +47,11 @@ export const PinAccessView = () => {
   // Lazy initializer (no useEffect): la identidad recordada o el enlace de
   // alta (?h=&t=&n=) son datos disponibles de entrada, no algo que llegue de
   // forma asíncrona — no hace falta sincronizar nada externo acá.
-  const [identity, setIdentity] = useState<VendorIdentity | null>(() => {
-    const remembered = getRememberedVendorIdentity();
-    if (remembered) return remembered;
-    const h = searchParams.get('h');
-    const t = searchParams.get('t');
-    const n = searchParams.get('n');
-    if (h && t && n) return { loginHandle: h, tenantId: t, displayName: decodeURIComponent(n) };
-    return null;
-  });
+  // El enlace explícito gana sobre la identidad recordada de otro negocio.
+  const [remembered] = useState<VendorIdentity | null>(() => getRememberedVendorIdentity());
+  const [identity, setIdentity] = useState<VendorIdentity | null>(() =>
+    resolveAccessIdentity({ h: searchParams.get('h'), t: searchParams.get('t'), n: searchParams.get('n') }, remembered),
+  );
   const [handleInput, setHandleInput] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -68,7 +65,9 @@ export const PinAccessView = () => {
   // codigo: la sesion viva de Firebase, o la credencial de dispositivo que el
   // servidor emitio al vincularse (lo que permite volver despues de cerrar sesion).
   const [hasDeviceSecret] = useState(() => !!getDeviceSecret());
-  const quickEntryAvailable = !!identity && !forceCode && (hasLiveSession || hasDeviceSecret);
+  // Solo si la identidad mostrada es la recordada: la sesión viva y la credencial
+  // de dispositivo son de esa persona en ese negocio, no de la del enlace.
+  const quickEntryAvailable = !!identity && !forceCode && isSameIdentity(identity, remembered) && (hasLiveSession || hasDeviceSecret);
 
   // Si la entrada rápida falla, el teclado aparece justo debajo del dedo que
   // mantenía el botón: al soltar, ese toque caía en un dígito, lo escribía solo
@@ -121,10 +120,18 @@ export const PinAccessView = () => {
           { customToken: string; displayName: string }
         >(getFunctions(), 'loginWithDevice');
         const res = await loginWithDevice({ deviceId: getOrCreateDeviceId(), deviceSecret: secret, tenantId: identity.tenantId });
+        // El servidor ya validó este negocio para el dispositivo: pasa a ser el
+        // activo ANTES de que authStore resuelva las membresías de la sesión.
+        persistValidatedTenant(identity.tenantId);
         const cred = await signInWithCustomToken(auth, res.data.customToken);
         await AuthService.linkPendingMembership();
-        playAccessFeedback();
         await waitForSessionReady(cred.user.uid);
+        if (!(await ensureActiveTenant(identity.tenantId, useAuthStore))) {
+          try { await signOut(auth); } catch { /* igual seguimos */ }
+          showCodeAfterQuickEntry('No se pudo abrir este negocio. Usá tu código de acceso.');
+          return;
+        }
+        playAccessFeedback();
         navigate('/', { replace: true });
         return;
       }
@@ -147,6 +154,12 @@ export const PinAccessView = () => {
         return;
       }
 
+      // Sesión viva: el servidor confirmó este negocio, que debe quedar activo.
+      persistValidatedTenant(identity.tenantId);
+      if (!(await ensureActiveTenant(identity.tenantId, useAuthStore))) {
+        showCodeAfterQuickEntry('No se pudo abrir este negocio. Usá tu código de acceso.');
+        return;
+      }
       playAccessFeedback();
       navigate('/', { replace: true });
     } catch {
@@ -181,6 +194,11 @@ export const PinAccessView = () => {
         pin,
       });
 
+      // AUTORIDAD: el tenantId que devolvió el servidor (no el del enlace). Debe
+      // quedar guardado ANTES del sign-in: authStore resuelve el negocio activo
+      // apenas cambia la sesión, y un usuario con varios negocios (mismo uid)
+      // caía en el primero que devolvía Firestore.
+      persistValidatedTenant(result.data.tenantId);
       const cred = await signInWithCustomToken(auth, result.data.customToken);
       await AuthService.linkPendingMembership();
 
@@ -221,8 +239,14 @@ export const PinAccessView = () => {
       }
 
       rememberVendorIdentity(confirmed);
-      playAccessFeedback();
       await waitForSessionReady(cred.user.uid);
+      if (!(await ensureActiveTenant(confirmed.tenantId, useAuthStore))) {
+        try { await signOut(auth); } catch { /* igual seguimos */ }
+        setPin('');
+        setError('No se pudo abrir ese negocio. Pedí un acceso nuevo a tu jefe o encargado.');
+        return;
+      }
+      playAccessFeedback();
       navigate('/', { replace: true });
     } catch (err: unknown) {
       setPin('');
