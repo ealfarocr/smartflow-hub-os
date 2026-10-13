@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { RouteErrorBoundary } from './RouteErrorBoundary'
-import { LayoutDashboard, MessageSquareText, Users, Calendar, Settings, Package, FileText, Menu, X, LogOut, LayoutGrid, Plus, Zap, Sun, Moon, Bot, ShieldCheck, CreditCard, ShoppingBag, LayoutList, Mail, GraduationCap, Handshake, FolderOpen, Sparkles, ChevronDown, ChevronRight, Headset, Blocks, BadgeCheck } from 'lucide-react'
+import { LayoutDashboard, MessageSquareText, Users, Calendar, Settings, Package, FileText, Menu, X, LogOut, LayoutGrid, Plus, Zap, Sun, Moon, Bot, ShieldCheck, CreditCard, ShoppingBag, LayoutList, Mail, GraduationCap, Handshake, FolderOpen, Sparkles, ChevronDown, ChevronRight, Headset, Blocks, BadgeCheck, Eye } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useUIStore } from '@/stores/uiStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -9,6 +9,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { usePresenceTracker } from '@/hooks/usePresenceTracker'
 import { OperationalStatusSelector } from '@/components/layout/OperationalStatusSelector'
+import { isImpersonatingTenant } from '@/utils/presenceStatus'
 import { ToastContainer } from '@/components/ui/Toast'
 import { TenantFeatures } from '@/types'
 import { CreateTenantModal } from '@/modules/superadmin/CreateTenantModal'
@@ -418,7 +419,14 @@ export const MainLayout = () => {
             <Menu className="h-6 w-6" />
           </button>
           <div className="flex-1 flex justify-end items-center space-x-4">
-            <OperationalStatusSelector />
+            {isImpersonatingTenant(impersonatedName, activeMembership) ? (
+              <span className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-500 dark:text-slate-300">
+                <Eye className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">SuperAdmin · Vista del negocio</span>
+              </span>
+            ) : (
+              <OperationalStatusSelector />
+            )}
             <div className="hidden sm:flex items-center text-sm font-medium text-slate-600 dark:text-slate-400 mr-2">
                {user?.name || 'Cargando...'}
             </div>

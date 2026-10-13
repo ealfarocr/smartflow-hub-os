@@ -12,11 +12,19 @@ import type { VendorAccessData } from './vendorAccessHelpers';
 import { buildAccessLink, displayMemberEmail } from './vendorAccessHelpers';
 import { primaryActionMeta, accessStateLabel, hasResolvedAccess, type TenantAccessEntry } from './accessActions';
 import { formatLastSeen } from '@/utils/formatLastSeen';
+import { resolvePresenceStatus, resolveOperationalStatus } from '@/utils/presenceStatus';
 
 export const UsersManagementView = () => {
   const { teamMembers, presenceMap, workSessionMap, updateMemberRole, updateMemberStatus, createDraftMember, sendInvitation, createPreparedMember, convertPreparedToDraft, updateAllowedTools, subscribe, isLoading } = useUserStore();
   const { activeMembership } = useAuthStore();
   const { addToast } = useUIStore();
+  // Reloj del render: sin esto, quien deja de latir no genera snapshot y la
+  // columna PRESENCIA nunca pasaría a Offline sola.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (activeMembership?.tenantId) {
@@ -346,8 +354,9 @@ Ningún Owner/Admin activo de este negocio puede generar este acceso.
 
   const renderPresence = (u: Row) => {
     const p = presenceMap[u.userId];
-    const isOnline = p?.status === 'online';
-    const isIdle = p?.status === 'idle';
+    const resolved = resolvePresenceStatus(p, new Date(nowTick), activeMembership?.tenantId);
+    const isOnline = resolved === 'online';
+    const isIdle = resolved === 'idle';
     return (
       <>
         <div className="relative">
@@ -380,7 +389,7 @@ Ningún Owner/Admin activo de este negocio puede generar este acceso.
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
   const renderOperationalStatus = (u: Row) => {
-    const opStatus = presenceMap[u.userId]?.operationalStatus || 'off_shift';
+    const opStatus = resolveOperationalStatus(presenceMap[u.userId], activeMembership?.tenantId);
     const meta = OPERATIONAL_META[opStatus];
     const session = workSessionMap[u.userId];
     const connectedSeconds = (session?.activeSeconds || 0) + (session?.idleSeconds || 0);

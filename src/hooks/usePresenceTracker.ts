@@ -3,15 +3,18 @@ import { useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { PresenceService } from '@/services/firebase/PresenceService';
 import { UserPresence } from '@/types';
+import { PRESENCE_HEARTBEAT_MS, isImpersonatingTenant } from '@/utils/presenceStatus';
 
 export function usePresenceTracker() {
-  const { user, activeMembership } = useAuthStore();
+  const { user, activeMembership, impersonatedName } = useAuthStore();
   const location = useLocation();
   const lastActivityRef = useRef<number>(Date.now());
   const statusRef = useRef<'online' | 'idle' | 'offline'>('online');
 
   useEffect(() => {
     if (!user || !activeMembership) return;
+    // SuperAdmin viendo un negocio ajeno no es miembro: no crea presencia ni turno ahí.
+    if (isImpersonatingTenant(impersonatedName, activeMembership)) return;
 
     const tenantId = activeMembership.tenantId;
     const uid = user.id;
@@ -67,7 +70,7 @@ export function usePresenceTracker() {
       } catch (err) {
         console.error('Error en heartbeat de work_session:', err);
       }
-    }, 60 * 1000);
+    }, PRESENCE_HEARTBEAT_MS);
 
     // Detectar actividad
     const handleActivity = () => {
@@ -96,5 +99,5 @@ export function usePresenceTracker() {
       // Opcional: Marcar como offline al desmontar (aunque el cierre de pestaña no siempre lo dispara)
       // PresenceService.updatePresence({ uid, tenantId, status: 'offline' });
     };
-  }, [user?.id, activeMembership?.tenantId, location.pathname]);
+  }, [user?.id, activeMembership?.tenantId, activeMembership?.id, impersonatedName, location.pathname]);
 }

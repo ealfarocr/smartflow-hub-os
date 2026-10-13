@@ -1,5 +1,17 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🕒 Impersonación sin turno + presencia vencida (2026-10-12)
+
+- Auditoría: el "Trabajando" vs "Fuera de turno" venía de dos sesiones distintas (ADMIN real en USADITOS vs SuperAdmin ALFARO impersonando, probablemente USADITOS CR sin `user_presence`). Datos correctos, sin fallos de escritura.
+- Impersonando (`impersonatedName` o membership `impersonated_*`): el header muestra "SuperAdmin · Vista del negocio" en vez del selector de turno y `usePresenceTracker` no escribe presencia ni heartbeat. Usuarios reales: sin cambios.
+- Presencia derivada en lectura (`src/utils/presenceStatus.ts`): heartbeat real 60 s (`PRESENCE_HEARTBEAT_MS`, compartido con el hook); `PRESENCE_STALE_THRESHOLD_MS` = 3 heartbeats = 180 s; `lastSeenAt` vencido/ausente/ilegible => OFFLINE aunque el doc diga online/idle. Usuarios re-renderiza cada 30 s. NO se escribe `offline` a Firestore. `operationalStatus` no se toca.
+- Pendiente a propósito: `work_session` huérfana `27l5kkdQwyPk5ELIkOPG` (ADMIN, abierta desde 2026-09-09, idle ~9 días) — NO tocada.
+- Validación: vitest 371/371 (20 nuevos), tsc+build OK, lint sin errores nuevos. QA física no realizada.
+
+### Próximo paso exacto
+
+QA física: ADMIN en Brave y SuperAdmin impersonando en Chrome; ver que Chrome muestre "SuperAdmin · Vista del negocio", que ADMIN salga En línea/Ausente, y que tras cerrar la pestaña de ADMIN pase a Offline en ~3 min con su turno aún "Trabajando". Luego decidir con el usuario el cierre de la work_session huérfana.
+
 ## 🔔 Alerta sonora global de WhatsApp — desplegada (2026-10-12, commit 24821fd)
 
 - `useInboundAlerts` (montado una vez en `MainLayout`): suscripción por tenant, detección por `lastInboundDate` (primer snapshot ignorado), beep Web Audio propio (`inboundSound.ts`, AudioContext compartido, se reanuda con el primer clic/tecla), botón "Sonido de mensajes" (ON por defecto, `localStorage` por usuario) y contador `(n)` en el título.

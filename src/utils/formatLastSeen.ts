@@ -5,7 +5,7 @@
 // silencioso que terminaba mostrándose tal cual ("Visto el Invalid Date").
 export type PresenceTimestampLike = string | number | { toDate: () => Date } | null | undefined;
 
-function toSafeDate(value: PresenceTimestampLike): Date | null {
+export function toSafeDate(value: PresenceTimestampLike): Date | null {
   if (value == null) return null;
   if (typeof value === 'object') {
     if (typeof value.toDate !== 'function') return null;

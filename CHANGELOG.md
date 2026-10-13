@@ -1,6 +1,12 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-12 — Impersonación sin selector de turno + presencia vencida
+
+- Agente: Claude Code. Solo frontend. Nuevo `presenceStatus.ts` (`resolvePresenceStatus`, `resolveOperationalStatus`, `isImpersonatingTenant`); `MainLayout`, `usePresenceTracker`, `UsersManagementView` y `formatLastSeen` (export `toSafeDate`) ajustados.
+- Umbral de presencia = 3 × heartbeat de 60 s = 180 s; derivado en UI, sin escribir `offline`. `operationalStatus`, `setOperationalStatus`, work_sessions, WhatsApp y Meta intactos.
+- Validación: vitest 371/371, tsc+build OK, eslint sin errores nuevos. No verificado: QA física.
+
 ## 2026-10-12 — Alerta sonora global de mensajes WhatsApp entrantes
 
 - Agente: Claude Code. Commit `24821fd`; deploy solo `hosting:app`. Sin cambios en webhook, Meta, reglas ni Firestore.
