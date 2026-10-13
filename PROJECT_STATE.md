@@ -1,5 +1,16 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🎞️ Adjuntos del chat: feedback de subida y rechazo visible (2026-10-12)
+
+- Contexto: un video de ~10 s no aparecía en el chat (rechazado por >16 MB, con un toast de 3 s que se perdía). Fotos y videos cortos ya funcionaban.
+- Hecho (solo frontend): aviso rojo persistente y cerrable al rechazar por tamaño, con tamaño real, límite y qué hacer; progreso real "Subiendo… X%" (barra en la miniatura + línea de estado); estados `uploading/ready/sending/sent/error` con motivo concreto; candado síncrono contra doble envío y dedupe del mismo archivo mientras sube. Lógica en `src/modules/conversations/mediaUpload.ts`.
+- Sin cambios: límites (5/16/16/100 MB), compresión de fotos, ruta `chat-attachments/{tenant}/…`, Functions, Rules, Meta. Sin compresión de video.
+- Validación: vitest 425/425 (25 nuevos), tsc+build OK, lint sin errores nuevos (los 7 de `ConversationsPageView.tsx` ya existían). Deploy solo `hosting:app`. No verificado: QA física.
+
+### Próximo paso exacto
+
+QA física en Android Chrome con `eduardo pruebas` (USADITOS CR): repetir el video de ~10 s (debe salir el aviso rojo con el tamaño real y quedar hasta cerrarlo), un video corto (debe mostrar el % y enviarse), y una foto de cámara y una de galería (siguen igual, ahora con %). Pendiente aparte: la subida de fotos tarda 3–9 s por la subida resumible (posible mejora con `uploadBytes` para archivos pequeños).
+
 ## 📱 Selector de turno responsive — desplegado (2026-10-12)
 
 - Bug: en móvil el menú del selector (`absolute right-0 w-48`) se recortaba por la izquierda (botón a ~110 px del borde; el layout tiene `overflow-hidden`).

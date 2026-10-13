@@ -1,6 +1,11 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-12 — Adjuntos del chat: progreso y rechazo visibles
+
+- Agente: Claude Code. Solo frontend (`ConversationsPageView`, nuevo `mediaUpload.ts`); deploy solo `hosting:app`. Sin cambios en límites, compresión, Functions, Rules ni Meta.
+- Validación: vitest 425/425, tsc+build OK, eslint sin errores nuevos. No verificado: QA física en el teléfono.
+
 ## 2026-10-12 — Selector de turno: menú visible completo en móvil
 
 - Agente: Claude Code. Solo frontend (`OperationalStatusSelector`, nuevo `dropdownPosition.ts`); deploy solo `hosting:app`. Sin cambios de media, Functions ni Rules.

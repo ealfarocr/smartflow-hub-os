@@ -38,6 +38,11 @@ import { extensionOf, mimeFor, prepareImage, safeFileName } from '@/utils/mediaP
 import { chromeIntentUrl, isOutsideBrowserTab } from '@/utils/openInChrome';
 import { MediaDiagPanel } from './MediaDiagPanel';
 import { FileTapTarget } from './FileTapTarget';
+import {
+  MEDIA_SIZE_LIMITS, oversizeNotice, type PendingMediaAction, type PendingMediaItem, type RejectionNotice,
+  buildChatAttachmentPath, describeUploadFailure, fileKeyOf, isMediaBusy, pendingMediaReducer,
+  progressPercent, readyToSend, statusLine, validateMediaFile,
+} from './mediaUpload';
 import { AudioMessagePlayer } from './components/AudioMessagePlayer';
 
 // Hoy: solo hora (como antes). Otro día: día + mes + hora, para no confundir
@@ -118,16 +123,14 @@ export const ConversationsPageView = () => {
   // responda al toque de inmediato en vez de esperar la subida completa. No reemplaza el
   // mediaUrl/mediaFilename "legacy" (nota de voz, catálogo, borrador por query param), que
   // sigue funcionando exactamente igual.
-  type PendingMediaKind = 'image' | 'video' | 'audio' | 'document';
-  type PendingMediaItem = {
-    id: string;
-    localPreviewUrl: string;
-    filename: string;
-    kind: PendingMediaKind;
-    status: 'uploading' | 'ready' | 'error';
-    remoteUrl: string | null;
-  };
   const [pendingMedia, setPendingMedia] = useState<PendingMediaItem[]>([]);
+  const dispatchPending = (a: PendingMediaAction) => setPendingMedia(prev => pendingMediaReducer(prev, a));
+  // Avisos PERSISTENTES de archivos rechazados (p. ej. video > 16 MB): se quedan hasta que
+  // la persona los cierra — el toast global dura 3 s y justo al volver de la cámara se pierde.
+  const [mediaNotices, setMediaNotices] = useState<(RejectionNotice & { id: string })[]>([]);
+  // Candado SÍNCRONO contra doble toque en Enviar: el estado isSending se actualiza recién en
+  // el próximo render, y dos toques seguidos entran los dos al handler antes de eso.
+  const sendLockRef = useRef(false);
   const pendingMediaRef = useRef<PendingMediaItem[]>([]);
   useEffect(() => { pendingMediaRef.current = pendingMedia; }, [pendingMedia]);
 
@@ -245,17 +248,19 @@ export const ConversationsPageView = () => {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeConversation || !activeMembership?.tenantId || isSending) return;
+    if (!activeConversation || !activeMembership?.tenantId || isSending || sendLockRef.current) return;
     const cleanText = inputText.replace(/[​-‍﻿]/g, '').replace(/\r\n/g, '\n').trim();
     const hasPending = pendingMedia.length > 0;
     if (!cleanText && !mediaUrl && !hasPending) return;
-    if (hasPending && pendingMedia.some(m => m.status === 'uploading')) return; // el botón ya queda disabled en este caso
-    const readyItems = hasPending ? pendingMedia.filter(m => m.status === 'ready' && m.remoteUrl) : [];
+    if (hasPending && isMediaBusy(pendingMedia)) return; // el botón ya queda disabled en este caso
+    const readyItems = hasPending ? readyToSend(pendingMedia) : [];
     if (hasPending && readyItems.length === 0 && !cleanText) {
       addToast('Todos los adjuntos tienen error. Quitalos o reintentá.', 'error');
       return;
     }
+    sendLockRef.current = true;
     setIsSending(true);
+    if (readyItems.length) dispatchPending({ type: 'sending', ids: readyItems.map(i => i.id) });
     try {
       if (hasPending) {
         // Cada imagen/video pendiente se envía como su propio mensaje (mismo sendMessage de
@@ -279,10 +284,11 @@ export const ConversationsPageView = () => {
           const result = await sendMessage(activeConversation, caption, 'advisor', activeMembership.tenantId, item.remoteUrl, item.filename);
           if (isVideoItem) debugAttach('VIDEO_SEND_RESPONSE', result);
           reportOutboundResult(result);
+          dispatchPending({ type: 'sent', id: item.id });
           caption = '';
         }
         pendingMedia.forEach(m => URL.revokeObjectURL(m.localPreviewUrl));
-        setPendingMedia([]);
+        dispatchPending({ type: 'clear' });
         if (!readyItems.length && cleanText) {
           // No había adjuntos listos (todos con error) pero sí texto: igual se envía el texto solo.
           reportOutboundResult(await sendMessage(activeConversation, cleanText, 'advisor', activeMembership.tenantId, null, null));
@@ -292,7 +298,12 @@ export const ConversationsPageView = () => {
       }
       setInputText(''); setMediaUrl(null); setMediaFilename(null);
     } catch (err) { handleSellerError('send', err); }
-    finally { setIsSending(false); }
+    finally {
+      // Lo que no salió vuelve a 'ready' (se puede reintentar); lo que ya salió queda 'sent'.
+      dispatchPending({ type: 'unlock-sending' });
+      sendLockRef.current = false;
+      setIsSending(false);
+    }
   };
 
   // LOOP nocturno USADITOS, Fase 5: reintento manual y explícito de un
@@ -389,7 +400,7 @@ export const ConversationsPageView = () => {
   // Subida REANUDABLE (uploadBytesResumable): en datos móviles un video de 10 MB
   // en un solo request se cortaba sin reintento; así sube por partes, reintenta
   // solo y reporta el avance (<diag>_UPLOAD_PROGRESS cada 25 %).
-  const uploadToStorage = async (file: File, diag: string, safeName: string): Promise<string> => {
+  const uploadToStorage = async (file: File, diag: string, safeName: string, onProgress?: (pct: number) => void): Promise<string> => {
     let etapa = 'AUTH';
     try {
       const { ref, uploadBytesResumable, getDownloadURL } = await import('firebase/storage');
@@ -408,7 +419,7 @@ export const ConversationsPageView = () => {
       await user.getIdToken();
       recordMediaDiag(`${diag}_TOKEN_REFRESH_OK`);
       etapa = 'UPLOAD';
-      const path = `chat-attachments/${activeMembership!.tenantId}/${Date.now()}-${safeName}`;
+      const path = buildChatAttachmentPath(activeMembership!.tenantId, safeName);
       const storageRef = ref(storage, path);
       const contentType = mimeFor(file);
       recordMediaDiag(`${diag}_UPLOAD_START`, {
@@ -419,7 +430,8 @@ export const ConversationsPageView = () => {
       await new Promise<void>((resolve, reject) => {
         let lastBucket = 0;
         uploadBytesResumable(storageRef, file, { contentType }).on('state_changed', (snap) => {
-          const pct = snap.totalBytes ? Math.floor((snap.bytesTransferred / snap.totalBytes) * 100) : 0;
+          const pct = progressPercent(snap.bytesTransferred, snap.totalBytes);
+          onProgress?.(pct);
           const bucket = Math.floor(pct / 25) * 25;
           if (bucket > lastBucket && bucket < 100) {
             lastBucket = bucket;
@@ -469,30 +481,14 @@ export const ConversationsPageView = () => {
   // ya no puede pasar: el texto ahora se arma con el tipo real detectado, no con un ternario
   // aparte. Límites verificados contra la documentación de Meta al momento de este cambio —
   // revisar si Meta los actualiza.
-  const classifyFile = (file: File): PendingMediaKind => {
-    if (file.type.startsWith('video/') || /\.(mp4|mov|3gp|webm)$/i.test(file.name)) return 'video';
-    if (file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(file.name)) return 'image';
-    if (file.type.startsWith('audio/') || /\.(ogg|mp3|m4a|aac|wav|opus)$/i.test(file.name)) return 'audio';
-    return 'document';
-  };
-  const MEDIA_SIZE_LIMITS: Record<PendingMediaKind, number> = {
-    image: 5 * 1024 * 1024,
-    video: 16 * 1024 * 1024,
-    audio: 16 * 1024 * 1024,
-    document: 100 * 1024 * 1024,
-  };
-  const MEDIA_KIND_LABEL: Record<PendingMediaKind, string> = {
-    image: 'imagen', video: 'video', audio: 'audio', document: 'documento',
-  };
-
   // Agrega un archivo al composer con preview local instantánea (URL.createObjectURL, se ve
   // de inmediato) y sube en segundo plano — la UI nunca espera a que termine la subida para
   // reaccionar al toque del usuario. Cada ítem trackea su propio estado (uploading/ready/error).
   const addPendingMedia = (file: File, source: 'PHOTO' | 'VIDEO' | 'GALLERY' | 'ATTACH') => {
     debugAttach(`${source}_FILE_RECEIVED`, { name: file.name, size: file.size, type: file.type });
     const diag = source === 'GALLERY' ? 'CLIP' : source;
-    const kind = classifyFile(file);
-    const limit = MEDIA_SIZE_LIMITS[kind];
+    const validation = validateMediaFile(file);
+    const kind = validation.kind;
     // Solo metadatos: nunca el contenido ni el nombre original completo.
     const safeName = safeFileName(file.name, mimeFor(file));
     recordMediaDiag(`${diag}_FILE_SELECTED`, {
@@ -519,7 +515,7 @@ export const ConversationsPageView = () => {
         sizeMB: +(file.size / 1048576).toFixed(2),
         extension: extMatch ? extMatch[0].toLowerCase() : '(sin extensión)',
         classifyFileResult: kind,
-        selectedLimitMB: limit / 1048576,
+        selectedLimitMB: 16,
         source,
         origin: source === 'VIDEO' ? 'camera' : source === 'GALLERY' ? 'gallery' : source,
       });
@@ -527,15 +523,18 @@ export const ConversationsPageView = () => {
     const rejectTooLarge = (size: number) => {
       debugAttach(`${source}_REJECTED_TOO_LARGE`, { size, kind });
       recordMediaDiag(`${diag}_REJECTED_TOO_LARGE`, { mb: +(size / 1048576).toFixed(1), tipo: kind });
-      addToast(`El archivo pesa ${(size / 1048576).toFixed(1)}MB. WhatsApp acepta máximo ${(limit / 1048576).toFixed(0)}MB para ${MEDIA_KIND_LABEL[kind]}.`, 'error');
+      const notice = oversizeNotice(kind, size);
+      // Aviso persistente (se cierra a mano) + el toast de siempre.
+      setMediaNotices(prev => [...prev.slice(-2), { ...notice, id: `notice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }]);
+      addToast(notice.detail, 'error');
     };
     // Las imágenes se miden DESPUÉS de comprimir (ver prepareImage): una foto de
     // cámara de 6 MB queda en menos de 1 MB. Video y audio no se recomprimen.
-    if (kind !== 'image' && file.size > limit) { rejectTooLarge(file.size); return; }
+    if (!validation.ok) { rejectTooLarge(file.size); return; }
 
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const localPreviewUrl = URL.createObjectURL(file);
-    setPendingMedia(prev => [...prev, { id, localPreviewUrl, filename: safeName, kind, status: 'uploading', remoteUrl: null }]);
+    dispatchPending({ type: 'add', item: { id, localPreviewUrl, filename: safeName, kind, status: 'uploading', remoteUrl: null, progress: 0, fileKey: fileKeyOf(file) } });
     if (kind === 'video') debugAttach('VIDEO_PENDING_ADDED', { id, name: file.name, sizeMB: +(file.size / 1048576).toFixed(2) });
 
     // Se devuelve la promesa (no se usa acá) para que el <input> pueda esperar a que el
@@ -551,22 +550,22 @@ export const ConversationsPageView = () => {
       : Promise.resolve(file);
     return prepared
       .then(async (toUpload) => {
-        if (toUpload.size > limit) {
+        if (toUpload.size > MEDIA_SIZE_LIMITS[kind]) {
           rejectTooLarge(toUpload.size);
-          setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'error' } : m));
+          dispatchPending({ type: 'fail', id, message: oversizeNotice(kind, toUpload.size).detail });
           return;
         }
         const uploadName = toUpload === file ? safeName : safeFileName(toUpload.name, mimeFor(toUpload));
-        const url = await uploadToStorage(toUpload, diag, uploadName);
+        const url = await uploadToStorage(toUpload, diag, uploadName, pct => dispatchPending({ type: 'progress', id, pct }));
         debugAttach(`${source}_ATTACHMENT_CREATED`, { url, name: uploadName });
         recordMediaDiag(`${diag}_ATTACHMENT_READY`, { tipo: kind, kb: Math.round(toUpload.size / 1024) });
         if (kind === 'video') debugAttach('VIDEO_UPLOAD_SUCCESS', { id, mediaUrl: url });
-        setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'ready', remoteUrl: url, filename: uploadName } : m));
+        dispatchPending({ type: 'ready', id, url, filename: uploadName });
       })
       .catch(err => {
         debugAttach(`${source}_UPLOAD_ERROR`, err);
         if (kind === 'video') debugAttach('VIDEO_UPLOAD_ERROR', { id, code: err?.code, message: err?.message });
-        setPendingMedia(prev => prev.map(m => m.id === id ? { ...m, status: 'error' } : m));
+        dispatchPending({ type: 'fail', id, message: describeUploadFailure(err) });
         handleSellerError('upload', err);
       });
   };
@@ -1255,8 +1254,21 @@ ${plantilla}` : plantilla);
                     {/* Previews múltiples (Adjuntar/Galería/Foto/Video) — preview local instantánea,
                         cada ítem muestra su propio estado de subida y se puede quitar individualmente.
                         Scroll horizontal encapsulado a esta franja, nunca a la página. */}
+                    {mediaNotices.map(n => (
+                      <div key={n.id} role="alert" className="flex items-start gap-2 p-3 mb-2 rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30">
+                        <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-red-700 dark:text-red-300">{n.title}</p>
+                          <p className="text-xs text-red-700/90 dark:text-red-300/90 mt-0.5">{n.detail}</p>
+                        </div>
+                        <button type="button" onClick={() => setMediaNotices(prev => prev.filter(x => x.id !== n.id))} aria-label="Cerrar aviso" title="Cerrar"
+                          className="shrink-0 p-1 text-red-400 hover:text-red-600 rounded-lg transition-colors">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
                     {pendingMedia.length > 0 && (
-                      <div className="flex items-center gap-2 mb-2 overflow-x-auto pb-1 -mx-1 px-1">
+                      <div className="flex items-center gap-2 mb-1 overflow-x-auto pb-1 -mx-1 px-1">
                         {pendingMedia.map(item => (
                           <div key={item.id} className="relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-900">
                             {item.kind === 'image' ? (
@@ -1269,8 +1281,20 @@ ${plantilla}` : plantilla);
                               <div className="w-full h-full flex items-center justify-center"><FileText className="w-5 h-5 text-slate-400" /></div>
                             )}
                             {item.status === 'uploading' && (
+                              <div className="absolute inset-0 bg-black/45 flex flex-col items-center justify-center gap-0.5">
+                                <Loader2 className="w-4 h-4 text-white animate-spin" />
+                                <span className="text-[10px] font-bold text-white tabular-nums">{item.progress}%</span>
+                                <div className="absolute bottom-0 left-0 h-1 bg-white/90" style={{ width: `${item.progress}%` }} />
+                              </div>
+                            )}
+                            {item.status === 'sending' && (
                               <div className="absolute inset-0 bg-black/45 flex items-center justify-center">
                                 <Loader2 className="w-4 h-4 text-white animate-spin" />
+                              </div>
+                            )}
+                            {item.status === 'sent' && (
+                              <div className="absolute inset-0 bg-emerald-500/60 flex items-center justify-center">
+                                <Check className="w-4 h-4 text-white" />
                               </div>
                             )}
                             {item.status === 'error' && (
@@ -1286,6 +1310,12 @@ ${plantilla}` : plantilla);
                         ))}
                       </div>
                     )}
+                    {(() => {
+                      const line = statusLine(pendingMedia);
+                      return line ? (
+                        <p aria-live="polite" className={`text-[11px] font-semibold mb-2 ${line.tone === 'error' ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}>{line.text}</p>
+                      ) : null;
+                    })()}
                     {mediaUrl && (
                       <div className="flex items-center gap-2.5 p-2.5 bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 rounded-xl mb-2 relative max-w-sm">
                         {/\.(jpg|jpeg|png|webp|gif)($|\?)/i.test(mediaUrl) ? (
@@ -1423,10 +1453,10 @@ ${plantilla}` : plantilla);
                       {/* Enviar texto (solo en reposo — mientras graba, el botón de arriba ya es Enviar) */}
                       {!isRecording && (
                         <button type="submit"
-                          disabled={(!inputText.trim() && !mediaUrl && pendingMedia.length === 0) || isSending || pendingMedia.some(m => m.status === 'uploading')}
-                          title={pendingMedia.some(m => m.status === 'uploading') ? 'Esperando a que terminen de subir los adjuntos…' : undefined}
+                          disabled={(!inputText.trim() && !mediaUrl && pendingMedia.length === 0) || isSending || isMediaBusy(pendingMedia)}
+                          title={isMediaBusy(pendingMedia) ? 'Esperando a que terminen de subir los adjuntos…' : undefined}
                           className="w-11 h-11 flex items-center justify-center bg-[#1877F2] text-white rounded-2xl shadow-lg shadow-[#1877F2]/20 hover:bg-blue-600 disabled:opacity-40 transition-all shrink-0">
-                          {isSending || pendingMedia.some(m => m.status === 'uploading') ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                          {isSending || isMediaBusy(pendingMedia) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                         </button>
                       )}
                     </div>

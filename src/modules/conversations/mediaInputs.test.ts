@@ -13,6 +13,9 @@ import { describeContainer, describeEnvironment } from '@/utils/mediaDiag';
 const view = Object.values(
   import.meta.glob('/src/modules/conversations/ConversationsPageView.tsx', { query: '?raw', import: 'default', eager: true }),
 )[0] as string;
+const upload = Object.values(
+  import.meta.glob('/src/modules/conversations/mediaUpload.ts', { query: '?raw', import: 'default', eager: true }),
+)[0] as string;
 const target = Object.values(
   import.meta.glob('/src/modules/conversations/FileTapTarget.tsx', { query: '?raw', import: 'default', eager: true }),
 )[0] as string;
@@ -283,7 +286,11 @@ describe('Subida desde el teléfono: reanudable, con avance y fotos reducidas', 
 
   it('las fotos se reducen antes de medir el límite de 5 MB', () => {
     expect(view).toContain('prepareImage(file)');
-    expect(view).toContain("kind !== 'image' && file.size > limit");
+    // La regla vive ahora en mediaUpload.ts (validateMediaFile): las fotos NO se rechazan
+    // antes de comprimir; la vista solo vuelve a medir la foto ya reducida.
+    expect(view).toContain('validateMediaFile(file)');
+    expect(view).toContain('toUpload.size > MEDIA_SIZE_LIMITS[kind]');
+    expect(upload).toContain("kind !== 'image' && file.size > MEDIA_SIZE_LIMITS[kind]");
     expect(view).toContain('_IMAGE_COMPRESSED');
   });
 
