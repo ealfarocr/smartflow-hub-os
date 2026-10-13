@@ -41,6 +41,7 @@ import { ToolGuard } from '@/components/guards/ToolGuard'
 
 import { useAuthStore } from '@/stores/authStore'
 import { SuperAdminGuard } from '@/components/guards/SuperAdminGuard'
+import { LiveVideoQaView } from '@/modules/qa/LiveVideoQaView'
 import { TenantsListView } from '@/modules/superadmin/TenantsListView'
 import { ToolsHubView } from '@/modules/superadmin/ToolsHubView'
 import { MarketingView } from '@/modules/superadmin/MarketingView'
@@ -96,6 +97,7 @@ export const AppRouter = () => {
               <Route path="super-admin/tools" element={<ToolsHubView />} />
               <Route path="super-admin/agente-global" element={<GlobalAgentView />} />
               <Route path="super-admin/marketing" element={<MarketingView />} />
+              <Route path="super-admin/qa-live-video" element={<LiveVideoQaView />} />
             </Route>
 
             {/* Rutas protegidas por Feature Flag (tenant) + ToolGuard (usuario) */}

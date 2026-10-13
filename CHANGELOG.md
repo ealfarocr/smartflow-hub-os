@@ -1,6 +1,11 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-13 — Prototipo QA Live Video (solo SuperAdmin)
+
+- Agente: Claude Code. Nueva función callable `liveVideoQa` + pantalla `/super-admin/qa-live-video`; dependencia `@ffprobe-installer/ffprobe`. Sin cambios en WhatsApp, chat productivo, Rules, tenants ni Meta.
+- Validación: vitest 453/453 y 132/132 (functions), tsc+build OK. No verificado: medición en Android real.
+
 ## 2026-10-12 — Adjuntos del chat: progreso y rechazo visibles
 
 - Agente: Claude Code. Solo frontend (`ConversationsPageView`, nuevo `mediaUpload.ts`); deploy solo `hosting:app`. Sin cambios en límites, compresión, Functions, Rules ni Meta.

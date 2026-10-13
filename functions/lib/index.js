@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.verifyDeviceSession = exports.loginWithDevice = exports.loginWithPin = exports.getTenantAccessOverview = exports.getVendorAccessInfo = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
+exports.liveVideoQa = exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.verifyDeviceSession = exports.loginWithDevice = exports.loginWithPin = exports.getTenantAccessOverview = exports.getVendorAccessInfo = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const crypto = __importStar(require("crypto"));
@@ -5276,4 +5276,7 @@ exports.repairOrphanLeads = functions.https.onRequest(async (req, res) => {
     console.log(`[RepairOrphanLeads] ${report.leadsFixed}/${report.leadsScanned} leads reparados.`);
     res.json(report);
 });
+// Prototipo QA "Live Video" (solo SuperAdmin; no toca tenants ni WhatsApp).
+var liveVideoQa_1 = require("./liveVideoQa");
+Object.defineProperty(exports, "liveVideoQa", { enumerable: true, get: function () { return liveVideoQa_1.liveVideoQa; } });
 //# sourceMappingURL=index.js.map

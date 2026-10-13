@@ -1,5 +1,18 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🎥 Prototipo QA "Live Video" — desplegado, pendiente de medición en Android (2026-10-13)
+
+- Objetivo: medir si se puede grabar dentro de SmartFlow subiendo chunks en paralelo y quedar READY en ~3–5 s tras detener (MP4 H.264/AAC <16 MB, sin transcodificar). NO es funcionalidad productiva.
+- Pantalla `/super-admin/qa-live-video` (SuperAdminGuard): `getUserMedia` + `MediaRecorder.start(2000)`, cola de subida con 3 en paralelo, métricas en vivo y reporte copiable. Código en `src/modules/qa/`.
+- Función `liveVideoQa` (callable, us-central1, SOLO SuperAdmin, sin triggers): compone los chunks (≤32 por compose), valida con ffprobe y analiza el contenedor MP4. Chunks y final viven en `admin_attachments/lvqa-{jobId}-…` (ruta ya solo-SuperAdmin; no se tocaron Storage/Firestore Rules). Acción `delete` borra la prueba.
+- Dependencia nueva en Functions: `@ffprobe-installer/ffprobe` (binario linux-x64 de ~79 MB, licencia GPL-3.0 según su paquete). Pendiente decidir si esto se aísla en otro codebase/servicio antes de cualquier uso productivo.
+- Validación: vitest 453/453 (front) y 132/132 (functions), tsc+build OK. `functions/lib` recompilado y versionado.
+- No verificado: ninguna medición en Android real; `bucket.combine` no se ha ejecutado contra Storage real.
+
+### Próximo paso exacto
+
+En el Android (SuperAdmin), abrir `/super-admin/qa-live-video` y grabar 30 s y 60 s con 1,2 / 1,4 / 1,6 Mbps, con buena y mala señal; copiar el reporte de cada prueba y pulsar "Borrar". Con eso se decide FAST_PATH (¿MP4 fragmentado aceptado por Meta o basta un remux?).
+
 ## 🎞️ Adjuntos del chat: feedback de subida y rechazo visible (2026-10-12)
 
 - Contexto: un video de ~10 s no aparecía en el chat (rechazado por >16 MB, con un toast de 3 s que se perdía). Fotos y videos cortos ya funcionaban.

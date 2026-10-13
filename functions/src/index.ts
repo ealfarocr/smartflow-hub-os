@@ -5742,3 +5742,6 @@ export const repairOrphanLeads = functions.https.onRequest(async (req, res) => {
   res.json(report);
 });
 
+
+// Prototipo QA "Live Video" (solo SuperAdmin; no toca tenants ni WhatsApp).
+export { liveVideoQa } from './liveVideoQa';
