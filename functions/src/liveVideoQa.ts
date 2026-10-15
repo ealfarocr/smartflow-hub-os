@@ -6,12 +6,12 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import {
-  chunkObjectName, finalObjectName, isValidJobId, jobPrefix, planComposeBatches, summarizeMp4,
+  chunkObjectName, finalObjectName, isLiveVideoQaAllowed, isValidJobId, jobPrefix, planComposeBatches, summarizeMp4,
 } from './liveVideoQaCore';
 
-// PROTOTIPO QA "Live Video" — SOLO SuperAdmin. No toca tenants, conversaciones,
-// WhatsApp ni Meta. Los chunks y el archivo final viven en admin_attachments/
-// (la única ruta de Storage que ya es SuperAdmin-only), con prefijo lvqa-{jobId}-.
+// PROTOTIPO QA "Live Video" — SuperAdmin o el UID QA explícito (liveVideoQaCore). No toca tenants, conversaciones,
+// WhatsApp ni Meta. Los chunks y el archivo final viven en
+// live-video-qa/{uid}/{jobId}/ (ruta dedicada; ver storage.rules).
 const MAX_CHUNKS = 120;
 const MAX_FINAL_BYTES_TO_INSPECT = 40 * 1024 * 1024;
 
@@ -42,9 +42,10 @@ export const liveVideoQa = onCall({ maxInstances: 2, memory: '512MiB', timeoutSe
   if (!request.auth) throw new HttpsError('unauthenticated', 'Usuario no autenticado');
   const db = admin.firestore();
   const userSnap = await db.collection('users').doc(request.auth.uid).get();
-  if (userSnap.data()?.isSuperAdmin !== true) {
-    throw new HttpsError('permission-denied', 'Solo el SuperAdmin puede usar el prototipo QA.');
+  if (!isLiveVideoQaAllowed(request.auth.uid, userSnap.data()?.isSuperAdmin === true)) {
+    throw new HttpsError('permission-denied', 'No autorizado para el prototipo QA.');
   }
+  const uid = request.auth.uid;
 
   const { action, jobId, chunkCount, mimeType } = request.data as {
     action?: string; jobId?: string; chunkCount?: number; mimeType?: string;
@@ -53,7 +54,7 @@ export const liveVideoQa = onCall({ maxInstances: 2, memory: '512MiB', timeoutSe
   const bucket = admin.storage().bucket();
 
   if (action === 'delete') {
-    const [files] = await bucket.getFiles({ prefix: jobPrefix(jobId) });
+    const [files] = await bucket.getFiles({ prefix: jobPrefix(uid, jobId) });
     await Promise.all(files.map(f => f.delete({ ignoreNotFound: true })));
     return { ok: true, deleted: files.length };
   }
@@ -71,20 +72,20 @@ export const liveVideoQa = onCall({ maxInstances: 2, memory: '512MiB', timeoutSe
   // archivo "válido" pero con un salto, y el prototipo debe decirlo claro.
   const tCompose0 = Date.now();
   const exists = await Promise.all(
-    Array.from({ length: count }, (_, i) => bucket.file(chunkObjectName(jobId, i)).exists().then(([e]) => e)),
+    Array.from({ length: count }, (_, i) => bucket.file(chunkObjectName(uid, jobId, i)).exists().then(([e]) => e)),
   );
   const missing = exists.map((e, i) => (e ? -1 : i)).filter(i => i >= 0);
   if (missing.length) {
     throw new HttpsError('failed-precondition', `Faltan chunks: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '…' : ''}`);
   }
 
-  const finalName = finalObjectName(jobId, ext);
+  const finalName = finalObjectName(uid, jobId, ext);
   const finalFile = bucket.file(finalName);
   const steps = planComposeBatches(count);
   for (const step of steps) {
     const sources = [
       ...(step.includesAccumulator ? [finalFile] : []),
-      ...step.chunkIndexes.map(i => bucket.file(chunkObjectName(jobId, i))),
+      ...step.chunkIndexes.map(i => bucket.file(chunkObjectName(uid, jobId, i))),
     ];
     await bucket.combine(sources, finalFile);
   }
@@ -96,7 +97,7 @@ export const liveVideoQa = onCall({ maxInstances: 2, memory: '512MiB', timeoutSe
   const tVal0 = Date.now();
   const [meta] = await finalFile.getMetadata();
   const sizeBytes = Number(meta.size);
-  const tmp = path.join(os.tmpdir(), `lvqa-${jobId}.${ext}`);
+  const tmp = path.join(os.tmpdir(), `lvqa-${uid}-${jobId}.${ext}`);
   let downloadMs = 0;
   let container: ReturnType<typeof summarizeMp4> | null = null;
   let ffprobe: unknown = null;

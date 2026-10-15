@@ -60,6 +60,19 @@ service firebase.storage {
       allow read: if isSuperAdmin();
     }
 
+    // Prototipo QA Live Video — carpeta propia por usuario. Solo SuperAdmin o el
+    // UID QA exacto (EDUARDO ADMIN), y siempre únicamente sobre SU {uid}. Chunks
+    // de ~2 s (<1 MB reales); tope de 5 MB. No abre admin_attachments ni otros UID.
+    match /live-video-qa/{uid}/{jobId}/{fileName} {
+      allow write: if request.auth != null
+                   && request.auth.uid == uid
+                   && (isSuperAdmin() || request.auth.uid == 'Bw4GC41RiSQ1s3pw4RpypL2eEcz1')
+                   && request.resource.size < 5 * 1024 * 1024;
+      allow read: if request.auth != null
+                  && request.auth.uid == uid
+                  && (isSuperAdmin() || request.auth.uid == 'Bw4GC41RiSQ1s3pw4RpypL2eEcz1');
+    }
+
     // Documentos de entrenamiento del Agente IA — solo miembros del propio
     // tenant, max 5MB, tipos MIME restringidos.
     match /tenants/{tenantId}/ai-agent/{type}/{fileName} {

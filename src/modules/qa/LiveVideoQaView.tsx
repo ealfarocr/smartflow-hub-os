@@ -8,7 +8,7 @@ import {
   type LiveVideoSession, type QueueStats,
 } from './liveVideo';
 
-// PROTOTIPO QA "Live Video" — solo SuperAdmin (ver ruta). No envía nada a
+// PROTOTIPO QA "Live Video" — SuperAdmin o UID QA (ver LiveVideoQaGuard). No envía nada a
 // WhatsApp, no toca conversaciones ni tenants. Graba con getUserMedia +
 // MediaRecorder y sube cada chunk MIENTRAS sigue grabando, para medir cuánto
 // tarda en estar listo el archivo después de detener.
@@ -111,12 +111,20 @@ export const LiveVideoQaView = () => {
     recorderRef.current = recorder;
 
     const { ref, uploadBytes } = await import('firebase/storage');
-    const { storage } = await import('@/lib/firebase');
+    const { storage, auth } = await import('@/lib/firebase');
+    // El uid de la ruta es el de Firebase Auth (storage.rules exige uid == request.auth.uid).
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      cleanupMedia();
+      setPhase('error');
+      addToast('Sesión no válida para el prototipo QA', 'error');
+      return;
+    }
     const contentType = (recorder.mimeType || mimeSupport.chosen || 'video/mp4').split(';')[0];
     const queue = new ChunkUploadQueue({
       concurrency: 3,
       upload: async (index, blob) => {
-        const name = `admin_attachments/lvqa-${jobId}-c${String(index).padStart(4, '0')}`;
+        const name = `live-video-qa/${uid}/${jobId}/c${String(index).padStart(4, '0')}`;
         await uploadBytes(ref(storage, name), blob, { contentType });
       },
     });

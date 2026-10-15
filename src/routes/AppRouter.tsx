@@ -41,6 +41,7 @@ import { ToolGuard } from '@/components/guards/ToolGuard'
 
 import { useAuthStore } from '@/stores/authStore'
 import { SuperAdminGuard } from '@/components/guards/SuperAdminGuard'
+import { LiveVideoQaGuard } from '@/components/guards/LiveVideoQaGuard'
 import { LiveVideoQaView } from '@/modules/qa/LiveVideoQaView'
 import { TenantsListView } from '@/modules/superadmin/TenantsListView'
 import { ToolsHubView } from '@/modules/superadmin/ToolsHubView'
@@ -97,6 +98,9 @@ export const AppRouter = () => {
               <Route path="super-admin/tools" element={<ToolsHubView />} />
               <Route path="super-admin/agente-global" element={<GlobalAgentView />} />
               <Route path="super-admin/marketing" element={<MarketingView />} />
+            </Route>
+            {/* Excepción de QA: SuperAdmin o el UID QA explícito, solo esta ruta. */}
+            <Route element={<LiveVideoQaGuard children={<Outlet />} />}>
               <Route path="super-admin/qa-live-video" element={<LiveVideoQaView />} />
             </Route>
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chunkObjectName, finalObjectName, isValidJobId, jobPrefix, planComposeBatches, summarizeMp4 } from './liveVideoQaCore';
+import { LIVE_VIDEO_QA_TESTER_UID, chunkObjectName, finalObjectName, isLiveVideoQaAllowed, isValidJobId, jobPrefix, planComposeBatches, summarizeMp4 } from './liveVideoQaCore';
 
 function box(type: string, payload: Buffer = Buffer.alloc(0)): Buffer {
   const b = Buffer.alloc(8 + payload.length);
@@ -50,10 +50,14 @@ describe('planComposeBatches (límite de 32 orígenes por compose)', () => {
 });
 
 describe('nombres y job ids', () => {
-  it('rutas bajo admin_attachments con prefijo del job', () => {
-    expect(chunkObjectName('abc12345', 7)).toBe('admin_attachments/lvqa-abc12345-c0007');
-    expect(finalObjectName('abc12345', 'mp4')).toBe('admin_attachments/lvqa-abc12345-final.mp4');
-    expect(chunkObjectName('abc12345', 7).startsWith(jobPrefix('abc12345'))).toBe(true);
+  it('rutas dedicadas live-video-qa/{uid}/{jobId}/ (nunca admin_attachments)', () => {
+    expect(chunkObjectName('u1', 'abc12345', 7)).toBe('live-video-qa/u1/abc12345/c0007');
+    expect(finalObjectName('u1', 'abc12345', 'mp4')).toBe('live-video-qa/u1/abc12345/final.mp4');
+    expect(chunkObjectName('u1', 'abc12345', 7).startsWith(jobPrefix('u1', 'abc12345'))).toBe(true);
+  });
+  it('el uid forma parte de la ruta: operar como otro uid nunca toca la carpeta ajena', () => {
+    expect(chunkObjectName('u2', 'abc12345', 0).startsWith(jobPrefix('u1', 'abc12345'))).toBe(false);
+    expect(jobPrefix('u2', 'abc12345').startsWith('live-video-qa/u2/')).toBe(true);
   });
   it('job id: solo minúsculas/dígitos de 8 a 32 (sin barras ni puntos)', () => {
     expect(isValidJobId('abc12345')).toBe(true);
@@ -101,5 +105,19 @@ describe('summarizeMp4', () => {
     const s = summarizeMp4(cut);
     expect(s.container).toBe('mp4');
     expect(s.mvhdDurationSec).toBe(1);
+  });
+});
+
+describe('autorización de liveVideoQa (isLiveVideoQaAllowed)', () => {
+  it('SuperAdmin → permitido', () => expect(isLiveVideoQaAllowed('cualquiera', true)).toBe(true));
+  it('UID QA exacto (sin ser SuperAdmin) → permitido', () => expect(isLiveVideoQaAllowed(LIVE_VIDEO_QA_TESTER_UID, false)).toBe(true));
+  it('otro usuario autenticado → denegado', () => expect(isLiveVideoQaAllowed('vendedor1', false)).toBe(false));
+  it('sin uid → denegado', () => {
+    expect(isLiveVideoQaAllowed(undefined, false)).toBe(false);
+    expect(isLiveVideoQaAllowed('', false)).toBe(false);
+  });
+  it('UID QA con mayúsculas/espacios alterados → denegado', () => {
+    expect(isLiveVideoQaAllowed(LIVE_VIDEO_QA_TESTER_UID.toLowerCase(), false)).toBe(false);
+    expect(isLiveVideoQaAllowed(` ${LIVE_VIDEO_QA_TESTER_UID}`, false)).toBe(false);
   });
 });

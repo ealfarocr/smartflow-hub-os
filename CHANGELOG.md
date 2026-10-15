@@ -1,6 +1,9 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-15 — Acceso aislado a Live Video QA para EDUARDO ADMIN (sin deploy)
+- Agente: Claude Code. Ruta dedicada `live-video-qa/{uid}/{jobId}/`; `storage.rules` (nuevo match, `admin_attachments` intacto); `liveVideoQa` autoriza SuperAdmin o UID QA exacto y opera solo sobre `request.auth.uid`; `LiveVideoQaGuard` solo para `/super-admin/qa-live-video`. Validación: vitest front 463/463, functions 138/138, `storage.rules.test.ts` 8/8 (emuladores), tsc y build OK. NO desplegado: falta deploy de storage, función `liveVideoQa` y hosting (requiere aprobación).
+
 ## 2026-10-15 — Header: nombre de usuario visible en móvil
 - Agente: Claude Code. `MainLayout.tsx` (nombre siempre visible, truncado solo como último recurso), nuevo `HeaderMoreMenu.tsx` (menú "⋮" solo móvil: sonido, tema, cerrar sesión), `OperationalStatusSelector.tsx` (solo clases: etiqueta visible en móvil ≥360px). Validación: vitest 453/453, `npm run build` OK, tsc sin errores; eslint solo errores previos de MainLayout. Sin deploy; QA visual por viewport pendiente.
 

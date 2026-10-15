@@ -32,10 +32,17 @@ export function planComposeBatches(chunkCount: number, max: number = COMPOSE_MAX
 
 const range = (from: number, to: number): number[] => Array.from({ length: to - from }, (_, i) => from + i);
 
-export const chunkObjectName = (jobId: string, index: number): string =>
-  `admin_attachments/lvqa-${jobId}-c${String(index).padStart(4, '0')}`;
-export const finalObjectName = (jobId: string, ext: string): string => `admin_attachments/lvqa-${jobId}-final.${ext}`;
-export const jobPrefix = (jobId: string): string => `admin_attachments/lvqa-${jobId}-`;
+// Ruta dedicada por usuario: live-video-qa/{uid}/{jobId}/... (storage.rules solo
+// deja a SuperAdmin o al UID QA tocar SU propia carpeta). El uid sale siempre de
+// request.auth, nunca del payload: así nadie puede operar la carpeta de otro.
+export const LIVE_VIDEO_QA_TESTER_UID = 'Bw4GC41RiSQ1s3pw4RpypL2eEcz1'; // EDUARDO ADMIN — solo este prototipo
+export const isLiveVideoQaAllowed = (uid: string | undefined | null, isSuperAdmin: boolean): boolean =>
+  isSuperAdmin === true || (typeof uid === 'string' && uid === LIVE_VIDEO_QA_TESTER_UID);
+
+export const jobPrefix = (uid: string, jobId: string): string => `live-video-qa/${uid}/${jobId}/`;
+export const chunkObjectName = (uid: string, jobId: string, index: number): string =>
+  `${jobPrefix(uid, jobId)}c${String(index).padStart(4, '0')}`;
+export const finalObjectName = (uid: string, jobId: string, ext: string): string => `${jobPrefix(uid, jobId)}final.${ext}`;
 export const isValidJobId = (id: unknown): id is string => typeof id === 'string' && /^[a-z0-9]{8,32}$/.test(id);
 
 export interface Mp4Summary {

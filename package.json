@@ -8,8 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run --exclude '**/firestore.rules.test.ts'",
-    "test:rules": "vitest run firestore.rules.test.ts"
+    "test": "vitest run --exclude '**/firestore.rules.test.ts' --exclude '**/storage.rules.test.ts'",
+    "test:rules": "vitest run firestore.rules.test.ts",
+    "test:storage-rules": "firebase emulators:exec --only firestore,storage --project smartflow-storage-rules-test \"npx vitest run storage.rules.test.ts\""
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
