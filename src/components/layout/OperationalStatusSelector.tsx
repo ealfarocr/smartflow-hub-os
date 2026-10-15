@@ -140,11 +140,11 @@ export const OperationalStatusSelector = () => {
         aria-expanded={isOpen}
         onClick={() => setIsOpen((o) => !o)}
         disabled={isSaving}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors disabled:opacity-50"
+        className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors disabled:opacity-50"
       >
-        <span className={`w-2.5 h-2.5 rounded-full ${meta.dot}`} />
-        <span className="text-xs font-bold text-slate-700 dark:text-slate-200 hidden sm:inline">{meta.label}</span>
-        <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+        <span className={`w-2.5 h-2.5 shrink-0 rounded-full ${meta.dot}`} />
+        <span className="text-[11px] sm:text-xs font-bold text-slate-700 dark:text-slate-200 whitespace-nowrap max-[359px]:hidden">{meta.label}</span>
+        <ChevronDown className="w-3.5 h-3.5 shrink-0 text-slate-400" />
       </button>
       {isOpen && createPortal(
         <div

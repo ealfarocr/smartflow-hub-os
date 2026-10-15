@@ -16,6 +16,7 @@ import { CreateTenantModal } from '@/modules/superadmin/CreateTenantModal'
 import SupportAgent from '../support/SupportAgent'
 import { OnboardingBanner } from '../onboarding/OnboardingBanner'
 import { NotificationBell } from './NotificationBell'
+import { HeaderMoreMenu } from './HeaderMoreMenu'
 import { InboundSoundToggle } from './InboundSoundToggle'
 import { useInboundAlerts } from '@/hooks/useInboundAlerts'
 import { getEffectiveTools, ToolKey, isAdminRole } from '@/utils/permissions'
@@ -418,7 +419,7 @@ export const MainLayout = () => {
           <button className="md:hidden p-2 text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 flex items-center" onClick={() => toggleMobileMenu(true)}>
             <Menu className="h-6 w-6" />
           </button>
-          <div className="flex-1 flex justify-end items-center space-x-4">
+          <div className="flex-1 min-w-0 flex justify-end items-center gap-2 sm:gap-4">
             {isImpersonatingTenant(impersonatedName, activeMembership) ? (
               <span className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-500 dark:text-slate-300">
                 <Eye className="w-3.5 h-3.5" />
@@ -427,26 +428,30 @@ export const MainLayout = () => {
             ) : (
               <OperationalStatusSelector />
             )}
-            <div className="hidden sm:flex items-center text-sm font-medium text-slate-600 dark:text-slate-400 mr-2">
+            <div
+              className="min-w-0 flex-1 sm:flex-none text-right text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400 truncate whitespace-nowrap sm:mr-2"
+              title={user?.name || undefined}
+            >
                {user?.name || 'Cargando...'}
             </div>
-            <div className="h-8 w-8 rounded-full flex items-center justify-center border cursor-pointer" style={{ backgroundColor: 'color-mix(in srgb, var(--primary) 15%, transparent)', borderColor: 'color-mix(in srgb, var(--primary) 30%, transparent)', color: 'var(--primary)' }}>
+            <div className="h-8 w-8 shrink-0 rounded-full flex items-center justify-center border cursor-pointer" style={{ backgroundColor: 'color-mix(in srgb, var(--primary) 15%, transparent)', borderColor: 'color-mix(in srgb, var(--primary) 30%, transparent)', color: 'var(--primary)' }}>
               <span className="text-sm font-medium">
                 {userInitials}
               </span>
             </div>
-            <InboundSoundToggle />
+            <div className="hidden sm:block"><InboundSoundToggle /></div>
             <NotificationBell />
+            <HeaderMoreMenu theme={theme} onToggleTheme={toggleTheme} onLogout={handleLogout} />
             <button
               onClick={toggleTheme}
-              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+              className="hidden sm:block p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
               title={theme === 'dark' ? 'Modo Claro' : 'Modo Oscuro'}
             >
               {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </button>
             <button 
               onClick={handleLogout}
-              className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+              className="hidden sm:block p-2 text-slate-400 hover:text-red-500 transition-colors"
               title="Cerrar Sesión"
             >
               <LogOut className="h-5 w-5" />

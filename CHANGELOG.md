@@ -1,6 +1,9 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-15 — Header: nombre de usuario visible en móvil
+- Agente: Claude Code. `MainLayout.tsx` (nombre siempre visible, truncado solo como último recurso), nuevo `HeaderMoreMenu.tsx` (menú "⋮" solo móvil: sonido, tema, cerrar sesión), `OperationalStatusSelector.tsx` (solo clases: etiqueta visible en móvil ≥360px). Validación: vitest 453/453, `npm run build` OK, tsc sin errores; eslint solo errores previos de MainLayout. Sin deploy; QA visual por viewport pendiente.
+
 ## 2026-10-13 — Prototipo QA Live Video (solo SuperAdmin)
 
 - Agente: Claude Code. Nueva función callable `liveVideoQa` + pantalla `/super-admin/qa-live-video`; dependencia `@ffprobe-installer/ffprobe`. Sin cambios en WhatsApp, chat productivo, Rules, tenants ni Meta.
