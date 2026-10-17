@@ -1,6 +1,9 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-17 — Fix Live Video QA: lib desincronizado + predeploy
+- Agente: Claude Code (commit fab913f). Causa: el deploy del 15-oct subió `functions/lib` viejo (check solo-SuperAdmin) porque no había build previo. Se regeneró lib, se añadió `predeploy` (`npm --prefix "$RESOURCE_DIR" run build`) en `firebase.json` y se desplegó SOLO `functions:liveVideoQa` → revisión `livevideoqa-00003-tuf` (100% tráfico). Validación: tsc OK, functions 138/138. Pendiente: reintentar QA física con EDUARDO ADMIN. El primer deploy dio timeout de discovery (10 s); pasó con `FUNCTIONS_DISCOVERY_TIMEOUT=60`.
+
 ## 2026-10-15 — Deploy header + Live Video QA access
 - Agente: Claude Code. Desplegados (commits 05efd18, 5dc6e22): `storage` rules, `functions:liveVideoQa` (ACTIVE; sin auth → 401) y `hosting:app` (hub.smartflow-suite.com 200). Sin objetos `live-video-qa/` creados. QA con login de EDUARDO ADMIN, otras rutas /super-admin, vendedor y header en dispositivos: pendientes (requieren sesión real).
 
