@@ -7,6 +7,7 @@ import {
   buildReport, clockMs, newJobId, pickRecorderMime, toMb, uploadRateBps, wallMs,
   type LiveVideoSession, type QueueStats,
 } from './liveVideo';
+import { LiveVideoWhatsappCard } from './LiveVideoWhatsappCard';
 
 // PROTOTIPO QA "Live Video" — SuperAdmin o UID QA (ver LiveVideoQaGuard). No envía nada a
 // WhatsApp, no toca conversaciones ni tenants. Graba con getUserMedia +
@@ -252,6 +253,8 @@ export const LiveVideoQaView = () => {
           {VIDEO_BITRATE_OPTIONS.map(b => <option key={b} value={b}>{(b / 1e6).toFixed(1)} Mbps</option>)}
         </select>
       </div>
+
+      <LiveVideoWhatsappCard />
 
       <video ref={videoRef} muted playsInline className="w-full rounded-2xl bg-black aspect-video object-cover" />
 
