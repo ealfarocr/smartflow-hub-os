@@ -1,6 +1,9 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-17 — Botón "Enviar video QA a WhatsApp" (commit 85bf068)
+- Agente: Claude Code. En `/super-admin/qa-live-video` se añadió `LiveVideoWhatsappCard`: lee la ventana 24h de la conversación QA (USADITOS CR, `J8qU4lmvYkuRMjYxtvRy`), obtiene la URL del `final.mp4` del job mvc0dj5ddmsvu0 con `getDownloadURL` y envía SOLO al pulsar, vía `ConversationService.sendMessage` → `sendWhatsappMessage`. Botón deshabilitado con ventana inactiva. Sin cambios en Functions/Rules/Meta. Validación: vitest 467/467, tsc y build OK; deploy solo `hosting:app`. Envío real NO ejecutado; ventana inactiva al desplegar (último inbound 2026-10-15 16:49 UTC).
+
 ## 2026-10-17 — Fix Live Video QA: lib desincronizado + predeploy
 - Agente: Claude Code (commit fab913f). Causa: el deploy del 15-oct subió `functions/lib` viejo (check solo-SuperAdmin) porque no había build previo. Se regeneró lib, se añadió `predeploy` (`npm --prefix "$RESOURCE_DIR" run build`) en `firebase.json` y se desplegó SOLO `functions:liveVideoQa` → revisión `livevideoqa-00003-tuf` (100% tráfico). Validación: tsc OK, functions 138/138. Pendiente: reintentar QA física con EDUARDO ADMIN. El primer deploy dio timeout de discovery (10 s); pasó con `FUNCTIONS_DISCOVERY_TIMEOUT=60`.
 

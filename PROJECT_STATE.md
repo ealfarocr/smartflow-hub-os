@@ -1,5 +1,10 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 📲 Live Video QA → prueba WhatsApp (2026-10-17)
+- Botón manual desplegado (hosting:app) en `/super-admin/qa-live-video`. Eduardo Admin: membership Owner activa en t-1791700036682 (no SuperAdmin), pasa `checkMembershipAuth`. Envío real NO ejecutado.
+### Próximo paso exacto
+Desde el WhatsApp de prueba enviar "hola" a USADITOS CR (ventana 24h está inactiva), abrir la ruta, pulsar Actualizar y luego "Enviar video QA a WhatsApp"; reportar SUCCESS/FAILED.
+
 ## 🎥 Prototipo QA "Live Video" — desplegado, pendiente de medición en Android (2026-10-13)
 
 - Objetivo: medir si se puede grabar dentro de SmartFlow subiendo chunks en paralelo y quedar READY en ~3–5 s tras detener (MP4 H.264/AAC <16 MB, sin transcodificar). NO es funcionalidad productiva.
