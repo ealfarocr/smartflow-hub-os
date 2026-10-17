@@ -2,7 +2,7 @@
 // Lógica pura del prototipo QA "Live Video" (sin Firebase): plan de compose y
 // resumen de la estructura de un MP4. Se prueba sin red ni Storage.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isValidJobId = exports.jobPrefix = exports.finalObjectName = exports.chunkObjectName = exports.COMPOSE_MAX_SOURCES = void 0;
+exports.isValidJobId = exports.finalObjectName = exports.chunkObjectName = exports.jobPrefix = exports.isLiveVideoQaAllowed = exports.LIVE_VIDEO_QA_TESTER_UID = exports.COMPOSE_MAX_SOURCES = void 0;
 exports.planComposeBatches = planComposeBatches;
 exports.summarizeMp4 = summarizeMp4;
 exports.COMPOSE_MAX_SOURCES = 32;
@@ -27,12 +27,18 @@ function planComposeBatches(chunkCount, max = exports.COMPOSE_MAX_SOURCES) {
     return steps;
 }
 const range = (from, to) => Array.from({ length: to - from }, (_, i) => from + i);
-const chunkObjectName = (jobId, index) => `admin_attachments/lvqa-${jobId}-c${String(index).padStart(4, '0')}`;
-exports.chunkObjectName = chunkObjectName;
-const finalObjectName = (jobId, ext) => `admin_attachments/lvqa-${jobId}-final.${ext}`;
-exports.finalObjectName = finalObjectName;
-const jobPrefix = (jobId) => `admin_attachments/lvqa-${jobId}-`;
+// Ruta dedicada por usuario: live-video-qa/{uid}/{jobId}/... (storage.rules solo
+// deja a SuperAdmin o al UID QA tocar SU propia carpeta). El uid sale siempre de
+// request.auth, nunca del payload: así nadie puede operar la carpeta de otro.
+exports.LIVE_VIDEO_QA_TESTER_UID = 'Bw4GC41RiSQ1s3pw4RpypL2eEcz1'; // EDUARDO ADMIN — solo este prototipo
+const isLiveVideoQaAllowed = (uid, isSuperAdmin) => isSuperAdmin === true || (typeof uid === 'string' && uid === exports.LIVE_VIDEO_QA_TESTER_UID);
+exports.isLiveVideoQaAllowed = isLiveVideoQaAllowed;
+const jobPrefix = (uid, jobId) => `live-video-qa/${uid}/${jobId}/`;
 exports.jobPrefix = jobPrefix;
+const chunkObjectName = (uid, jobId, index) => `${(0, exports.jobPrefix)(uid, jobId)}c${String(index).padStart(4, '0')}`;
+exports.chunkObjectName = chunkObjectName;
+const finalObjectName = (uid, jobId, ext) => `${(0, exports.jobPrefix)(uid, jobId)}final.${ext}`;
+exports.finalObjectName = finalObjectName;
 const isValidJobId = (id) => typeof id === 'string' && /^[a-z0-9]{8,32}$/.test(id);
 exports.isValidJobId = isValidJobId;
 function readBox(buf, offset, limit) {

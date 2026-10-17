@@ -42,9 +42,9 @@ const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const https_1 = require("firebase-functions/v2/https");
 const liveVideoQaCore_1 = require("./liveVideoQaCore");
-// PROTOTIPO QA "Live Video" — SOLO SuperAdmin. No toca tenants, conversaciones,
-// WhatsApp ni Meta. Los chunks y el archivo final viven en admin_attachments/
-// (la única ruta de Storage que ya es SuperAdmin-only), con prefijo lvqa-{jobId}-.
+// PROTOTIPO QA "Live Video" — SuperAdmin o el UID QA explícito (liveVideoQaCore). No toca tenants, conversaciones,
+// WhatsApp ni Meta. Los chunks y el archivo final viven en
+// live-video-qa/{uid}/{jobId}/ (ruta dedicada; ver storage.rules).
 const MAX_CHUNKS = 120;
 const MAX_FINAL_BYTES_TO_INSPECT = 40 * 1024 * 1024;
 function runFfprobe(file) {
@@ -77,15 +77,16 @@ exports.liveVideoQa = (0, https_1.onCall)({ maxInstances: 2, memory: '512MiB', t
         throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
     const db = admin.firestore();
     const userSnap = await db.collection('users').doc(request.auth.uid).get();
-    if (userSnap.data()?.isSuperAdmin !== true) {
-        throw new https_1.HttpsError('permission-denied', 'Solo el SuperAdmin puede usar el prototipo QA.');
+    if (!(0, liveVideoQaCore_1.isLiveVideoQaAllowed)(request.auth.uid, userSnap.data()?.isSuperAdmin === true)) {
+        throw new https_1.HttpsError('permission-denied', 'No autorizado para el prototipo QA.');
     }
+    const uid = request.auth.uid;
     const { action, jobId, chunkCount, mimeType } = request.data;
     if (!(0, liveVideoQaCore_1.isValidJobId)(jobId))
         throw new https_1.HttpsError('invalid-argument', 'jobId inválido');
     const bucket = admin.storage().bucket();
     if (action === 'delete') {
-        const [files] = await bucket.getFiles({ prefix: (0, liveVideoQaCore_1.jobPrefix)(jobId) });
+        const [files] = await bucket.getFiles({ prefix: (0, liveVideoQaCore_1.jobPrefix)(uid, jobId) });
         await Promise.all(files.map(f => f.delete({ ignoreNotFound: true })));
         return { ok: true, deleted: files.length };
     }
@@ -101,18 +102,18 @@ exports.liveVideoQa = (0, https_1.onCall)({ maxInstances: 2, memory: '512MiB', t
     // Todos los chunks deben existir antes de componer: un hueco produciría un
     // archivo "válido" pero con un salto, y el prototipo debe decirlo claro.
     const tCompose0 = Date.now();
-    const exists = await Promise.all(Array.from({ length: count }, (_, i) => bucket.file((0, liveVideoQaCore_1.chunkObjectName)(jobId, i)).exists().then(([e]) => e)));
+    const exists = await Promise.all(Array.from({ length: count }, (_, i) => bucket.file((0, liveVideoQaCore_1.chunkObjectName)(uid, jobId, i)).exists().then(([e]) => e)));
     const missing = exists.map((e, i) => (e ? -1 : i)).filter(i => i >= 0);
     if (missing.length) {
         throw new https_1.HttpsError('failed-precondition', `Faltan chunks: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '…' : ''}`);
     }
-    const finalName = (0, liveVideoQaCore_1.finalObjectName)(jobId, ext);
+    const finalName = (0, liveVideoQaCore_1.finalObjectName)(uid, jobId, ext);
     const finalFile = bucket.file(finalName);
     const steps = (0, liveVideoQaCore_1.planComposeBatches)(count);
     for (const step of steps) {
         const sources = [
             ...(step.includesAccumulator ? [finalFile] : []),
-            ...step.chunkIndexes.map(i => bucket.file((0, liveVideoQaCore_1.chunkObjectName)(jobId, i))),
+            ...step.chunkIndexes.map(i => bucket.file((0, liveVideoQaCore_1.chunkObjectName)(uid, jobId, i))),
         ];
         await bucket.combine(sources, finalFile);
     }
@@ -123,7 +124,7 @@ exports.liveVideoQa = (0, https_1.onCall)({ maxInstances: 2, memory: '512MiB', t
     const tVal0 = Date.now();
     const [meta] = await finalFile.getMetadata();
     const sizeBytes = Number(meta.size);
-    const tmp = path.join(os.tmpdir(), `lvqa-${jobId}.${ext}`);
+    const tmp = path.join(os.tmpdir(), `lvqa-${uid}-${jobId}.${ext}`);
     let downloadMs = 0;
     let container = null;
     let ffprobe = null;
