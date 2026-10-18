@@ -5650,3 +5650,6 @@ export const repairOrphanLeads = functions.https.onRequest(async (req, res) => {
 
 // Prototipo QA "Live Video" (solo SuperAdmin; no toca tenants ni WhatsApp).
 export { liveVideoQa } from './liveVideoQa';
+
+// Live Video productivo: compone los chunks de una grabacion hecha dentro de SmartFlow.
+export { chatLiveVideo } from './chatLiveVideo';
