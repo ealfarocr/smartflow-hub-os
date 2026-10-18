@@ -1,6 +1,12 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-17 — Falso FAILED de video QA: observabilidad webhook + responsive TOMAR (commits 8606a7d, eac05e1)
+- Agente: Claude Code. Live Video QA real: PASS (57.7 s, 10.64 MB, STOP_TO_READY 3041 ms, Meta aceptó, receptor reprodujo); REMUX_REQUIRED=NO. El "No enviado — Media upload error" fue un webhook de Meta `failed` (1.7 s tras el POST OK) que sobrescribió status/errorMessage; sin delivered/read posteriores. Causa de fondo de Meta: sin determinar (falta el código).
+- `whatsappWebhook` ahora guarda `metaError` estructurado (code, subcode, title, message, type, fbtraceId, details, wamid, receivedAt) y loguea sanitizado. NO cambian status, shouldApplyStatusUpdate, latch, retry ni sendWhatsappMessage. Responsive: botón TOMAR baja a fila propia en móvil, handleClaim/disabled intactos.
+- Validación: functions vitest 141/141, tsc build OK, front tsc OK, conversaciones 65/65; QA visual en 320/360/390/412 sin solapes ni overflow (emuladores). Deploy: `hosting:app` OK (200, bundle con el cambio) y `functions:whatsappWebhook` ACTIVE v104 (2026-10-18T01:51Z). Sin deploy de rules ni de otras Functions.
+- No verificado: ningún failed real posterior al deploy (se espera uno); no se inspeccionó el código fuente remoto de la Function más allá del deploy exitoso.
+
 ## 2026-10-17 — Botón "Enviar video QA a WhatsApp" (commit 85bf068)
 - Agente: Claude Code. En `/super-admin/qa-live-video` se añadió `LiveVideoWhatsappCard`: lee la ventana 24h de la conversación QA (USADITOS CR, `J8qU4lmvYkuRMjYxtvRy`), obtiene la URL del `final.mp4` del job mvc0dj5ddmsvu0 con `getDownloadURL` y envía SOLO al pulsar, vía `ConversationService.sendMessage` → `sendWhatsappMessage`. Botón deshabilitado con ventana inactiva. Sin cambios en Functions/Rules/Meta. Validación: vitest 467/467, tsc y build OK; deploy solo `hosting:app`. Envío real NO ejecutado; ventana inactiva al desplegar (último inbound 2026-10-15 16:49 UTC).
 

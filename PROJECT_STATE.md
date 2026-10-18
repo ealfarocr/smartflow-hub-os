@@ -1,5 +1,13 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🔎 Falso FAILED de video QA — observabilidad desplegada (2026-10-17)
+- Live Video QA real: PASS (Meta aceptó, receptor reprodujo, REMUX_REQUIRED=NO). MP4 fragmentado compatible; no se re-envía.
+- Causa del "Media upload error": webhook de Meta `failed` posterior a un POST OK (doc `conversations/J8qU4lmvYkuRMjYxtvRy/messages/1ThS3sS1l3ZjpSZAQJfr`). Código/causa de Meta aún desconocidos.
+- Desplegado: `functions:whatsappWebhook` (v104, ACTIVE) guarda `metaError` en `failed`; `hosting:app` con TOMAR responsive. Commits 8606a7d y eac05e1. Latch `failed` terminal SIN cambios a propósito.
+- Pendiente: `functions/lib/vendorPinAuth.js` aparece modificado solo por fin de línea (hash = HEAD); no commitear. `.claude/` sin seguir.
+### Próximo paso exacto
+Esperar un `failed` real de Meta y leer `metaError` (code/fbtraceId) del mensaje o el log `[Webhook Status] failed` en whatsappWebhook; con ese código decidir si relajar el latch (failed→delivered/read desde webhook) o tratar 131053 como transitorio. No provocar failed artificial.
+
 ## 📲 Live Video QA → prueba WhatsApp (2026-10-17)
 - Botón manual desplegado (hosting:app) en `/super-admin/qa-live-video`. Eduardo Admin: membership Owner activa en t-1791700036682 (no SuperAdmin), pasa `checkMembershipAuth`. Envío real NO ejecutado.
 ### Próximo paso exacto
