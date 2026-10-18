@@ -1,6 +1,12 @@
 # Changelog
 
 Formato libre, en español, más reciente primero. Un cambio por línea, agrupado por fecha.
+## 2026-10-17 — Round-robin sin TOMAR + Live Video productivo (commits 29f5c34, 22f8cdd, ac5c419; SIN DEPLOY)
+- Agente: Claude Code. Asignación: el round-robin YA existía y es atómico (transacción sobre settings/{tenant}); se extrajo a `functions/src/autoAssign.ts` sin cambiar la lógica y se agregó reintento al volver a escribir el lead si la conversación quedó sin asesor (WhatsApp y Meta; una ya asignada nunca se toca). Con asignación automática activa el asesor no ve TOMAR; Owner/Admin lo conservan como contingencia. Emulador: 8 paralelas → 2/2/2/2; secuencia 1→2→3→4→1.
+- Live Video: Function `chatLiveVideo` (compose/delete, sin ffprobe), ruta `chat-live-video/{tenant}/{conversation}/{uid}/{job}/` con reglas en storage.rules (16/16 casos en emulador), componente `ChatLiveVideoRecorder` (60 s, ~1,4 Mbps, review + Enviar/Descartar) y botón Grabar video del chat con fallback a la cámara nativa. Envío por ConversationService.sendMessage → sendWhatsappMessage. /super-admin/qa-live-video intacto.
+- Validación: functions vitest 160/160, front 504/504 (sin las suites de reglas), tsc/eslint del módulo nuevo, build OK. E2E en emulador con cámara falsa de Edge: cámara→grabar→subir chunks→Detener; cancelar y descartar borran lo subido; Enviar llama a sendWhatsappMessage. Nota: storage.rules.test.ts G (live-video-qa SuperAdmin) falla también SIN estos cambios.
+- No verificado: compose real (el emulador de Storage responde Not Implemented a combine; solo corrió en producción en el QA), preview del MP4 fragmentado en Android, envío real a Meta del video del chat, Edge/iOS. Sin deploy de Functions, Storage Rules ni Hosting.
+
 ## 2026-10-17 — Falso FAILED de video QA: observabilidad webhook + responsive TOMAR (commits 8606a7d, eac05e1)
 - Agente: Claude Code. Live Video QA real: PASS (57.7 s, 10.64 MB, STOP_TO_READY 3041 ms, Meta aceptó, receptor reprodujo); REMUX_REQUIRED=NO. El "No enviado — Media upload error" fue un webhook de Meta `failed` (1.7 s tras el POST OK) que sobrescribió status/errorMessage; sin delivered/read posteriores. Causa de fondo de Meta: sin determinar (falta el código).
 - `whatsappWebhook` ahora guarda `metaError` estructurado (code, subcode, title, message, type, fbtraceId, details, wamid, receivedAt) y loguea sanitizado. NO cambian status, shouldApplyStatusUpdate, latch, retry ni sendWhatsappMessage. Responsive: botón TOMAR baja a fila propia en móvil, handleClaim/disabled intactos.

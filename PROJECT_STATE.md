@@ -1,5 +1,14 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🎥 Live Video productivo + round-robin sin TOMAR — commiteado, PENDIENTE DE DEPLOY (2026-10-17)
+- Commits: 29f5c34 (asignación), 22f8cdd (backend + storage.rules), ac5c419 (UI). Nada desplegado.
+- Deploy necesario (en este orden): `firebase deploy --only storage` (regla nueva chat-live-video), `functions:chatLiveVideo,functions:whatsappWebhook,functions:metaWebhook` (autoAssign.ts toca ambos webhooks) y `hosting:app`. No desplegar Functions globales.
+- Pendiente de verificación física (Android, SOLO tras el deploy): compose real, preview del MP4 en la pantalla de revisión (si falla muestra "Video listo"), envío a Meta y reproducción en el receptor, 10/30/60 s, vertical/horizontal, red lenta.
+- Riesgos abiertos: sin ciclo de vida en el bucket (un job abandonado en review/cierre de app deja chunks o final huérfanos en chat-live-video/); conversaciones nuevas del mismo contacto en paralelo pueden duplicarse (previo); los asesores aún ven el dropdown "Asignar agente" (permisos no se tocaron).
+- QA: /super-admin/qa-live-video se mantiene hasta validar el productivo; luego retirarlo y mover src/modules/qa/liveVideo.ts (lo reutiliza chat-live-video).
+### Próximo paso exacto
+Revisar el reporte final, autorizar el deploy en el orden indicado y probar en el Android del vendedor: grabar 10 s y 60 s desde Cámara → Grabar video, revisar, Enviar y confirmar recepción/reproducción en el receptor.
+
 ## 🔎 Falso FAILED de video QA — observabilidad desplegada (2026-10-17)
 - Live Video QA real: PASS (Meta aceptó, receptor reprodujo, REMUX_REQUIRED=NO). MP4 fragmentado compatible; no se re-envía.
 - Causa del "Media upload error": webhook de Meta `failed` posterior a un POST OK (doc `conversations/J8qU4lmvYkuRMjYxtvRy/messages/1ThS3sS1l3ZjpSZAQJfr`). Código/causa de Meta aún desconocidos.
