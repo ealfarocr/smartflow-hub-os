@@ -16,6 +16,7 @@ import {
   FileText, Download, X, Bot, Settings2, Paperclip, Mic, Play, Trash2, RotateCcw,
 } from 'lucide-react';
 import { VoiceRecorder } from '@/utils/audioRecorder';
+import { canShowTakeButton } from '@/utils/takeConversation';
 import { useTeam } from '@/hooks/useTeam';
 import { CreatePaymentLinkModal } from '@/modules/payments/CreatePaymentLinkModal';
 import { WhatsappWindowBadge } from './WhatsappWindowBadge';
@@ -72,7 +73,7 @@ export const ConversationsPageView = () => {
     sendMessage, markAsRead, assignAgent, claimConversation, toggleBot, isLoadingInbox
   } = useConversationStore();
   const { activeMembership } = useAuthStore();
-  const { whatsappTemplates, templates: quickTemplates, company } = useSettingsStore();
+  const { whatsappTemplates, templates: quickTemplates, company, multiAgentConfig } = useSettingsStore();
   const { leads } = useLeadStore();
   const [showQuickTemplates, setShowQuickTemplates] = useState(false);
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
@@ -904,8 +905,8 @@ export const ConversationsPageView = () => {
                   </p>
                 </div>
 
-                {/* Tomar conversación — Modo Libre, solo si nadie la tiene aún. En móvil baja a una fila propia (order-last + w-full) para no invadir nombre/teléfono/acciones. */}
-                {!activeChat.advisorId && (
+                {/* Tomar conversación — Modo Libre; con asignación automática solo Owner/Admin (contingencia). En móvil baja a una fila propia (order-last + w-full) para no invadir nombre/teléfono/acciones. */}
+                {canShowTakeButton(activeChat, !!multiAgentConfig?.isAutoDistributionEnabled, activeMembership?.role) && (
                   <button
                     onClick={() => handleClaim(activeChat.id)}
                     disabled={isClaiming}

@@ -59,6 +59,7 @@ const pinAuth_1 = require("./pinAuth");
 const sendMessageAuth_1 = require("./sendMessageAuth");
 const vendorPinAuth_1 = require("./vendorPinAuth");
 const messageStatusUpdate_1 = require("./messageStatusUpdate");
+const autoAssign_1 = require("./autoAssign");
 const tenantAdminAuth_1 = require("./tenantAdminAuth");
 const accessLifecycle_1 = require("./accessLifecycle");
 const deviceSessionAuth_1 = require("./deviceSessionAuth");
@@ -789,100 +790,11 @@ Reglas para crm_action: null=conversación general | "seguimiento"=interés seri
         console.error('[AI Autopilot] Error:', err.message || err);
     }
 }
-/**
- * Elige el próximo asesor por round-robin y avanza el cursor, todo dentro de
- * una transacción de Firestore sobre settings/{tenantId} — así, si dos
- * conversaciones nuevas llegan casi al mismo tiempo para el mismo tenant,
- * Firestore serializa/reintenta las transacciones en conflicto y ninguna
- * lee un cursor obsoleto: no pueden terminar asignando la misma persona dos
- * veces seguidas. La creación del documento de conversación en sí queda
- * FUERA de esta transacción a propósito — el recurso compartido que hay que
- * proteger es el cursor (un valor por tenant), no cada conversación
- * individual, que es exclusiva de su propio flujo.
- */
-async function assignConversationAdvisor(tenantId) {
-    console.log('MULTI_AGENT_ASSIGNMENT_START', { tenantId });
-    const settingsRef = db.collection('settings').doc(tenantId);
-    const membershipsQuery = db.collection('memberships').where('tenantId', '==', tenantId);
-    try {
-        return await db.runTransaction(async (tx) => {
-            const [settingsSnap, membershipsSnap] = await Promise.all([
-                tx.get(settingsRef),
-                tx.get(membershipsQuery),
-            ]);
-            const multiAgentConfig = settingsSnap.exists ? settingsSnap.data()?.multiAgentConfig : null;
-            // Modo Libre (o sin configurar todavía): la conversación entra sin
-            // advisorId — cualquier asesor elegible la puede reclamar a mano
-            // (ver claimConversation).
-            if (!multiAgentConfig?.isAutoDistributionEnabled) {
-                return { advisorId: null, assignmentSource: 'unassigned_free_mode' };
-            }
-            const includedUserIds = Array.isArray(multiAgentConfig.includedUserIds) ? multiAgentConfig.includedUserIds : [];
-            // null/undefined = todos los active+incluidos son elegibles (fallback,
-            // comportamiento por defecto); array explícito = lista curada — ver
-            // sección 8: este toggle NO afecta el estado de la cuenta del vendedor.
-            const leadEnabledUserIds = Array.isArray(multiAgentConfig.leadEnabledUserIds) ? multiAgentConfig.leadEnabledUserIds : null;
-            const candidateIds = [];
-            membershipsSnap.forEach(doc => {
-                const m = doc.data();
-                if (m.status !== 'active')
-                    return;
-                const identifier = m.userId || doc.id;
-                if (!includedUserIds.includes(identifier))
-                    return;
-                if (leadEnabledUserIds !== null && !leadEnabledUserIds.includes(identifier))
-                    return;
-                candidateIds.push(identifier);
-            });
-            // LOOP — dispositivo confiable + estado operativo: solo quien puso
-            // 'working' entra al pool de asignación AUTOMÁTICA. coffee/lunch/
-            // errand/off_shift lo sacan del round-robin sin tocar las conversaciones
-            // que ya tenía asignadas (eso no cambia acá, solo futuras asignaciones).
-            // Sin doc de presencia todavía (o sin operationalStatus) = tratar como
-            // off_shift, nunca 'working' por defecto (ver Fase 21 - migración).
-            const presenceSnaps = await Promise.all(candidateIds.map(id => tx.get(db.collection('user_presence').doc(`${tenantId}_${id}`))));
-            const eligibleIds = candidateIds.filter((_, i) => {
-                const presence = presenceSnaps[i];
-                return presence.exists && presence.data()?.operationalStatus === 'working';
-            });
-            // Orden determinístico y estable — el round-robin necesita una
-            // secuencia fija para que "el siguiente después del cursor" tenga
-            // sentido entre llamadas.
-            eligibleIds.sort();
-            console.log('MULTI_AGENT_ELIGIBLE_ADVISORS', { tenantId, candidateIds, eligibleIds });
-            if (eligibleIds.length === 0) {
-                console.warn('MULTI_AGENT_NO_ELIGIBLE_ADVISORS', { tenantId });
-                const notifRef = db.collection('notifications').doc();
-                tx.set(notifRef, {
-                    tenantId,
-                    type: 'multi_agent_unassigned',
-                    title: 'Conversación sin asignar ⚠️',
-                    body: 'Llegó una conversación nueva pero no hay ningún asesor elegible para recibir leads automáticamente. Revisá Multi-Agente.',
-                    link: '/multi-agent',
-                    read: false,
-                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                });
-                return { advisorId: null, assignmentSource: 'unassigned_no_eligible' };
-            }
-            const cursor = multiAgentConfig.roundRobinCursor;
-            const cursorIndex = cursor ? eligibleIds.indexOf(cursor) : -1;
-            const nextIndex = (cursorIndex + 1) % eligibleIds.length;
-            const selected = eligibleIds[nextIndex];
-            console.log('MULTI_AGENT_ROUND_ROBIN_SELECTED', { tenantId, selected, cursorIndex, nextIndex, eligibleCount: eligibleIds.length });
-            tx.update(settingsRef, {
-                'multiAgentConfig.roundRobinCursor': selected,
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            console.log('MULTI_AGENT_ASSIGNMENT_SUCCESS', { tenantId, advisorId: selected });
-            return { advisorId: selected, assignmentSource: 'auto_round_robin' };
-        });
-    }
-    catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        console.error('[MultiAgente] Error en assignConversationAdvisor:', message);
-        return { advisorId: null, assignmentSource: 'unassigned_error' };
-    }
-}
+// ─── Multi-Agente: asignación automática (round-robin) ────────────────────
+// La lógica vive en ./autoAssign (extraída sin cambios para poder probarla
+// contra el emulador de Firestore). Acá solo se le inyecta el db del módulo.
+const assignConversationAdvisor = (tenantId) => (0, autoAssign_1.assignConversationAdvisor)(db, tenantId);
+const ensureAdvisorForExistingConversation = (tenantId, conversationId, leadId) => (0, autoAssign_1.ensureConversationAdvisor)(db, tenantId, conversationId, leadId).catch((e) => console.warn('[MultiAgente] ensureConversationAdvisor falló:', e?.message || e));
 /**
  * Webhook de WhatsApp Cloud API
  */
@@ -1193,6 +1105,10 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                     }
                     else {
                         conversationId = convSnapshot.docs[0].id;
+                        // Quedó sin asesor (nadie elegible / error): se reintenta al volver a escribir.
+                        if (!convSnapshot.docs[0].data().advisorId) {
+                            await ensureAdvisorForExistingConversation(tenantId, conversationId, leadId);
+                        }
                     }
                     // F. MEDIA DOWNLOAD (audio/imagen entrante desde WhatsApp → Firebase Storage)
                     let inboundMediaUrl = null;
@@ -1528,6 +1444,9 @@ exports.metaWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).https.o
                     }
                     else {
                         conversationId = convSnapshot.docs[0].id;
+                        if (!convSnapshot.docs[0].data().advisorId) {
+                            await ensureAdvisorForExistingConversation(tenantId, conversationId, convSnapshot.docs[0].data().leadId);
+                        }
                     }
                     // E. PERSISTENCIA TRANSACCIONAL
                     await db.runTransaction(async (transaction) => {
