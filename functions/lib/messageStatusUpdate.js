@@ -7,6 +7,7 @@
 // mensaje — afecta a todos los tenants, no solo a USADITOS.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.shouldApplyStatusUpdate = shouldApplyStatusUpdate;
+exports.buildWebhookMetaError = buildWebhookMetaError;
 const STATUS_RANK = {
     pending: 0,
     sent: 1,
@@ -32,5 +33,27 @@ function shouldApplyStatusUpdate(currentStatus, incomingStatus) {
         return false;
     const currentRank = STATUS_RANK[currentStatus ?? 'pending'] ?? 0;
     return incomingRank > currentRank;
+}
+const clip = (v, max = 500) => typeof v === 'string' && v ? v.slice(0, max) : null;
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+/**
+ * Normaliza statuses[0].errors[0] de un webhook `failed` de Meta para
+ * persistirlo/loguearlo SOLO como diagnostico. Nunca incluye el payload
+ * completo (ni telefonos, tokens o headers); de error_data solo `details`.
+ * Sin `undefined` (Firestore los rechaza). Puro: no decide ningun estado.
+ */
+function buildWebhookMetaError(err, wamid, receivedAt) {
+    return {
+        source: 'webhook',
+        code: num(err?.code),
+        subcode: num(err?.error_subcode ?? err?.subcode),
+        title: clip(err?.title),
+        message: clip(err?.message),
+        type: clip(err?.type, 100),
+        fbtraceId: clip(err?.fbtrace_id, 100),
+        details: clip(err?.error_data?.details),
+        wamid,
+        receivedAt,
+    };
 }
 //# sourceMappingURL=messageStatusUpdate.js.map

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldApplyStatusUpdate } from './messageStatusUpdate';
+import { shouldApplyStatusUpdate, buildWebhookMetaError } from './messageStatusUpdate';
 
 describe('shouldApplyStatusUpdate — webhook status updates (LOOP nocturno USADITOS, Fase 6)', () => {
   it('sent -> delivered avanza', () => {
@@ -48,5 +48,28 @@ describe('shouldApplyStatusUpdate — webhook status updates (LOOP nocturno USAD
     expect(shouldApplyStatusUpdate(undefined, 'sent')).toBe(true);
     expect(shouldApplyStatusUpdate(null, 'sent')).toBe(true);
     expect(shouldApplyStatusUpdate('pending', 'sent')).toBe(true);
+  });
+});
+
+describe('buildWebhookMetaError — diagnostico de failed por webhook', () => {
+  it('captura code/title/message/fbtrace_id y details, sin undefined', () => {
+    const r = buildWebhookMetaError(
+      { code: 131053, title: 'Media upload error', message: 'Media upload error', type: 'OAuthException', fbtrace_id: 'AbC', error_data: { details: 'Unsupported codec', secret: 'x' } },
+      'wamid.X', '2026-10-17T19:54:25.000Z'
+    );
+    expect(r).toEqual({
+      source: 'webhook', code: 131053, subcode: null, title: 'Media upload error', message: 'Media upload error',
+      type: 'OAuthException', fbtraceId: 'AbC', details: 'Unsupported codec', wamid: 'wamid.X', receivedAt: '2026-10-17T19:54:25.000Z',
+    });
+    expect(Object.values(r).includes(undefined as any)).toBe(false);
+  });
+
+  it('acepta error ausente y subcode alterno', () => {
+    expect(buildWebhookMetaError(undefined, 'w', 't').code).toBeNull();
+    expect(buildWebhookMetaError({ subcode: 7 }, 'w', 't').subcode).toBe(7);
+  });
+
+  it('recorta textos largos', () => {
+    expect(buildWebhookMetaError({ message: 'a'.repeat(900) }, 'w', 't').message).toHaveLength(500);
   });
 });

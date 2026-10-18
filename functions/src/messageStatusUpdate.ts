@@ -31,3 +31,45 @@ export function shouldApplyStatusUpdate(currentStatus: string | undefined | null
   const currentRank = STATUS_RANK[currentStatus ?? 'pending'] ?? 0;
   return incomingRank > currentRank;
 }
+
+export interface WebhookMetaError {
+  source: 'webhook';
+  code: number | null;
+  subcode: number | null;
+  title: string | null;
+  message: string | null;
+  type: string | null;
+  fbtraceId: string | null;
+  details: string | null;
+  wamid: string;
+  receivedAt: string;
+}
+
+const clip = (v: unknown, max = 500): string | null =>
+  typeof v === 'string' && v ? v.slice(0, max) : null;
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/**
+ * Normaliza statuses[0].errors[0] de un webhook `failed` de Meta para
+ * persistirlo/loguearlo SOLO como diagnostico. Nunca incluye el payload
+ * completo (ni telefonos, tokens o headers); de error_data solo `details`.
+ * Sin `undefined` (Firestore los rechaza). Puro: no decide ningun estado.
+ */
+export function buildWebhookMetaError(
+  err: Record<string, any> | undefined | null,
+  wamid: string,
+  receivedAt: string
+): WebhookMetaError {
+  return {
+    source: 'webhook',
+    code: num(err?.code),
+    subcode: num(err?.error_subcode ?? err?.subcode),
+    title: clip(err?.title),
+    message: clip(err?.message),
+    type: clip(err?.type, 100),
+    fbtraceId: clip(err?.fbtrace_id, 100),
+    details: clip(err?.error_data?.details),
+    wamid,
+    receivedAt,
+  };
+}

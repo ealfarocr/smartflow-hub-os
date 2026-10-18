@@ -22,7 +22,7 @@ import {
 } from './pinAuth';
 import { checkMembershipAuth, checkConversationTenantMatch, buildMetaErrorDetail, MetaErrorDetail } from './sendMessageAuth';
 import { checkVendorPinAuth, buildBreakGlassAuditEvent, checkPinLoginAllowed } from './vendorPinAuth';
-import { shouldApplyStatusUpdate } from './messageStatusUpdate';
+import { shouldApplyStatusUpdate, buildWebhookMetaError } from './messageStatusUpdate';
 import { checkTenantAdminAuth } from './tenantAdminAuth';
 import {
   resolveAccessState, resolveAccessActionsFor, checkSetVendorPinTransition,
@@ -1379,6 +1379,9 @@ export const whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }
                 const updatePayload: any = { status: newStatus };
                 if (newStatus === 'failed' && statusUpdate.errors?.[0]) {
                   updatePayload.errorMessage = statusUpdate.errors[0].title || statusUpdate.errors[0].message || 'Meta reportó un fallo de entrega';
+                  // Solo diagnóstico: no altera status ni errorMessage.
+                  updatePayload.metaError = buildWebhookMetaError(statusUpdate.errors[0], wamid, new Date().toISOString());
+                  console.error('[Webhook Status] failed', JSON.stringify({ tenantId, previousStatus: msgDoc.data()?.status ?? null, ...updatePayload.metaError }));
                 }
                 await msgDoc.ref.update(updatePayload);
               }

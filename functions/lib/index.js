@@ -1334,6 +1334,9 @@ exports.whatsappWebhook = functions.runWith({ secrets: ['OPENAI_API_KEY'] }).htt
                                 const updatePayload = { status: newStatus };
                                 if (newStatus === 'failed' && statusUpdate.errors?.[0]) {
                                     updatePayload.errorMessage = statusUpdate.errors[0].title || statusUpdate.errors[0].message || 'Meta reportó un fallo de entrega';
+                                    // Solo diagnóstico: no altera status ni errorMessage.
+                                    updatePayload.metaError = (0, messageStatusUpdate_1.buildWebhookMetaError)(statusUpdate.errors[0], wamid, new Date().toISOString());
+                                    console.error('[Webhook Status] failed', JSON.stringify({ tenantId, previousStatus: msgDoc.data()?.status ?? null, ...updatePayload.metaError }));
                                 }
                                 await msgDoc.ref.update(updatePayload);
                             }
