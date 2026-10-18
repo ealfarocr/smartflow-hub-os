@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { isToday, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useConversationStore } from '@/stores/conversationStore';
@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { VoiceRecorder } from '@/utils/audioRecorder';
 import { canShowTakeButton } from '@/utils/takeConversation';
+import { detectLiveVideoSupportInBrowser } from '@/modules/chat-live-video/chatLiveVideo';
+import type { LiveVideoResult } from '@/modules/chat-live-video/ChatLiveVideoRecorder';
 import { useTeam } from '@/hooks/useTeam';
 import { CreatePaymentLinkModal } from '@/modules/payments/CreatePaymentLinkModal';
 import { WhatsappWindowBadge } from './WhatsappWindowBadge';
@@ -66,6 +68,9 @@ const TEAM_STATUS_LABEL: Record<string, string> = {
   suspended: 'Suspendido',
 };
 
+// Grabador Live Video (carga diferida: solo se baja cuando alguien toca "Grabar video").
+const ChatLiveVideoRecorder = lazy(() => import('@/modules/chat-live-video/ChatLiveVideoRecorder'));
+
 export const ConversationsPageView = () => {
   const {
     conversations, activeConversation, activeMessages,
@@ -79,6 +84,11 @@ export const ConversationsPageView = () => {
   const [showQuotaPanel, setShowQuotaPanel] = useState(false);
   const [showToolsPanel, setShowToolsPanel] = useState(false);
   const [showCameraChoice, setShowCameraChoice] = useState(false);
+  // Live Video: grabar dentro de SmartFlow (MP4 H.264/AAC) en vez de la cámara nativa.
+  // Si el navegador no lo soporta, o la cámara/grabador falla una vez, se usa la cámara nativa de siempre.
+  const liveVideoSupport = useMemo(() => detectLiveVideoSupportInBrowser(), []);
+  const [liveVideoOpen, setLiveVideoOpen] = useState(false);
+  const [liveVideoDisabled, setLiveVideoDisabled] = useState(false);
   const { addToast } = useUIStore();
 
   const [inputText, setInputText]   = useState('');
@@ -350,6 +360,29 @@ export const ConversationsPageView = () => {
       addToast(outboundRejectionMessage(result.errorMessage), 'error');
     }
   };
+  // Live Video: el grabador deja el video LISTO y el vendedor pulsa Enviar. Se envía por el
+  // MISMO pipeline de siempre (sendMessage → sendWhatsappMessage); no hay un segundo camino a Meta.
+  // true = el mensaje quedó registrado (si Meta lo rechazó, queda en el chat con "Reintentar"); false = no
+  // se pudo ni intentar, y el grabador conserva el video para reintentar.
+  const handleLiveVideoSend = async (r: LiveVideoResult): Promise<boolean> => {
+    if (!activeConversation || !activeMembership?.tenantId || sendLockRef.current) return false;
+    sendLockRef.current = true;
+    setIsSending(true);
+    try {
+      debugAttach('LIVE_VIDEO_SEND_REQUEST', { conversationId: activeConversation, mediaFilename: r.filename, sizeMB: +(r.sizeBytes / 1048576).toFixed(2) });
+      const result = await sendMessage(activeConversation, '', 'advisor', activeMembership.tenantId, r.url, r.filename);
+      debugAttach('LIVE_VIDEO_SEND_RESPONSE', result);
+      reportOutboundResult(result);
+      return true;
+    } catch (err) {
+      handleSellerError('send', err);
+      return false;
+    } finally {
+      sendLockRef.current = false;
+      setIsSending(false);
+    }
+  };
+
   // Owner/Admin abren el modulo de Cotizaciones; el asesor trabaja desde el chat.
   const canOpenQuotesModule = isAdminRole(activeMembership?.role);
 
@@ -756,6 +789,26 @@ export const ConversationsPageView = () => {
         onNativeFiles={activeChat ? (files, kind) => handleFilesSelected(files, kind === 'gallery' ? 'GALLERY' : kind === 'photo' ? 'PHOTO' : 'VIDEO') : undefined}
         chat={{ conversacionAbierta: !!activeChat, ventana: activeChat ? windowInfo.status : null, grabando: isRecording }}
       />
+
+      {liveVideoOpen && activeConversation && activeMembership?.tenantId && (
+        <Suspense fallback={null}>
+          <ChatLiveVideoRecorder
+            tenantId={activeMembership.tenantId}
+            conversationId={activeConversation}
+            support={liveVideoSupport}
+            onClose={() => setLiveVideoOpen(false)}
+            onDiag={mediaUi}
+            onFallback={(reason) => {
+              mediaUi('LIVE_VIDEO_FALLBACK', { reason });
+              setLiveVideoOpen(false);
+              setLiveVideoDisabled(true);
+              setShowCameraChoice(true);
+              addToast('No se pudo abrir la cámara dentro de SmartFlow. Tocá "Grabar video" otra vez para usar la cámara del teléfono.', 'info');
+            }}
+            onSend={handleLiveVideoSend}
+          />
+        </Suspense>
+      )}
 
       {/* ── Sidebar ── */}
       <div className={`${activeChat ? 'hidden md:flex' : 'flex'} w-full md:w-72 flex-col border-r border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900`}>
@@ -1392,6 +1445,16 @@ ${plantilla}` : plantilla);
                             {/* Grabador propio (VideoRecorderModal) desactivado: en Android el MP4
                                 del MediaRecorder sale sin duración válida (preview negro, 0:00).
                                 Se usa la cámara nativa del teléfono, igual que para la foto. */}
+                            {liveVideoSupport.supported && !liveVideoDisabled ? (
+                              <button type="button"
+                                title="Grabar video"
+                                data-media-control="live-video"
+                                onClick={() => { mediaUi('LIVE_VIDEO_OPEN', { mime: liveVideoSupport.mime.chosen }); setShowCameraChoice(false); setLiveVideoOpen(true); }}
+                                className="w-full border-t border-slate-100 dark:border-slate-700 px-4 py-3 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 text-left">
+                                <Play className="w-3.5 h-3.5" /> Grabar video
+                              </button>
+                            ) : (
+                              <>
                             <FileTapTarget
                               diag="VIDEO"
                               control="video"
@@ -1412,6 +1475,8 @@ ${plantilla}` : plantilla);
                                 <Play className="w-3.5 h-3.5" /> Grabar video
                               </span>
                             </FileTapTarget>
+                              </>
+                            )}
                           </div>
                       </div>
 
