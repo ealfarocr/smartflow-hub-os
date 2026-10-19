@@ -4,8 +4,8 @@ import { ref, uploadBytes } from 'firebase/storage';
 import { Circle, Cloud, Loader2, Send, Square, Trash2, X } from 'lucide-react';
 import { auth, storage } from '@/lib/firebase';
 import {
-  AUDIO_BITRATE, CHAT_MAX_SECONDS, CHAT_UPLOAD_CONCURRENCY, CHAT_VIDEO_BITRATE, CHUNK_MS, ChunkUploadQueue,
-  chatChunkPath, clockMs, finishingLabel, formatClock, liveVideoErrorMessage, liveVideoFilename, newJobId, shouldAutoStop,
+  AUDIO_BITRATE, CHAT_MAX_SECONDS, CHAT_UPLOAD_CONCURRENCY, CHAT_VIDEO_BITRATE, CHUNK_MS, ChunkUploadFailedError, ChunkUploadQueue,
+  chatChunkPath, clockMs, finishingLabel, formatClock, liveVideoErrorMessage, liveVideoFilename, liveVideoTechCode, newJobId, shouldAutoStop,
   type LiveVideoSupport,
 } from './chatLiveVideo';
 
@@ -39,6 +39,7 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
   const [seconds, setSeconds] = useState(0);
   const [backlogChunks, setBacklogChunks] = useState(0);
   const [errorText, setErrorText] = useState('');
+  const [errorTech, setErrorTech] = useState<string | null>(null);
   const [result, setResult] = useState<LiveVideoResult | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [sending, setSending] = useState(false);
@@ -105,7 +106,7 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fail = (text: string) => { if (mountedRef.current) { setErrorText(text); setPhase('error'); } };
+  const fail = (text: string, tech: string | null = null) => { if (mountedRef.current) { setErrorText(text); setErrorTech(tech); setPhase('error'); } };
 
   const discardRemote = useCallback(async () => {
     try { await callBackend({ action: 'delete' }); } catch { /* best effort: lo huérfano lo limpia el ciclo de vida del bucket */ }
@@ -120,7 +121,11 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
       await queue.idle();
       const done = queue.stats();
       diag('UPLOADS_DONE', { chunks: done.chunksCreated, failed: done.chunksFailed, backlogAtStop: done.backlogChunks });
-      if (done.chunksFailed > 0) throw new Error('chunks');
+      if (done.chunksFailed > 0) {
+        // Se conserva el error REAL del primer chunk terminal (code/mensaje saneados); solo si no hay, fallback genérico.
+        const failure = queue.firstFailure();
+        throw failure ? new ChunkUploadFailedError(failure) : new Error('chunks');
+      }
       const t0 = clockMs();
       const res = await callBackend({ action: 'compose', chunkCount, mimeType: recorderRef.current?.mimeType || support.mime.chosen || 'video/mp4' });
       if (!res.data.url) throw new Error('sin url');
@@ -129,10 +134,17 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
       setResult({ url: res.data.url, filename: liveVideoFilename(new Date()), sizeBytes: res.data.sizeBytes ?? 0 });
       setPhase('review');
     } catch (e) {
-      diag('FINISH_FAILED', { code: (e as { code?: string })?.code, message: (e as Error)?.message });
+      const failure = e instanceof ChunkUploadFailedError ? e.failure : null;
+      diag('FINISH_FAILED', failure
+        ? {
+          stage: 'chunk-upload', code: failure.code, name: failure.name, message: failure.message,
+          chunkIndex: failure.chunkIndex, chunkSizeBytes: failure.chunkSizeBytes, attempts: failure.attempts,
+          hasAuthenticatedUser: !!auth.currentUser, hasTenantId: !!tenantId, hasConversationId: !!conversationId,
+        }
+        : { stage: 'compose-or-other', code: (e as { code?: string })?.code, message: (e as Error)?.message });
       // Un intento fallido no deja chunks huérfanos en Storage (best effort).
       void discardRemote();
-      fail(liveVideoErrorMessage(e));
+      fail(liveVideoErrorMessage(e), liveVideoTechCode(e));
     } finally {
       releaseMedia();
     }
@@ -262,6 +274,9 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
         {phase === 'error' ? (
           <div className="px-6 text-center space-y-3 max-w-sm">
             <p className="text-base font-bold" role="alert">{errorText}</p>
+            {errorTech ? (
+              <p className="text-xs text-white/60" data-testid="live-video-tech-code">Código técnico:<br />{errorTech}</p>
+            ) : null}
           </div>
         ) : null}
       </div>

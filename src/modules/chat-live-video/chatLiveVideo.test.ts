@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   CHAT_MAX_SECONDS, CHAT_VIDEO_BITRATE, chatChunkPath, detectLiveVideoSupport, finishingLabel, formatClock,
-  liveVideoErrorMessage, liveVideoFilename, shouldAutoStop,
+  liveVideoErrorMessage, liveVideoFilename, liveVideoTechCode, shouldAutoStop,
 } from './chatLiveVideo';
+import { ChunkUploadFailedError, ChunkUploadQueue } from './chatLiveVideo';
 
 const env = (over: Partial<Parameters<typeof detectLiveVideoSupport>[0]> = {}) => ({
   isSecureContext: true, hasMediaRecorder: true, hasGetUserMedia: true,
@@ -67,6 +68,91 @@ describe('textos y nombres', () => {
   it('errores: muestra el mensaje del servidor o uno genérico accionable', () => {
     expect(liveVideoErrorMessage({ code: 'functions/failed-precondition', message: 'El video pesa más de 16 MB' })).toBe('El video pesa más de 16 MB');
     expect(liveVideoErrorMessage({ code: 'functions/permission-denied' })).toMatch(/permiso/);
-    expect(liveVideoErrorMessage(new Error('boom'))).toMatch(/conexión/);
+    expect(liveVideoErrorMessage(new Error('boom'))).toBe('No se pudo preparar el video.');
+  });
+});
+
+// Reintentos instantáneos: el comportamiento de la cola no cambia, solo se conserva el error real.
+const blob = (n: number) => new Blob([new Uint8Array(n)]);
+const fastQueue = (upload: (i: number, b: Blob) => Promise<void>) =>
+  new ChunkUploadQueue({ concurrency: 3, upload, delay: async () => {} });
+const storageErr = (code: string, message = 'boom') => Object.assign(new Error(message), { code, name: 'FirebaseError' });
+
+describe('diagnóstico de fallo de chunks', () => {
+  it('A: storage/unauthorized conserva code, índice y el mensaje visible trae el código técnico', async () => {
+    const q = fastQueue(async i => { if (i === 1) throw storageErr('storage/unauthorized'); });
+    q.add(0, blob(10)); q.add(1, blob(2048)); q.add(2, blob(10));
+    await q.idle();
+    const f = q.firstFailure()!;
+    expect(f).toMatchObject({ code: 'storage/unauthorized', chunkIndex: 1, chunkSizeBytes: 2048, attempts: 3, name: 'FirebaseError' });
+    const err = new ChunkUploadFailedError(f);
+    expect(err.code).toBe('storage/unauthorized');
+    expect(liveVideoErrorMessage(err)).toMatch(/administrador/);
+    expect(liveVideoTechCode(err)).toBe('storage/unauthorized · fragmento 2');
+  });
+
+  it('B: storage/retry-limit-exceeded conserva el code y no culpa a la conexión', async () => {
+    const q = fastQueue(async () => { throw storageErr('storage/retry-limit-exceeded'); });
+    q.add(2, blob(5));
+    await q.idle();
+    const err = new ChunkUploadFailedError(q.firstFailure()!);
+    expect(err.failure.code).toBe('storage/retry-limit-exceeded');
+    expect(liveVideoErrorMessage(err)).toBe('No se pudo preparar el video.');
+    expect(liveVideoTechCode(err)).toBe('storage/retry-limit-exceeded · fragmento 3');
+  });
+
+  it('storage/unauthenticated y network/offline se distinguen; canceled/unknown quedan neutros', () => {
+    expect(liveVideoErrorMessage({ code: 'storage/unauthenticated' })).toMatch(/sesión/);
+    expect(liveVideoErrorMessage({ code: 'network/offline' })).toMatch(/Sin conexión/);
+    expect(liveVideoErrorMessage({ code: 'storage/canceled' })).toBe('No se pudo preparar el video.');
+    expect(liveVideoErrorMessage({ code: 'storage/unknown' })).toBe('No se pudo preparar el video.');
+    expect(liveVideoTechCode({ code: 'storage/unknown' })).toBe('storage/unknown');
+  });
+
+  it('C: error genérico sin code → fallback seguro, sin línea técnica inventada', async () => {
+    const q = fastQueue(async () => { throw 'texto plano'; });
+    q.add(0, blob(1));
+    await q.idle();
+    const f = q.firstFailure()!;
+    expect(f.code).toBeNull();
+    const err = new ChunkUploadFailedError(f);
+    expect(liveVideoErrorMessage(err)).toBe('No se pudo preparar el video.');
+    expect(liveVideoTechCode(err)).toBeNull();
+    expect(liveVideoTechCode(new Error('chunks'))).toBeNull();
+    expect(liveVideoTechCode(null)).toBeNull();
+  });
+
+  it('D: subida exitosa → sin fallos, mismos reintentos y estadísticas', async () => {
+    let calls = 0;
+    const q = fastQueue(async i => { calls++; if (i === 0 && calls === 1) throw storageErr('storage/unknown'); });
+    q.add(0, blob(10)); q.add(1, blob(10));
+    await q.idle();
+    expect(q.firstFailure()).toBeNull();
+    expect(q.stats()).toMatchObject({ chunksCreated: 2, chunksUploaded: 2, chunksFailed: 0 });
+    expect(q.records.find(r => r.index === 0)!.attempts).toBe(2);
+    expect(calls).toBe(3);
+  });
+
+  it('reintentos intactos: 3 intentos por chunk antes de fallar', async () => {
+    let calls = 0;
+    const q = fastQueue(async () => { calls++; throw storageErr('storage/unauthorized'); });
+    q.add(0, blob(1));
+    await q.idle();
+    expect(calls).toBe(3);
+    expect(q.stats().chunksFailed).toBe(1);
+  });
+
+  it('E: datos sensibles no aparecen en el mensaje visible ni en el fallo guardado', async () => {
+    const secret = 'https://firebasestorage.googleapis.com/v0/b/x/o/chat-live-video%2Ft-1%2Fconv%2Fuid%2Fjob%2Fc0000?token=abc123 Authorization: Bearer eyJhbGciOi.zzz';
+    const q = fastQueue(async () => { throw storageErr('storage/unauthorized', `fallo ${secret} en chat-live-video/t-1791700036682/convX/uidY/job/c0000`); });
+    q.add(0, blob(1));
+    await q.idle();
+    const f = q.firstFailure()!;
+    const err = new ChunkUploadFailedError(f);
+    const visible = `${liveVideoErrorMessage(err)} ${liveVideoTechCode(err)}`;
+    for (const s of ['abc123', 'eyJhbGciOi', 'googleapis', 't-1791700036682', 'convX', 'uidY', 'chat-live-video', 'token=']) {
+      expect(visible).not.toContain(s);
+      expect(JSON.stringify(f)).not.toContain(s);
+    }
   });
 });

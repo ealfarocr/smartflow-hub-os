@@ -56,6 +56,44 @@ export interface ChunkRecord {
   uploadCompletedAt: number | null;
   attempts: number;
   error: string | null;
+  /** Detalle del último error real (saneado). Solo diagnóstico. */
+  errorName?: string | null;
+  errorMessage?: string | null;
+}
+
+/** Fallo terminal de un chunk (agotó sus reintentos). Sin tokens, URLs ni rutas. */
+export interface LiveVideoChunkUploadFailure {
+  name: string | null;
+  code: string | null;
+  message: string;
+  chunkIndex: number;
+  chunkSizeBytes: number;
+  attempts: number;
+}
+
+/** Quita URLs, tokens y rutas del mensaje de un error antes de guardarlo/mostrarlo. */
+export function sanitizeErrorText(raw: unknown, max = 160): string {
+  const s = typeof raw === 'string' ? raw : '';
+  return s
+    .replace(/https?:\/\/\S+/gi, '[url]')
+    .replace(/(?:authorization[\s:=]+)?bearer\s+\S+/gi, '[redacted]')
+    .replace(/\b(token|authorization|key)\b[\s:=]+\S+/gi, '$1 [redacted]')
+    .replace(/\S*chat-live-video\/\S*/gi, '[path]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+/** Error con la información del primer chunk fallido; finish() lo propaga sin reemplazarlo. */
+export class ChunkUploadFailedError extends Error {
+  readonly failure: LiveVideoChunkUploadFailure;
+  readonly code: string | undefined;
+  constructor(failure: LiveVideoChunkUploadFailure) {
+    super(failure.message);
+    this.name = 'ChunkUploadFailedError';
+    this.failure = failure;
+    this.code = failure.code ?? undefined;
+  }
 }
 
 export interface QueueStats {
@@ -135,6 +173,8 @@ export class ChunkUploadQueue {
         return;
       } catch (e) {
         rec.error = (e as { code?: string; message?: string })?.code || (e as Error)?.message || 'error';
+        rec.errorName = typeof (e as Error)?.name === 'string' ? (e as Error).name : null;
+        rec.errorMessage = sanitizeErrorText((e as Error)?.message);
         if (rec.attempts < this.maxAttempts) await this.delay(500 * rec.attempts);
       }
     }
@@ -152,6 +192,23 @@ export class ChunkUploadQueue {
   idle(): Promise<void> {
     if (this.active === 0 && this.pending.length === 0) return Promise.resolve();
     return new Promise(resolve => this.waiters.push(resolve));
+  }
+
+  /** Primer chunk (por índice) que agotó sus reintentos, con su error real saneado. Solo diagnóstico. */
+  firstFailure(): LiveVideoChunkUploadFailure | null {
+    const rec = this.records
+      .filter(r => r.uploadCompletedAt === null && r.error !== null && r.attempts >= this.maxAttempts)
+      .sort((a, b) => a.index - b.index)[0];
+    if (!rec) return null;
+    const looksLikeCode = /^[a-z]+\/[a-z0-9-]+$/i.test(rec.error ?? '');
+    return {
+      name: rec.errorName ?? null,
+      code: looksLikeCode ? rec.error : null,
+      message: rec.errorMessage ?? '',
+      chunkIndex: rec.index,
+      chunkSizeBytes: rec.size,
+      attempts: rec.attempts,
+    };
   }
 
   stats(): QueueStats {

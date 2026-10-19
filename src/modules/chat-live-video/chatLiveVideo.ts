@@ -4,7 +4,7 @@
 // no se reimplementan, solo se fijan los parámetros de producción.
 import { pickRecorderMime, type MimeSupport } from '@/modules/qa/liveVideo';
 
-export { AUDIO_BITRATE, CHUNK_MS, ChunkUploadQueue, clockMs, newJobId, pickRecorderMime } from '@/modules/qa/liveVideo';
+export { AUDIO_BITRATE, CHUNK_MS, ChunkUploadFailedError, ChunkUploadQueue, clockMs, newJobId, pickRecorderMime } from '@/modules/qa/liveVideo';
 
 // V1: 60 s a ~1,4 Mbps de video + 64 kbps de audio (≈11 MB; límite de WhatsApp 16 MB).
 // No subir el bitrate: el resultado validado físicamente fue suficiente.
@@ -82,7 +82,28 @@ export function liveVideoErrorMessage(err: unknown): string {
   const msg = (err as { message?: string } | null)?.message || '';
   if (code === 'functions/failed-precondition' || code === 'functions/invalid-argument') return msg || 'No se pudo preparar el video. Probá grabar de nuevo.';
   if (code === 'functions/permission-denied') return 'No tenés permiso para enviar video en esta conversación.';
-  if (code === 'functions/unauthenticated') return 'Tu sesión venció. Entrá de nuevo para enviar el video.';
+  if (code === 'functions/unauthenticated' || code === 'storage/unauthenticated') return 'Tu sesión venció. Entrá de nuevo para enviar el video.';
   if (code === 'storage/unauthorized') return 'No se pudo subir el video con tu usuario. Avisale al administrador.';
-  return 'No se pudo preparar el video. Revisá tu conexión y probá de nuevo.';
+  if (code === 'network/offline') return 'Sin conexión. Revisá tu internet y probá de nuevo.';
+  // storage/retry-limit-exceeded, storage/canceled, storage/unknown y desconocidos:
+  // no se afirma que sea la red; el código técnico se muestra aparte (liveVideoTechCode).
+  return 'No se pudo preparar el video.';
+}
+
+/**
+ * Línea técnica pequeña para QA (captura desde Android). Solo código y número de
+ * fragmento: nunca uid, tenant, conversación, rutas, URLs ni tokens.
+ * Devuelve null si no hay un código distinguible.
+ */
+export function liveVideoTechCode(err: unknown): string | null {
+  const e = err as { code?: unknown; failure?: { code?: unknown; name?: unknown; chunkIndex?: unknown } } | null;
+  const safe = /^[a-z0-9_-]+\/[a-z0-9_-]+$/i;
+  const rawCode = typeof e?.code === 'string' ? e.code : typeof e?.failure?.code === 'string' ? e.failure.code : '';
+  const rawName = typeof e?.failure?.name === 'string' ? e.failure.name : '';
+  let label = '';
+  if (safe.test(rawCode)) label = rawCode;
+  else if (/^[A-Za-z]+Error$/.test(rawName) && rawName !== 'Error' && rawName !== 'ChunkUploadFailedError') label = rawName;
+  if (!label) return null;
+  const idx = e?.failure?.chunkIndex;
+  return typeof idx === 'number' && Number.isFinite(idx) ? `${label} · fragmento ${idx + 1}` : label;
 }
