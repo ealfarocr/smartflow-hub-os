@@ -76,20 +76,24 @@ service firebase.storage {
     // Live Video PRODUCTIVO (grabar video dentro de SmartFlow para enviarlo por
     // WhatsApp): chat-live-video/{tenantId}/{conversationId}/{uid}/{jobId}/...
     // Escribe solo el propio uid, con membresía ACTIVA (rol distinto de "Solo
-    // lectura", como sendWhatsappMessage) en ESE tenant — o SuperAdmin — y solo
-    // sobre una conversación que pertenece a ese tenant. Chunks de ~2 s (<1 MB
-    // reales), tope 5 MB, siempre video. El archivo final lo crea la Function
+    // lectura", como sendWhatsappMessage) en ESE tenant, y solo sobre una
+    // conversación que pertenece a ese tenant. Chunks de ~2 s (<1 MB reales),
+    // tope 5 MB, siempre video. El archivo final lo crea la Function
     // chatLiveVideo (Admin SDK) y llega a Meta por la URL con token, que no
     // pasa por estas reglas. Lectura: miembros del tenant o SuperAdmin.
+    //
+    // LÍMITE CRÍTICO: Storage Rules permite como MÁXIMO 2 documentos Firestore
+    // distintos por evaluación (más → permission denied). El WRITE usa EXACTAMENTE
+    // 2: memberships/{uid}_{tenantId} y conversations/{conversationId}. NO usar
+    // isSuperAdmin() aquí (lee users/{uid} = 3er documento). Un SuperAdmin que
+    // suba video necesita membresía activa en el tenant. Guarda en
+    // storage.rules.limit.test.ts (guarda estática del límite de 2 documentos).
     match /chat-live-video/{tenantId}/{conversationId}/{uid}/{jobId}/{fileName} {
       allow write: if request.auth != null
                    && request.auth.uid == uid
-                   && (
-                        isSuperAdmin()
-                     || (firestore.exists(/databases/(default)/documents/memberships/$(request.auth.uid + '_' + tenantId))
-                         && firestore.get(/databases/(default)/documents/memberships/$(request.auth.uid + '_' + tenantId)).data.status == 'active'
-                         && firestore.get(/databases/(default)/documents/memberships/$(request.auth.uid + '_' + tenantId)).data.role != 'Solo lectura')
-                      )
+                   && firestore.exists(/databases/(default)/documents/memberships/$(request.auth.uid + '_' + tenantId))
+                   && firestore.get(/databases/(default)/documents/memberships/$(request.auth.uid + '_' + tenantId)).data.status == 'active'
+                   && firestore.get(/databases/(default)/documents/memberships/$(request.auth.uid + '_' + tenantId)).data.role != 'Solo lectura'
                    && firestore.exists(/databases/(default)/documents/conversations/$(conversationId))
                    && firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.tenantId == tenantId
                    && request.resource.size < 5 * 1024 * 1024
