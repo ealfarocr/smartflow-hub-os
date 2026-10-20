@@ -43,7 +43,7 @@ const chatLiveVideoCore_1 = require("./chatLiveVideoCore");
 // esta función solo los compone y devuelve la URL con token para enviar por el
 // pipeline normal (ConversationService.sendMessage → sendWhatsappMessage).
 // El uid sale SIEMPRE de request.auth, nunca del payload.
-exports.chatLiveVideo = (0, https_1.onCall)({ maxInstances: 10, memory: '256MiB', timeoutSeconds: 90 }, async (request) => {
+exports.chatLiveVideo = (0, https_1.onCall)({ maxInstances: 10, memory: '512MiB', timeoutSeconds: 90 }, async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
     const uid = request.auth.uid;
