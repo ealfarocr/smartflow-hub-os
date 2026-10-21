@@ -41,6 +41,8 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
   const [errorText, setErrorText] = useState('');
   const [errorTech, setErrorTech] = useState<string | null>(null);
   const [result, setResult] = useState<LiveVideoResult | null>(null);
+  const [remoteReady, setRemoteReady] = useState(false);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [sending, setSending] = useState(false);
 
@@ -50,15 +52,32 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
   const queueRef = useRef<ChunkUploadQueue | null>(null);
   const timerRef = useRef<number | null>(null);
   const startedAtRef = useRef(0);
+  const stopTimeRef = useRef(0);
+  const stopToLocalPreviewMsRef = useRef(0);
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const jobIdRef = useRef('');
   const cancelledRef = useRef(false);
   const mountedRef = useRef(true);
+  const localChunksRef = useRef<Blob[]>([]);
+  const localPreviewUrlRef = useRef<string | null>(null);
   const diag = useCallback((step: string, data?: Record<string, unknown>) => onDiag?.(`LIVE_VIDEO_${step}`, data), [onDiag]);
+
+  const revokeLocalPreview = useCallback(() => {
+    if (localPreviewUrlRef.current) {
+      try {
+        URL.revokeObjectURL(localPreviewUrlRef.current);
+      } catch {
+        /* noop */
+      }
+      localPreviewUrlRef.current = null;
+    }
+    localChunksRef.current = [];
+    setLocalPreviewUrl(null);
+  }, []);
 
   const callBackend = useCallback(
     (req: Omit<ComposeReq, 'tenantId' | 'conversationId' | 'jobId'>) =>
-      httpsCallable<ComposeReq, { ok: boolean; url?: string; sizeBytes?: number; deleted?: number }>(getFunctions(), 'chatLiveVideo')(
+      httpsCallable<ComposeReq, { ok: boolean; url?: string; sizeBytes?: number; remuxMs?: number; deleted?: number }>(getFunctions(), 'chatLiveVideo')(
         { ...req, tenantId, conversationId, jobId: jobIdRef.current },
       ),
     [tenantId, conversationId],
@@ -101,6 +120,7 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
       cancelledRef.current = true;
       try { if (recorderRef.current?.state === 'recording') recorderRef.current.stop(); } catch { /* ya detenido */ }
       releaseMedia();
+      revokeLocalPreview();
     };
     // Una sola vez al montar.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,6 +139,8 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
     try {
       if (chunkCount < 1) throw Object.assign(new Error('corta'), { code: 'functions/failed-precondition', message: 'La grabación es muy corta. Probá de nuevo.' });
       await queue.idle();
+      const stopToUploadIdleMs = clockMs() - stopTimeRef.current;
+      diag('STOP_TO_UPLOAD_IDLE', { ms: Math.round(stopToUploadIdleMs) });
       const done = queue.stats();
       diag('UPLOADS_DONE', { chunks: done.chunksCreated, failed: done.chunksFailed, backlogAtStop: done.backlogChunks });
       if (done.chunksFailed > 0) {
@@ -129,9 +151,20 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
       const t0 = clockMs();
       const res = await callBackend({ action: 'compose', chunkCount, mimeType: recorderRef.current?.mimeType || support.mime.chosen || 'video/mp4' });
       if (!res.data.url) throw new Error('sin url');
-      diag('COMPOSE_OK', { ms: Math.round(clockMs() - t0), sizeMB: +((res.data.sizeBytes ?? 0) / 1048576).toFixed(2) });
+      const functionCallMs = clockMs() - t0;
+      const stopToRemoteReadyMs = clockMs() - stopTimeRef.current;
+      const remuxMs = typeof res.data.remuxMs === 'number' ? res.data.remuxMs : 0;
+      diag('LATENCY_METRICS', {
+        STOP_TO_LOCAL_PREVIEW_MS: Math.round(stopToLocalPreviewMsRef.current),
+        STOP_TO_UPLOAD_IDLE_MS: Math.round(stopToUploadIdleMs),
+        FUNCTION_CALL_MS: Math.round(functionCallMs),
+        REMUX_MS: Math.round(remuxMs),
+        STOP_TO_REMOTE_READY_MS: Math.round(stopToRemoteReadyMs),
+      });
+      diag('COMPOSE_OK', { ms: Math.round(functionCallMs), sizeMB: +((res.data.sizeBytes ?? 0) / 1048576).toFixed(2) });
       if (!mountedRef.current) return;
       setResult({ url: res.data.url, filename: liveVideoFilename(new Date()), sizeBytes: res.data.sizeBytes ?? 0 });
+      setRemoteReady(true);
       setPhase('review');
     } catch (e) {
       const failure = e instanceof ChunkUploadFailedError ? e.failure : null;
@@ -144,6 +177,7 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
         : { stage: 'compose-or-other', code: (e as { code?: string })?.code, message: (e as Error)?.message });
       // Un intento fallido no deja chunks huérfanos en Storage (best effort).
       void discardRemote();
+      revokeLocalPreview();
       fail(liveVideoErrorMessage(e), liveVideoTechCode(e));
     } finally {
       releaseMedia();
@@ -155,6 +189,11 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
     const uid = auth.currentUser?.uid;
     if (!stream || !uid) { fail('Tu sesión venció. Entrá de nuevo para grabar.'); return; }
     cancelledRef.current = false;
+    revokeLocalPreview();
+    setRemoteReady(false);
+    setResult(null);
+    setPreviewFailed(false);
+    localChunksRef.current = [];
     const jobId = newJobId();
     jobIdRef.current = jobId;
 
@@ -184,9 +223,32 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
     queueRef.current = queue;
 
     let index = 0;
-    recorder.ondataavailable = (ev: BlobEvent) => { if (ev.data && ev.data.size > 0) queue.add(index++, ev.data); };
+    recorder.ondataavailable = (ev: BlobEvent) => {
+      if (ev.data && ev.data.size > 0) {
+        localChunksRef.current.push(ev.data);
+        queue.add(index++, ev.data);
+      }
+    };
     recorder.onerror = () => { diag('RECORDER_ERROR'); };
-    recorder.onstop = () => { void finish(index); };
+    recorder.onstop = () => {
+      if (localChunksRef.current.length > 0 && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        try {
+          const localBlob = new Blob(localChunksRef.current, {
+            type: recorder.mimeType || support.mime.chosen || 'video/mp4',
+          });
+          const localUrl = URL.createObjectURL(localBlob);
+          localPreviewUrlRef.current = localUrl;
+          setLocalPreviewUrl(localUrl);
+          const stopToLocalPreviewMs = clockMs() - stopTimeRef.current;
+          stopToLocalPreviewMsRef.current = stopToLocalPreviewMs;
+          diag('STOP_TO_LOCAL_PREVIEW', { ms: Math.round(stopToLocalPreviewMs) });
+          setPhase('review');
+        } catch (err) {
+          diag('LOCAL_PREVIEW_FAILED', { error: String(err) });
+        }
+      }
+      void finish(index);
+    };
 
     startedAtRef.current = clockMs();
     recorder.start(CHUNK_MS);
@@ -204,6 +266,7 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
     const rec = recorderRef.current;
     if (!rec || rec.state !== 'recording') return;
     if (timerRef.current) { window.clearInterval(timerRef.current); timerRef.current = null; }
+    stopTimeRef.current = clockMs();
     setSeconds(Math.min((clockMs() - startedAtRef.current) / 1000, CHAT_MAX_SECONDS));
     setPhase('finishing');
     rec.stop();
@@ -215,19 +278,31 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
   // Cancelar mientras graba: se descarta todo (lo subido se borra cuando termina la cola).
   const cancelRecording = () => {
     cancelledRef.current = true;
+    revokeLocalPreview();
     try { if (recorderRef.current?.state === 'recording') recorderRef.current.stop(); } catch { /* ya detenido */ }
     releaseMedia();
     onClose();
   };
 
-  const discard = () => { void discardRemote(); onClose(); };
+  const discard = () => {
+    cancelledRef.current = true;
+    revokeLocalPreview();
+    void discardRemote();
+    onClose();
+  };
 
   const send = async () => {
-    if (!result || sending) return;
+    if (!result || !remoteReady || sending) return;
     setSending(true);
+    // El archivo que se envía es SIEMPRE el final.mp4 remoto remuxeado
     const ok = await onSend(result);
     if (!mountedRef.current) return;
-    if (ok) onClose(); else setSending(false);
+    if (ok) {
+      revokeLocalPreview();
+      onClose();
+    } else {
+      setSending(false);
+    }
   };
 
   const recording = phase === 'recording';
@@ -237,10 +312,19 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
     <div role="dialog" aria-modal="true" aria-label="Grabar video" className="fixed inset-0 z-[70] bg-black flex flex-col text-white">
       <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-2">
         <span className="text-sm font-black tabular-nums" aria-live="off">
-          {phase === 'review' || phase === 'error' ? '' : `${formatClock(seconds)} / ${formatClock(CHAT_MAX_SECONDS)}`}
+          {phase === 'error' ? '' : `${formatClock(seconds)} / ${formatClock(CHAT_MAX_SECONDS)}`}
         </span>
         {recording ? (
           <span className="flex items-center gap-1.5 text-xs font-semibold text-sky-300"><Cloud className="w-4 h-4" aria-hidden="true" /> Sincronizando…</span>
+        ) : null}
+        {phase === 'review' ? (
+          remoteReady ? (
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400" role="status">Listo para enviar</span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-300" role="status">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> Finalizando video…
+            </span>
+          )
         ) : null}
         {phase !== 'finishing' && !sending ? (
           <button type="button" onClick={recording ? cancelRecording : (phase === 'review' ? discard : onClose)}
@@ -260,14 +344,14 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
             <p className="text-base font-bold" role="status">{finishingLabel(backlogChunks > 0 ? 'uploading' : 'preparing')}</p>
           </div>
         ) : null}
-        {phase === 'review' && result ? (
+        {phase === 'review' && (localPreviewUrl || result) ? (
           previewFailed ? (
             <div className="px-6 text-center space-y-1">
               <p className="text-base font-bold">Video listo</p>
-              <p className="text-sm text-white/70">{formatClock(seconds)} · {(result.sizeBytes / 1048576).toFixed(1)} MB</p>
+              <p className="text-sm text-white/70">{formatClock(seconds)} {result ? `· ${(result.sizeBytes / 1048576).toFixed(1)} MB` : ''}</p>
             </div>
           ) : (
-            <video src={result.url} controls playsInline preload="metadata" onError={() => setPreviewFailed(true)}
+            <video src={localPreviewUrl || result?.url} controls playsInline preload="auto" onError={() => setPreviewFailed(true)}
               className="max-w-full max-h-full w-full h-full object-contain bg-black" />
           )
         ) : null}
@@ -300,9 +384,9 @@ export const ChatLiveVideoRecorder = ({ tenantId, conversationId, support, onClo
               className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white font-bold rounded-full px-6 py-4 text-base disabled:opacity-40">
               <Trash2 className="w-5 h-5" aria-hidden="true" /> Descartar
             </button>
-            <button type="button" onClick={() => { void send(); }} disabled={sending}
-              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-black rounded-full px-8 py-4 text-base disabled:opacity-60">
-              {sending ? <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" /> : <Send className="w-5 h-5" aria-hidden="true" />} {sending ? 'Enviando…' : 'Enviar'}
+            <button type="button" onClick={() => { void send(); }} disabled={!remoteReady || sending} aria-label={!remoteReady ? 'Finalizando video' : 'Enviar video'}
+              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-black rounded-full px-8 py-4 text-base disabled:opacity-50 disabled:cursor-not-allowed">
+              {sending ? <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" /> : (!remoteReady ? <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" /> : <Send className="w-5 h-5" aria-hidden="true" />)} {sending ? 'Enviando…' : (!remoteReady ? 'Finalizando…' : 'Enviar')}
             </button>
           </>
         ) : null}

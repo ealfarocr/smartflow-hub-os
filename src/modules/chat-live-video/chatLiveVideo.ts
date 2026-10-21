@@ -6,11 +6,19 @@ import { pickRecorderMime, type MimeSupport } from '@/modules/qa/liveVideo';
 
 export { AUDIO_BITRATE, CHUNK_MS, ChunkUploadFailedError, ChunkUploadQueue, clockMs, newJobId, pickRecorderMime } from '@/modules/qa/liveVideo';
 
-// V1: 60 s a ~1,4 Mbps de video + 64 kbps de audio (≈11 MB; límite de WhatsApp 16 MB).
-// No subir el bitrate: el resultado validado físicamente fue suficiente.
+// V1: 60 s a ~1,0 Mbps de video + 64 kbps de audio (≈8 MB; límite de WhatsApp 16 MB).
 export const CHAT_MAX_SECONDS = 60;
-export const CHAT_VIDEO_BITRATE = 1_400_000;
+export const CHAT_VIDEO_BITRATE = 1_000_000;
 export const CHAT_UPLOAD_CONCURRENCY = 3;
+
+/**
+ * Estimación teórica del peso del video en bytes según duración a 1.0 Mbps video + 64 kbps audio.
+ * 10 s: ~1.3 MB (1.33 MB)
+ * 60 s: ~8.0 MB (7.98 MB)
+ */
+export function estimateLiveVideoBytes(seconds: number, videoBitrate = CHAT_VIDEO_BITRATE, audioBitrate = 64_000): number {
+  return Math.round(((videoBitrate + audioBitrate) * seconds) / 8);
+}
 
 export interface LiveVideoSupport {
   supported: boolean;
@@ -67,11 +75,18 @@ export function liveVideoFilename(d: Date): string {
   return `video-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.mp4`;
 }
 
-export type FinishingStage = 'uploading' | 'preparing';
+export type FinishingStage = 'uploading' | 'preparing' | 'finalizing';
 
 /** Texto simple para el vendedor mientras termina; sin chunks, bytes ni jerga. */
 export function finishingLabel(stage: FinishingStage): string {
-  return stage === 'uploading' ? 'Terminando de cargar video…' : 'Preparando video…';
+  if (stage === 'uploading') return 'Terminando de cargar video…';
+  if (stage === 'preparing') return 'Preparando video…';
+  return 'Finalizando video…';
+}
+
+/** Estado en pantalla de preview antes de enviar */
+export function reviewStatusLabel(remoteReady: boolean): string {
+  return remoteReady ? 'Listo para enviar' : 'Finalizando video…';
 }
 
 export const shouldAutoStop = (elapsedSeconds: number): boolean => elapsedSeconds >= CHAT_MAX_SECONDS;

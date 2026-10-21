@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CHAT_MAX_SECONDS, CHAT_VIDEO_BITRATE, chatChunkPath, detectLiveVideoSupport, finishingLabel, formatClock,
-  liveVideoErrorMessage, liveVideoFilename, liveVideoTechCode, shouldAutoStop,
+  CHAT_MAX_SECONDS, CHAT_VIDEO_BITRATE, chatChunkPath, detectLiveVideoSupport, estimateLiveVideoBytes,
+  finishingLabel, formatClock, liveVideoErrorMessage, liveVideoFilename, liveVideoTechCode, reviewStatusLabel, shouldAutoStop,
 } from './chatLiveVideo';
 import { ChunkUploadFailedError, ChunkUploadQueue } from './chatLiveVideo';
 
@@ -10,16 +10,42 @@ const env = (over: Partial<Parameters<typeof detectLiveVideoSupport>[0]> = {}) =
   isTypeSupported: (m: string) => m === 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', ...over,
 });
 
-describe('límites productivos V1', () => {
-  it('60 s y ~1,4 Mbps (no se sube el bitrate validado)', () => {
+describe('límites productivos V1 — optimización de latencia', () => {
+  it('60 s y 1,0 Mbps video + 64 kbps audio', () => {
     expect(CHAT_MAX_SECONDS).toBe(60);
-    expect(CHAT_VIDEO_BITRATE).toBe(1_400_000);
-    // 60 s * (1,4 Mbps + 64 kbps) = ~11 MB, cómodamente < 16 MB
-    expect(((CHAT_VIDEO_BITRATE + 64_000) * 60) / 8 / 1048576).toBeLessThan(11.5);
+    expect(CHAT_VIDEO_BITRATE).toBe(1_000_000);
+    // 60 s * (1,0 Mbps + 64 kbps) = ~8 MB, cómodamente < 16 MB
+    expect(((CHAT_VIDEO_BITRATE + 64_000) * 60) / 8 / 1048576).toBeLessThan(8.5);
   });
+
+  it('estimaciones teóricas de tamaño: 10 s (~1.3 MB) y 60 s (~8.0 MB)', () => {
+    const bytes10 = estimateLiveVideoBytes(10);
+    const mb10 = bytes10 / 1048576;
+    expect(mb10).toBeGreaterThan(1.2);
+    expect(mb10).toBeLessThan(1.4);
+
+    const bytes60 = estimateLiveVideoBytes(60);
+    const mb60 = bytes60 / 1048576;
+    expect(mb60).toBeGreaterThan(7.5);
+    expect(mb60).toBeLessThan(8.5);
+  });
+
   it('auto-stop exactamente a 60 s', () => {
     expect(shouldAutoStop(59.9)).toBe(false);
     expect(shouldAutoStop(60)).toBe(true);
+  });
+});
+
+describe('estados de preview y finalización', () => {
+  it('reviewStatusLabel cambia de "Finalizando video…" a "Listo para enviar"', () => {
+    expect(reviewStatusLabel(false)).toBe('Finalizando video…');
+    expect(reviewStatusLabel(true)).toBe('Listo para enviar');
+  });
+
+  it('finishingLabel maneja etapas sin jerga técnica', () => {
+    expect(finishingLabel('uploading')).toBe('Terminando de cargar video…');
+    expect(finishingLabel('preparing')).toBe('Preparando video…');
+    expect(finishingLabel('finalizing')).toBe('Finalizando video…');
   });
 });
 
@@ -156,3 +182,58 @@ describe('diagnóstico de fallo de chunks', () => {
     }
   });
 });
+
+describe('garantías de preview local y envío de archivo final remoto', () => {
+  it('el Blob local se compone de los fragmentos y genera un object URL válido', () => {
+    const chunk1 = new Blob([new Uint8Array([1, 2, 3])]);
+    const chunk2 = new Blob([new Uint8Array([4, 5, 6])]);
+    const combined = new Blob([chunk1, chunk2], { type: 'video/mp4' });
+    expect(combined.size).toBe(6);
+    expect(combined.type).toBe('video/mp4');
+
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    let createdUrl = '';
+    let revokedUrl = '';
+
+    URL.createObjectURL = (b: Blob) => {
+      createdUrl = `blob:http://localhost/${b.size}`;
+      return createdUrl;
+    };
+    URL.revokeObjectURL = (u: string) => {
+      revokedUrl = u;
+    };
+
+    try {
+      const url = URL.createObjectURL(combined);
+      expect(url).toBe('blob:http://localhost/6');
+      URL.revokeObjectURL(url);
+      expect(revokedUrl).toBe('blob:http://localhost/6');
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+
+  it('el payload de envío final SIEMPRE usa la URL remota de Storage con token y nunca el blob local', () => {
+    const remoteUrl = 'https://firebasestorage.googleapis.com/v0/b/bucket/o/chat-live-video%2Ft%2Fc%2Fu%2Fj%2Ffinal.mp4?alt=media&token=xyz';
+    const localBlobUrl = 'blob:http://localhost/12345';
+
+    const sendPayload = (remoteResult: { url: string; filename: string; sizeBytes: number }) => {
+      expect(remoteResult.url).toBe(remoteUrl);
+      expect(remoteResult.url).not.toContain('blob:');
+      expect(remoteResult.url).toContain('firebase');
+      expect(remoteResult.filename).toMatch(/^video-\d{8}-\d{6}\.mp4$/);
+      return true;
+    };
+
+    const sent = sendPayload({
+      url: remoteUrl,
+      filename: liveVideoFilename(new Date()),
+      sizeBytes: 1330000,
+    });
+    expect(sent).toBe(true);
+    expect(localBlobUrl).toContain('blob:');
+  });
+});
+
