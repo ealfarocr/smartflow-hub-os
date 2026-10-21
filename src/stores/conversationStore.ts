@@ -13,7 +13,10 @@ interface ConversationState {
   
   reset: () => void;
   setActiveConversation: (id: string | null) => void;
-  subscribeInbox: (tenantId: string) => () => void;
+  subscribeInbox: (
+    tenantId: string, 
+    options?: { advisorId?: string | null; isAdmin?: boolean; isAutoDistributionEnabled?: boolean }
+  ) => () => void;
   subscribeMessages: (conversationId: string) => () => void;
   sendMessage: (
     conversationId: string, 
@@ -58,11 +61,13 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     errorMessages: null
   }),
 
-  subscribeInbox: (tenantId) => {
+  subscribeInbox: (tenantId, options) => {
     if (get().conversations.length === 0) {
       set({ isLoadingInbox: true, errorInbox: null });
     }
-    return ConversationService.subscribeToInbox(tenantId, 
+    return ConversationService.subscribeToInbox(
+      tenantId, 
+      options || {},
       (conversations) => {
         set({ conversations, isLoadingInbox: false });
       },

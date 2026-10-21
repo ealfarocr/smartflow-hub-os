@@ -17,51 +17,92 @@ import { Lead, CRMStage } from '@/types';
 export const LeadService = {
   /**
    * Suscribe a los leads de un tenant con ordenamiento en tiempo real.
+   * Si advisorId viene presente, se acota la consulta a ese asesor server-side.
    */
-  subscribeToLeads: (tenantId: string, callback: (leads: Lead[]) => void, errorCallback?: (error: any) => void) => {
-    const q = query(
-      collection(db, 'leads'),
-      where('tenantId', '==', tenantId),
-      orderBy('orderIndex', 'asc')
-    );
+  subscribeToLeads: (
+    tenantId: string, 
+    advisorId?: string | null, 
+    callback?: (leads: Lead[]) => void, 
+    errorCallback?: (error: any) => void
+  ) => {
+    // Soporte para firma retrocompatible (tenantId, callback, errorCallback)
+    let effectiveAdvisorId = advisorId;
+    let effectiveCallback = callback;
+    let effectiveErrorCallback = errorCallback;
+    if (typeof advisorId === 'function') {
+      effectiveCallback = advisorId;
+      effectiveErrorCallback = callback as any;
+      effectiveAdvisorId = null;
+    }
+
+    const q = effectiveAdvisorId
+      ? query(
+          collection(db, 'leads'),
+          where('tenantId', '==', tenantId),
+          where('advisorId', '==', effectiveAdvisorId)
+        )
+      : query(
+          collection(db, 'leads'),
+          where('tenantId', '==', tenantId),
+          orderBy('orderIndex', 'asc')
+        );
 
     return onSnapshot(q, (snapshot) => {
       const leads = snapshot.docs.map(doc => ({
         ...doc.data(),
         id: doc.id
       })) as Lead[];
-      callback(leads);
+      leads.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+      if (effectiveCallback) effectiveCallback(leads);
     }, (error) => {
       console.error("Error subscribing to leads:", error);
-      if (errorCallback) errorCallback(error);
+      if (effectiveErrorCallback) effectiveErrorCallback(error);
     });
   },
 
   /**
    * Mueve un lead atómicamente usando transacciones.
+   * Si advisorId viene presente, la transacción solo opera sobre los leads del asesor.
    */
   moveLeadTransaction: async (
     tenantId: string, 
     leadId: string, 
     sourceStage: CRMStage, 
     destStage: CRMStage, 
-    destIndex: number
+    destIndex: number,
+    advisorId?: string | null
   ) => {
     await runTransaction(db, async (transaction) => {
       // Consultar leads de la etapa origen
-      const sourceQuery = query(
-        collection(db, 'leads'),
-        where('tenantId', '==', tenantId),
-        where('stage', '==', sourceStage),
-        orderBy('orderIndex', 'asc')
-      );
+      const sourceQuery = advisorId
+        ? query(
+            collection(db, 'leads'),
+            where('tenantId', '==', tenantId),
+            where('advisorId', '==', advisorId),
+            where('stage', '==', sourceStage)
+          )
+        : query(
+            collection(db, 'leads'),
+            where('tenantId', '==', tenantId),
+            where('stage', '==', sourceStage),
+            orderBy('orderIndex', 'asc')
+          );
       
       // Consultar leads de la etapa destino
-      const destQuery = sourceStage === destStage ? sourceQuery : query(
-        collection(db, 'leads'),
-        where('tenantId', '==', tenantId),
-        where('stage', '==', destStage),
-        orderBy('orderIndex', 'asc')
+      const destQuery = sourceStage === destStage ? sourceQuery : (
+        advisorId
+          ? query(
+              collection(db, 'leads'),
+              where('tenantId', '==', tenantId),
+              where('advisorId', '==', advisorId),
+              where('stage', '==', destStage)
+            )
+          : query(
+              collection(db, 'leads'),
+              where('tenantId', '==', tenantId),
+              where('stage', '==', destStage),
+              orderBy('orderIndex', 'asc')
+            )
       );
 
       const [sourceSnap, destSnap] = await Promise.all([
@@ -69,8 +110,11 @@ export const LeadService = {
         sourceStage === destStage ? Promise.resolve(null) : getDocs(destQuery)
       ]);
 
-      const sourceLeads = sourceSnap.docs.map(d => ({ ...d.data(), id: d.id })) as Lead[];
-      let destLeads = destSnap ? destSnap.docs.map(d => ({ ...d.data(), id: d.id })) as Lead[] : sourceLeads;
+      const sourceLeads = (sourceSnap.docs.map(d => ({ ...d.data(), id: d.id })) as Lead[])
+        .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+      let destLeads = destSnap 
+        ? (destSnap.docs.map(d => ({ ...d.data(), id: d.id })) as Lead[]).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0))
+        : sourceLeads;
 
       const leadToMove = sourceLeads.find(l => l.id === leadId);
       if (!leadToMove) throw new Error("Lead no encontrado en la etapa origen");

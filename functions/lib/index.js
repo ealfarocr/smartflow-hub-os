@@ -3536,9 +3536,12 @@ exports.claimConversation = (0, https_1.onCall)({ maxInstances: 10 }, async (req
                 throw new https_1.HttpsError('already-exists', 'Esta conversación ya fue tomada por otro asesor.');
             }
             const membershipRef = db.collection('memberships').doc(`${uid}_${tenantId}`);
-            const [membershipSnap, settingsSnap] = await Promise.all([
+            const leadRef = conv.leadId ? db.collection('leads').doc(conv.leadId) : null;
+            const [membershipSnap, settingsSnap, presenceSnap, leadSnap] = await Promise.all([
                 tx.get(membershipRef),
                 tx.get(db.collection('settings').doc(tenantId)),
+                tx.get(db.collection('user_presence').doc(`${tenantId}_${uid}`)),
+                leadRef ? tx.get(leadRef) : Promise.resolve(null),
             ]);
             if (!membershipSnap.exists || membershipSnap.data()?.status !== 'active') {
                 throw new https_1.HttpsError('permission-denied', 'No tenés una membresía activa en este tenant.');
@@ -3553,7 +3556,6 @@ exports.claimConversation = (0, https_1.onCall)({ maxInstances: 10 }, async (req
             // tomar una conversación a mano igual, contradiciendo el propósito
             // completo de la feature (evitar que alguien fuera de turno reciba
             // trabajo nuevo).
-            const presenceSnap = await tx.get(db.collection('user_presence').doc(`${tenantId}_${uid}`));
             if (presenceSnap.data()?.operationalStatus !== 'working') {
                 throw new https_1.HttpsError('failed-precondition', 'Tenés que estar en estado "Trabajando" para tomar una conversación.');
             }
@@ -3564,6 +3566,12 @@ exports.claimConversation = (0, https_1.onCall)({ maxInstances: 10 }, async (req
                 assignmentSource: 'manual_claim',
                 updatedAt: firestore_1.FieldValue.serverTimestamp(),
             });
+            if (leadSnap && leadSnap.exists) {
+                tx.update(leadSnap.ref, {
+                    advisorId: uid,
+                    updatedAt: firestore_1.FieldValue.serverTimestamp(),
+                });
+            }
             return { conversationId, advisorId: uid };
         });
         console.log('MULTI_AGENT_MANUAL_CLAIM_SUCCESS', result);

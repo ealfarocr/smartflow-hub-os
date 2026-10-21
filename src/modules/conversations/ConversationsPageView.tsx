@@ -192,12 +192,20 @@ export const ConversationsPageView = () => {
     }
   }, [draftMessageQuery, mediaUrlQuery, mediaFilenameQuery, activeChat]);
 
+  const isAdmin = isAdminRole(activeMembership?.role);
+  const isAutoDistributionEnabled = multiAgentConfig?.isAutoDistributionEnabled;
+  const currentAdvisorId = activeMembership?.userId || null;
+
   useEffect(() => {
     if (activeMembership?.tenantId) {
-      const u = subscribeInbox(activeMembership.tenantId);
+      const u = subscribeInbox(activeMembership.tenantId, {
+        advisorId: isAdmin ? null : currentAdvisorId,
+        isAdmin,
+        isAutoDistributionEnabled,
+      });
       return () => u();
     }
-  }, [activeMembership?.tenantId, subscribeInbox]);
+  }, [activeMembership?.tenantId, currentAdvisorId, isAdmin, isAutoDistributionEnabled, subscribeInbox]);
 
   useEffect(() => {
     if (!activeConversation) return;
@@ -1017,27 +1025,29 @@ export const ConversationsPageView = () => {
                   </button>
                 )}
 
-                {/* Assign agent — oculto en móvil */}
-                <div className="hidden md:flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl shrink-0">
-                  <UserPlus className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <select
-                    value={activeChat.advisorId || ''}
-                    onChange={e => handleAssignAgent(activeChat.id, e.target.value)}
-                    className="bg-transparent text-[10px] font-bold text-slate-600 dark:text-slate-400 outline-none cursor-pointer max-w-[90px]"
-                  >
-                    <option value="">Sin asignar</option>
-                    {team.map(m => {
-                      const effectiveId = m.userId || m.id;
-                      const isActive = m.status === 'active';
-                      const label = `${m.name || m.email || 'Sin nombre'}${!isActive ? ` (${TEAM_STATUS_LABEL[m.status] || m.status})` : ''}`;
-                      return (
-                        <option key={m.id} value={effectiveId} disabled={!isActive} title={!isActive ? 'Solo se puede asignar a miembros con acceso activo' : undefined}>
-                          {label}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
+                {/* Assign agent — solo Owner/Admin; oculto en móvil */}
+                {isAdmin && (
+                  <div className="hidden md:flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl shrink-0">
+                    <UserPlus className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <select
+                      value={activeChat.advisorId || ''}
+                      onChange={e => handleAssignAgent(activeChat.id, e.target.value)}
+                      className="bg-transparent text-[10px] font-bold text-slate-600 dark:text-slate-400 outline-none cursor-pointer max-w-[90px]"
+                    >
+                      <option value="">Sin asignar</option>
+                      {team.map(m => {
+                        const effectiveId = m.userId || m.id;
+                        const isActive = m.status === 'active';
+                        const label = `${m.name || m.email || 'Sin nombre'}${!isActive ? ` (${TEAM_STATUS_LABEL[m.status] || m.status})` : ''}`;
+                        return (
+                          <option key={m.id} value={effectiveId} disabled={!isActive} title={!isActive ? 'Solo se puede asignar a miembros con acceso activo' : undefined}>
+                            {label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
 
                 {/* Lead Score — oculto en móvil */}
                 <div className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-black shrink-0 ${scoreColor(activeChat.aiScore || 0)}`}>

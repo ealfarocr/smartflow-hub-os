@@ -49,15 +49,37 @@ service cloud.firestore {
     function isSuperAdmin() {
       return isAuthenticated() && (
         request.auth.uid == 'qsiEuc1lBWUOkjUQRiYvsRf3Syn2' ||
-        request.auth.token.email == 'publicidadynegociosenlinea@gmail.com' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isSuperAdmin == true
+        ('email' in request.auth.token && request.auth.token.email == 'publicidadynegociosenlinea@gmail.com') ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isSuperAdmin', false) == true)
+      );
+    }
+
+    function isAutoDistributionEnabled(tenantId) {
+      return exists(/databases/$(database)/documents/settings/$(tenantId)) &&
+        get(/databases/$(database)/documents/settings/$(tenantId)).data.get('multiAgentConfig', {}).get('isAutoDistributionEnabled', false) == true;
+    }
+
+    function isConversationUnassigned(convData) {
+      return !('advisorId' in convData) || convData.advisorId == null || convData.advisorId == '';
+    }
+
+    function canAccessConversation(convData) {
+      return isSuperAdmin() || (
+        isTenantMember(convData.tenantId) && (
+          isTenantAdmin(convData.tenantId) ||
+          convData.advisorId == request.auth.uid ||
+          (
+            isConversationUnassigned(convData) &&
+            !isAutoDistributionEnabled(convData.tenantId)
+          )
+        )
       );
     }
 
     match /memberships/{membershipId} {
       allow read: if isAuthenticated() && (
         resource.data.userId == request.auth.uid ||
-        resource.data.email == request.auth.token.email ||
+        ('email' in request.auth.token && resource.data.email == request.auth.token.email) ||
         isTenantAdmin(resource.data.tenantId) ||
         isSuperAdmin()
       );
@@ -138,10 +160,32 @@ service cloud.firestore {
     }
 
     match /leads/{leadId} {
-      allow read: if isTenantMember(resource.data.tenantId) || isSuperAdmin();
-      allow create: if isTenantMember(request.resource.data.tenantId) || isSuperAdmin();
-      allow update: if isTenantMember(resource.data.tenantId) || isSuperAdmin();
-      allow delete: if isTenantAdmin(resource.data.tenantId) || isSuperAdmin();
+      allow read: if isSuperAdmin() || (
+        isTenantMember(resource.data.tenantId) && (
+          isTenantAdmin(resource.data.tenantId) ||
+          resource.data.advisorId == request.auth.uid
+        )
+      );
+      allow create: if isSuperAdmin() || (
+        isTenantMember(request.resource.data.tenantId) && (
+          isTenantAdmin(request.resource.data.tenantId) ||
+          (
+            request.resource.data.advisorId == request.auth.uid &&
+            request.resource.data.tenantId != null
+          )
+        )
+      );
+      allow update: if isSuperAdmin() || (
+        isTenantMember(resource.data.tenantId) && (
+          isTenantAdmin(resource.data.tenantId) ||
+          (
+            resource.data.advisorId == request.auth.uid &&
+            request.resource.data.advisorId == resource.data.advisorId &&
+            request.resource.data.tenantId == resource.data.tenantId
+          )
+        )
+      );
+      allow delete: if isSuperAdmin() || isTenantAdmin(resource.data.tenantId);
     }
 
     match /quotes/{quoteId} {
@@ -223,11 +267,36 @@ service cloud.firestore {
     }
 
     match /conversations/{conversationId} {
-      allow read, update: if isTenantMember(resource.data.tenantId) || isSuperAdmin();
-      allow create: if isTenantMember(request.resource.data.tenantId) || isSuperAdmin();
+      allow read: if canAccessConversation(resource.data);
+      allow create: if isSuperAdmin() || (
+        isTenantMember(request.resource.data.tenantId) && (
+          isTenantAdmin(request.resource.data.tenantId) ||
+          (
+            request.resource.data.advisorId == request.auth.uid &&
+            request.resource.data.tenantId != null
+          )
+        )
+      );
+      allow update: if isSuperAdmin() || (
+        isTenantMember(resource.data.tenantId) && (
+          isTenantAdmin(resource.data.tenantId) ||
+          (
+            resource.data.advisorId == request.auth.uid &&
+            request.resource.data.advisorId == resource.data.advisorId &&
+            request.resource.data.tenantId == resource.data.tenantId
+          )
+        )
+      );
+      allow delete: if isSuperAdmin() || isTenantAdmin(resource.data.tenantId);
 
       match /messages/{messageId} {
-        allow read, write: if isTenantMember(get(/databases/$(database)/documents/conversations/$(conversationId)).data.tenantId) || isSuperAdmin();
+        allow read: if canAccessConversation(get(/databases/$(database)/documents/conversations/$(conversationId)).data);
+        allow write: if isSuperAdmin() || (
+          isTenantMember(get(/databases/$(database)/documents/conversations/$(conversationId)).data.tenantId) && (
+            isTenantAdmin(get(/databases/$(database)/documents/conversations/$(conversationId)).data.tenantId) ||
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.advisorId == request.auth.uid
+          )
+        );
       }
     }
     

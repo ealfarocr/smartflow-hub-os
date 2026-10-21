@@ -472,3 +472,229 @@ describe('Catálogo — leer todos, administrar solo Owner/Admin', () => {
     await assertFails(setDoc(doc(db, 'catalog', 'itemAjeno'), { tenantId: 'tCat', name: 'Intruso', rate: 1 }));
   });
 });
+
+// ==============================================================================
+// CORRECCIÓN 01 — AISLAMIENTO SERVER-SIDE POR ASESOR (CASOS A HASTA O)
+// ==============================================================================
+describe('CORRECCIÓN 01 — Aislamiento Server-Side por Asesor', () => {
+  const T_SEC = 'tSec';
+  const T_OTHER = 'tOther';
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+
+      // Memberships tenant T_SEC
+      await setDoc(doc(db, 'memberships', 'ownerSec_tSec'), {
+        tenantId: T_SEC, userId: 'ownerSec', status: 'active', role: 'Owner',
+      });
+      await setDoc(doc(db, 'memberships', 'adminSec_tSec'), {
+        tenantId: T_SEC, userId: 'adminSec', status: 'active', role: 'Admin',
+      });
+      await setDoc(doc(db, 'memberships', 'advisorA_tSec'), {
+        tenantId: T_SEC, userId: 'advisorA', status: 'active', role: 'Asesor Comercial',
+      });
+      await setDoc(doc(db, 'memberships', 'advisorB_tSec'), {
+        tenantId: T_SEC, userId: 'advisorB', status: 'active', role: 'Asesor Comercial',
+      });
+      await setDoc(doc(db, 'memberships', 'suspendedAdv_tSec'), {
+        tenantId: T_SEC, userId: 'suspendedAdv', status: 'suspended', role: 'Asesor Comercial',
+      });
+
+      // Memberships tenant T_OTHER
+      await setDoc(doc(db, 'memberships', 'ownerOther_tOther'), {
+        tenantId: T_OTHER, userId: 'ownerOther', status: 'active', role: 'Owner',
+      });
+      await setDoc(doc(db, 'memberships', 'advisorOther_tOther'), {
+        tenantId: T_OTHER, userId: 'advisorOther', status: 'active', role: 'Asesor Comercial',
+      });
+
+      // Settings Modo Libre por defecto para T_SEC
+      await setDoc(doc(db, 'settings', T_SEC), {
+        multiAgentConfig: { isAutoDistributionEnabled: false },
+      });
+
+      // Leads en T_SEC
+      await setDoc(doc(db, 'leads', 'leadA'), {
+        tenantId: T_SEC, advisorId: 'advisorA', name: 'Lead de A', stage: 'Nuevo',
+      });
+      await setDoc(doc(db, 'leads', 'leadB'), {
+        tenantId: T_SEC, advisorId: 'advisorB', name: 'Lead de B', stage: 'Nuevo',
+      });
+
+      // Leads en T_OTHER
+      await setDoc(doc(db, 'leads', 'leadOther'), {
+        tenantId: T_OTHER, advisorId: 'advisorOther', name: 'Lead Other', stage: 'Nuevo',
+      });
+
+      // Conversaciones en T_SEC
+      await setDoc(doc(db, 'conversations', 'convA'), {
+        tenantId: T_SEC, advisorId: 'advisorA', status: 'open', lastMessage: 'hola A',
+      });
+      await setDoc(doc(db, 'conversations', 'convB'), {
+        tenantId: T_SEC, advisorId: 'advisorB', status: 'open', lastMessage: 'hola B',
+      });
+      await setDoc(doc(db, 'conversations', 'convUnassigned'), {
+        tenantId: T_SEC, advisorId: null, status: 'open', lastMessage: 'alguien?',
+      });
+
+      // Mensajes en convA y convB
+      await setDoc(doc(db, 'conversations', 'convA', 'messages', 'msgA1'), {
+        text: 'Mensaje A', sender: 'advisor',
+      });
+      await setDoc(doc(db, 'conversations', 'convB', 'messages', 'msgB1'), {
+        text: 'Mensaje B', sender: 'advisor',
+      });
+
+      // Conversaciones en T_OTHER
+      await setDoc(doc(db, 'conversations', 'convOther'), {
+        tenantId: T_OTHER, advisorId: 'advisorOther', status: 'open',
+      });
+    });
+  });
+
+  // A. Advisor A lee su propio lead: ALLOW
+  it('A. Advisor A lee su propio lead: ALLOW', async () => {
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    await assertSucceeds(getDoc(doc(db, 'leads', 'leadA')));
+  });
+
+  // B. Advisor A lee lead de Advisor B: DENY (direct get)
+  it('B. Advisor A lee lead de Advisor B: DENY', async () => {
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    await assertFails(getDoc(doc(db, 'leads', 'leadB')));
+  });
+
+  // C. Advisor A actualiza lead de Advisor B: DENY
+  it('C. Advisor A actualiza lead de Advisor B: DENY', async () => {
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    await assertFails(setDoc(doc(db, 'leads', 'leadB'), {
+      tenantId: T_SEC, advisorId: 'advisorB', name: 'Hackeado', stage: 'Ganado',
+    }, { merge: true }));
+  });
+
+  // D. Advisor A lee su conversación: ALLOW
+  it('D. Advisor A lee su conversación: ALLOW', async () => {
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    await assertSucceeds(getDoc(doc(db, 'conversations', 'convA')));
+  });
+
+  // E. Advisor A lee conversación de Advisor B: DENY
+  it('E. Advisor A lee conversación de Advisor B: DENY', async () => {
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    await assertFails(getDoc(doc(db, 'conversations', 'convB')));
+  });
+
+  // F. Advisor A cambia advisorId de su registro hacia otro usuario: DENY
+  it('F. Advisor A cambia advisorId de su lead o conversación: DENY', async () => {
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    // Intenta transferir su lead a advisorB
+    await assertFails(setDoc(doc(db, 'leads', 'leadA'), {
+      tenantId: T_SEC, advisorId: 'advisorB', name: 'Transferido',
+    }, { merge: true }));
+
+    // Intenta transferir su conversación a advisorB
+    await assertFails(setDoc(doc(db, 'conversations', 'convA'), {
+      tenantId: T_SEC, advisorId: 'advisorB',
+    }, { merge: true }));
+  });
+
+  // G. Advisor A cambia tenantId: DENY
+  it('G. Advisor A cambia tenantId: DENY', async () => {
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    await assertFails(setDoc(doc(db, 'leads', 'leadA'), {
+      tenantId: T_OTHER, advisorId: 'advisorA',
+    }, { merge: true }));
+  });
+
+  // H. Owner/Admin lee registros de cualquier asesor dentro de su tenant: ALLOW
+  it('H. Owner/Admin lee registros de cualquier asesor dentro de su tenant: ALLOW', async () => {
+    const dbOwner = testEnv.authenticatedContext('ownerSec').firestore();
+    const dbAdmin = testEnv.authenticatedContext('adminSec').firestore();
+
+    await assertSucceeds(getDoc(doc(dbOwner, 'leads', 'leadA')));
+    await assertSucceeds(getDoc(doc(dbOwner, 'leads', 'leadB')));
+    await assertSucceeds(getDoc(doc(dbOwner, 'conversations', 'convA')));
+    await assertSucceeds(getDoc(doc(dbOwner, 'conversations', 'convB')));
+
+    await assertSucceeds(getDoc(doc(dbAdmin, 'leads', 'leadA')));
+    await assertSucceeds(getDoc(doc(dbAdmin, 'leads', 'leadB')));
+    await assertSucceeds(getDoc(doc(dbAdmin, 'conversations', 'convA')));
+    await assertSucceeds(getDoc(doc(dbAdmin, 'conversations', 'convB')));
+  });
+
+  // I. Owner/Admin cruza a otro tenant: DENY
+  it('I. Owner/Admin cruza a otro tenant: DENY', async () => {
+    const dbOwner = testEnv.authenticatedContext('ownerSec').firestore();
+    await assertFails(getDoc(doc(dbOwner, 'leads', 'leadOther')));
+    await assertFails(getDoc(doc(dbOwner, 'conversations', 'convOther')));
+  });
+
+  // J. Advisor cruza a otro tenant: DENY
+  it('J. Advisor cruza a otro tenant: DENY', async () => {
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    await assertFails(getDoc(doc(db, 'leads', 'leadOther')));
+    await assertFails(getDoc(doc(db, 'conversations', 'convOther')));
+  });
+
+  // K. Modo Libre: conversación unassigned elegible puede ser leída: ALLOW
+  it('K. Modo Libre: conversación unassigned elegible puede ser leída: ALLOW', async () => {
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    await assertSucceeds(getDoc(doc(db, 'conversations', 'convUnassigned')));
+  });
+
+  // L. Modo Auto: conversación unassigned NO es visible para advisor: DENY
+  it('L. Modo Auto: conversación unassigned NO es visible para advisor: DENY', async () => {
+    // Activamos auto-distribution en settings de T_SEC
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'settings', T_SEC), {
+        multiAgentConfig: { isAutoDistributionEnabled: true },
+      });
+    });
+
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    await assertFails(getDoc(doc(db, 'conversations', 'convUnassigned')));
+
+    // Pero Owner/Admin todavía pueden verla
+    const dbOwner = testEnv.authenticatedContext('ownerSec').firestore();
+    await assertSucceeds(getDoc(doc(dbOwner, 'conversations', 'convUnassigned')));
+  });
+
+  // M. Mensajes de conversación: aislamiento estricto
+  it('M. Mensajes: Advisor A no puede leer ni escribir en mensajes de convB', async () => {
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    // Leer propio mensaje: ALLOW
+    await assertSucceeds(getDoc(doc(db, 'conversations', 'convA', 'messages', 'msgA1')));
+    // Escribir en propia conversación: ALLOW
+    await assertSucceeds(setDoc(doc(db, 'conversations', 'convA', 'messages', 'msgA2'), {
+      text: 'Nuevo mensaje', sender: 'advisor',
+    }));
+    // Leer mensaje de convB: DENY
+    await assertFails(getDoc(doc(db, 'conversations', 'convB', 'messages', 'msgB1')));
+    // Escribir mensaje en convB: DENY
+    await assertFails(setDoc(doc(db, 'conversations', 'convB', 'messages', 'msgB2'), {
+      text: 'Inyección', sender: 'advisor',
+    }));
+  });
+
+  // N. Suspended membership: DENY
+  it('N. Suspended membership: DENY según reglas actuales', async () => {
+    const db = testEnv.authenticatedContext('suspendedAdv').firestore();
+    await assertFails(getDoc(doc(db, 'leads', 'leadA')));
+    await assertFails(getDoc(doc(db, 'conversations', 'convA')));
+  });
+
+  // O. Direct creation: Advisor no puede crear lead con advisorId de otro usuario
+  it('O. Create: Advisor no puede crear lead atribuyéndolo a otro asesor', async () => {
+    const db = testEnv.authenticatedContext('advisorA').firestore();
+    // Crearse a sí mismo: ALLOW
+    await assertSucceeds(setDoc(doc(db, 'leads', 'leadNuevoA'), {
+      tenantId: T_SEC, advisorId: 'advisorA', name: 'Propio',
+    }));
+    // Crear para advisorB: DENY
+    await assertFails(setDoc(doc(db, 'leads', 'leadNuevoB'), {
+      tenantId: T_SEC, advisorId: 'advisorB', name: 'Ajeno',
+    }));
+  });
+});
+

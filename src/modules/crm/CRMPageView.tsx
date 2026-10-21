@@ -17,6 +17,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { PipelineEditor } from '../settings/PipelineEditor';
 import { PipelineStage } from '@/services/firebase/SettingsService';
 import { toDateSafe } from '@/utils/dateUtils';
+import { isAdminRole } from '@/utils/permissions';
 
 const getSourceStyles = (source: string) => {
   switch (source?.toLowerCase()) {
@@ -40,9 +41,11 @@ const getSourceIcon = (source: string) => {
 
 export const CRMPageView = () => {
   const { leads, moveLead, subscribe, isLoading, error, createLead, seedLeads } = useLeadStore();
-  const { activeMembership } = useAuthStore();
+  const { activeMembership, user } = useAuthStore();
   const { addToast } = useUIStore();
   const navigate = useNavigate();
+  const isAdmin = isAdminRole(activeMembership?.role);
+  const advisorIdScope = isAdmin ? null : (activeMembership?.userId || user?.id || null);
   const [isSeeding, setIsSeeding] = useState(false);
   const [agentFilter, setAgentFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -184,25 +187,17 @@ export const CRMPageView = () => {
 
   useEffect(() => {
     if (activeMembership?.tenantId) {
-      const unsubscribeLeads = subscribe(activeMembership.tenantId);
+      const unsubscribeLeads = subscribe(activeMembership.tenantId, advisorIdScope);
       const unsubscribeSettings = subscribeSettings(activeMembership.tenantId);
       
-      // Cargar Agentes
+      // Cargar Agentes solo para Owner/Admin
       const loadAgents = async () => {
+        if (!isAdmin) return;
         try {
           const { collection, query, where, getDocs } = await import('firebase/firestore');
           const { db } = await import('@/lib/firebase');
           const q = query(collection(db, 'memberships'), where('tenantId', '==', activeMembership.tenantId));
           const snap = await getDocs(q);
-          // Bug encontrado: leía un campo 'userName' que nunca existió en el
-          // documento de membership (el campo real es 'name') — por eso
-          // SIEMPRE caía al fallback "Agente", para cualquier asesor, activo
-          // o no. También usaba solo 'userId' como id, que es null para
-          // prepared/draft/pending — varias opciones terminaban con el mismo
-          // id (null) y el mismo texto ("Agente"), indistinguibles entre sí.
-          // Mostrar el nombre acá NO implica elegibilidad para recibir leads
-          // (eso lo sigue decidiendo solo assignConversationAdvisor en el
-          // backend) — esto es puramente un selector de visualización/filtro.
           const agentList = snap.docs.map(doc => {
             const data = doc.data();
             return {
@@ -217,14 +212,16 @@ export const CRMPageView = () => {
         }
       };
 
-      loadAgents();
+      if (isAdmin) {
+        loadAgents();
+      }
 
       return () => {
         unsubscribeLeads();
         unsubscribeSettings();
       };
     }
-  }, [activeMembership?.tenantId, subscribe, subscribeSettings]);
+  }, [activeMembership?.tenantId, advisorIdScope, isAdmin, subscribe, subscribeSettings]);
 
   const onDragEnd = async (result: DropResult) => {
     const { destination, source, draggableId } = result;
@@ -238,7 +235,8 @@ export const CRMPageView = () => {
         draggableId, 
         source.droppableId,
         destination.droppableId,
-        destination.index
+        destination.index,
+        advisorIdScope
       );
     } catch (error) {
       addToast('Error al mover lead. Reintenta.', 'error');
@@ -370,7 +368,7 @@ export const CRMPageView = () => {
     try {
       // Mover al final de la nueva etapa
       const stageLeads = leads.filter(l => l.stage === newStage);
-      await moveLead(activeMembership.tenantId, lead.id, lead.stage, newStage, stageLeads.length);
+      await moveLead(activeMembership.tenantId, lead.id, lead.stage, newStage, stageLeads.length, advisorIdScope);
       addToast(`Lead movido a ${newStage}`, 'success');
     } catch (error) {
       addToast('Error al cambiar etapa', 'error');
@@ -379,9 +377,11 @@ export const CRMPageView = () => {
 
   // Mismo filtro (agente + búsqueda) y orden que ya usaba cada columna del Kanban desktop —
   // extraído para reutilizarlo también en el selector de etapas y la lista compacta de mobile.
+  // Para asesores, leads ya viene acotado server-side a su propio advisorId.
   const getStageLeads = (stageLabel: string) => leads
     .filter(l => l.stage === stageLabel)
     .filter(l => {
+      if (!isAdmin) return true;
       if (agentFilter === 'all') return true;
       if (agentFilter === 'unassigned') return !l.advisorId || l.advisorId === 'unassigned';
       return l.advisorId === agentFilter;
@@ -420,22 +420,29 @@ export const CRMPageView = () => {
     <div className="flex flex-col md:h-[calc(100vh-8rem)]">
       {/* ═══ Header DESKTOP / TABLET (md+) — markup original, sin cambios ═══ */}
       <div className="hidden md:flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">CRM / Pipeline</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">CRM / Pipeline</h1>
+          {!isAdmin && (
+            <p className="text-xs text-slate-400 font-medium">Mis Leads Asignados</p>
+          )}
+        </div>
         <div className="flex flex-col md:flex-row md:items-center gap-4">
-          <div className="relative group">
-            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#1877F2] transition-colors" />
-            <select
-              value={agentFilter}
-              onChange={(e) => setAgentFilter(e.target.value)}
-              className="pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all appearance-none min-w-[180px] shadow-sm"
-            >
-               <option value="all">👥 Todos los Agentes</option>
-               <option value="unassigned">👤 Sin Asignar</option>
-               {agents.map(agent => (
-                 <option key={agent.id} value={agent.id}>👤 {agent.name}{agentStatusSuffix(agent.status)}</option>
-               ))}
-            </select>
-          </div>
+          {isAdmin && (
+            <div className="relative group">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#1877F2] transition-colors" />
+              <select
+                value={agentFilter}
+                onChange={(e) => setAgentFilter(e.target.value)}
+                className="pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all appearance-none min-w-[180px] shadow-sm"
+              >
+                 <option value="all">👥 Todos los Agentes</option>
+                 <option value="unassigned">👤 Sin Asignar</option>
+                 {agents.map(agent => (
+                   <option key={agent.id} value={agent.id}>👤 {agent.name}{agentStatusSuffix(agent.status)}</option>
+                 ))}
+              </select>
+            </div>
+          )}
 
           <div className="relative group">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#1877F2] transition-colors" />

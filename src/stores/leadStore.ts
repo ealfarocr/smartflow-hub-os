@@ -9,8 +9,8 @@ interface LeadState {
   
   // Actions
   reset: () => void;
-  subscribe: (tenantId: string) => () => void;
-  moveLead: (tenantId: string, id: string, sourceStage: CRMStage, newStage: CRMStage, newOrder: number) => Promise<void>;
+  subscribe: (tenantId: string, advisorId?: string | null) => () => void;
+  moveLead: (tenantId: string, id: string, sourceStage: CRMStage, newStage: CRMStage, newOrder: number, advisorId?: string | null) => Promise<void>;
   createLead: (tenantId: string, data: Partial<Lead>) => Promise<void>;
   updateLead: (id: string, data: Partial<Lead>) => Promise<void>;
   deleteLead: (id: string) => Promise<void>;
@@ -24,12 +24,12 @@ export const useLeadStore = create<LeadState>((set, get) => ({
 
   reset: () => set({ leads: [], isLoading: false, error: null }),
 
-  subscribe: (tenantId) => {
+  subscribe: (tenantId, advisorId) => {
     // Solo mostramos loading si no tenemos datos previos (evita delay en navegación)
     if (get().leads.length === 0) {
       set({ isLoading: true, error: null });
     }
-    const unsubscribe = LeadService.subscribeToLeads(tenantId, 
+    const unsubscribe = LeadService.subscribeToLeads(tenantId, advisorId,
       (leads) => {
         set({ leads, isLoading: false });
       },
@@ -40,7 +40,7 @@ export const useLeadStore = create<LeadState>((set, get) => ({
     return unsubscribe;
   },
 
-  moveLead: async (tenantId, id, sourceStage, newStage, newOrder) => {
+  moveLead: async (tenantId, id, sourceStage, newStage, newOrder, advisorId) => {
     const previousLeads = get().leads;
     try {
       // Optimistic Update
@@ -60,7 +60,7 @@ export const useLeadStore = create<LeadState>((set, get) => ({
         set({ leads: [...otherLeads, ...destLeads] });
       }
 
-      await LeadService.moveLeadTransaction(tenantId, id, sourceStage, newStage, newOrder);
+      await LeadService.moveLeadTransaction(tenantId, id, sourceStage, newStage, newOrder, advisorId);
     } catch (error) {
       console.error("Error al mover lead:", error);
       set({ leads: previousLeads });

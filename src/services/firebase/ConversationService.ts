@@ -21,30 +21,108 @@ export class ConversationService {
   private static collectionName = 'conversations';
   private static functions = getFunctions();
 
-  static subscribeToInbox(tenantId: string, callback: (conversations: Conversation[]) => void, errorCallback?: (error: any) => void) {
-    const q = query(
+  static subscribeToInbox(
+    tenantId: string, 
+    optionsOrCallback?: { advisorId?: string | null; isAdmin?: boolean; isAutoDistributionEnabled?: boolean } | ((conversations: Conversation[]) => void),
+    maybeCallback?: (conversations: Conversation[]) => void, 
+    errorCallback?: (error: any) => void
+  ) {
+    let options: { advisorId?: string | null; isAdmin?: boolean; isAutoDistributionEnabled?: boolean } = {};
+    let callback: (conversations: Conversation[]) => void;
+    let errCb: ((error: any) => void) | undefined = errorCallback;
+
+    if (typeof optionsOrCallback === 'function') {
+      callback = optionsOrCallback;
+      options = { isAdmin: true };
+    } else {
+      options = optionsOrCallback || {};
+      callback = maybeCallback || (() => {});
+    }
+
+    const mapDoc = (docSnap: any) => ({
+      ...docSnap.data(),
+      id: docSnap.id,
+      lastMessageDate: docSnap.data().lastMessageDate instanceof Timestamp 
+        ? docSnap.data().lastMessageDate.toDate().toISOString() 
+        : docSnap.data().lastMessageDate,
+      lastInboundDate: docSnap.data().lastInboundDate instanceof Timestamp 
+        ? docSnap.data().lastInboundDate.toDate().toISOString() 
+        : docSnap.data().lastInboundDate
+    } as Conversation);
+
+    // Owner o Admin: vista global del tenant
+    if (options.isAdmin) {
+      const q = query(
+        collection(db, this.collectionName),
+        where('tenantId', '==', tenantId),
+        where('status', 'in', ['active', 'bot_handling']),
+        orderBy('lastMessageDate', 'desc')
+      );
+
+      return onSnapshot(q, (snapshot) => {
+        const conversations = snapshot.docs.map(mapDoc);
+        callback(conversations);
+      }, (error) => {
+        console.error("Error subscribing to inbox (admin):", error);
+        if (errCb) errCb(error);
+      });
+    }
+
+    // Asesor: consulta acotada server-side a sus conversaciones asignadas
+    let assignedList: Conversation[] = [];
+    let unassignedList: Conversation[] = [];
+
+    const emitMerged = () => {
+      const mergedMap = new Map<string, Conversation>();
+      assignedList.forEach(c => mergedMap.set(c.id, c));
+      unassignedList.forEach(c => mergedMap.set(c.id, c));
+      const list = Array.from(mergedMap.values());
+      list.sort((a, b) => {
+        const ta = a.lastMessageDate ? new Date(a.lastMessageDate).getTime() : 0;
+        const tb = b.lastMessageDate ? new Date(b.lastMessageDate).getTime() : 0;
+        return tb - ta;
+      });
+      callback(list);
+    };
+
+    const assignedQuery = query(
       collection(db, this.collectionName),
       where('tenantId', '==', tenantId),
-      where('status', 'in', ['active', 'bot_handling']),
-      orderBy('lastMessageDate', 'desc')
+      where('advisorId', '==', options.advisorId || ''),
+      where('status', 'in', ['active', 'bot_handling'])
     );
 
-    return onSnapshot(q, (snapshot) => {
-      const conversations = snapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id,
-        lastMessageDate: doc.data().lastMessageDate instanceof Timestamp 
-          ? doc.data().lastMessageDate.toDate().toISOString() 
-          : doc.data().lastMessageDate,
-        lastInboundDate: doc.data().lastInboundDate instanceof Timestamp 
-          ? doc.data().lastInboundDate.toDate().toISOString() 
-          : doc.data().lastInboundDate
-      })) as Conversation[];
-      callback(conversations);
+    const unsubAssigned = onSnapshot(assignedQuery, (snapshot) => {
+      assignedList = snapshot.docs.map(mapDoc);
+      emitMerged();
     }, (error) => {
-      console.error("Error subscribing to inbox:", error);
-      if (errorCallback) errorCallback(error);
+      console.error("Error subscribing to assigned inbox:", error);
+      if (errCb) errCb(error);
     });
+
+    // En Modo Libre (!isAutoDistributionEnabled), el asesor también puede ver conversaciones sin asignar para tomarlas
+    let unsubUnassigned: (() => void) | null = null;
+    if (!options.isAutoDistributionEnabled) {
+      const unassignedQuery = query(
+        collection(db, this.collectionName),
+        where('tenantId', '==', tenantId),
+        where('advisorId', '==', ''),
+        where('status', 'in', ['active', 'bot_handling'])
+      );
+
+      unsubUnassigned = onSnapshot(unassignedQuery, (snapshot) => {
+        unassignedList = snapshot.docs.map(mapDoc);
+        emitMerged();
+      }, (error) => {
+        console.error("Error subscribing to unassigned inbox (free mode):", error);
+        if (errCb) errCb(error);
+      });
+    }
+
+    return () => {
+      unsubAssigned();
+      if (unsubUnassigned) unsubUnassigned();
+    };
   }
 
   static subscribeToMessages(conversationId: string, callback: (messages: Message[]) => void, errorCallback?: (error: any) => void) {

@@ -4,7 +4,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { ConversationService } from '@/services/firebase/ConversationService';
-import { getEffectiveTools } from '@/utils/permissions';
+import { getEffectiveTools, isAdminRole } from '@/utils/permissions';
 import { getMemberIdentifier } from '@/utils/multiAgentEligibility';
 import {
   AlertViewer, buildTitleWithUnread, countUnreadForViewer, createInboundDetector,
@@ -76,25 +76,37 @@ export function useInboundAlerts() {
   useEffect(() => {
     if (!tenantId || !canUseConversations) return;
 
+    const isAdmin = isAdminRole(activeMembership?.role);
+    const advisorId = activeMembership?.userId || user?.id || null;
+    const isAutoDistributionEnabled = multiAgentConfig?.isAutoDistributionEnabled;
+
     // Detector nuevo por tenant: sin historia, su primer snapshot solo fija la base.
     const detector = createInboundDetector(tenantId);
-    const unsubscribe = ConversationService.subscribeToInbox(tenantId, (conversations: Conversation[]) => {
-      const cur = live.current;
-      const fresh = detector.ingest(conversations);
-      setUnread(countUnreadForViewer(conversations, cur.viewer));
+    const unsubscribe = ConversationService.subscribeToInbox(
+      tenantId,
+      {
+        advisorId: isAdmin ? null : advisorId,
+        isAdmin,
+        isAutoDistributionEnabled,
+      },
+      (conversations: Conversation[]) => {
+        const cur = live.current;
+        const fresh = detector.ingest(conversations);
+        setUnread(countUnreadForViewer(conversations, cur.viewer));
 
-      if (!cur.soundEnabled || fresh.length === 0) return;
-      const play = shouldPlayForFresh(fresh, {
-        viewer: cur.viewer,
-        openConversationId: useConversationStore.getState().activeConversation,
-        onConversationsRoute: cur.pathname.startsWith('/conversaciones'),
-        tabVisible: typeof document === 'undefined' || document.visibilityState === 'visible',
-      });
-      if (play) playInboundBeep();
-    });
+        if (!cur.soundEnabled || fresh.length === 0) return;
+        const play = shouldPlayForFresh(fresh, {
+          viewer: cur.viewer,
+          openConversationId: useConversationStore.getState().activeConversation,
+          onConversationsRoute: cur.pathname.startsWith('/conversaciones'),
+          tabVisible: typeof document === 'undefined' || document.visibilityState === 'visible',
+        });
+        if (play) playInboundBeep();
+      }
+    );
 
     return () => { unsubscribe(); setUnread(0); };
-  }, [tenantId, canUseConversations]);
+  }, [tenantId, canUseConversations, activeMembership?.role, activeMembership?.userId, user?.id, multiAgentConfig?.isAutoDistributionEnabled]);
 
   // Contador en el título. Se parte del título que haya (no se fija uno propio)
   // y se restaura al quedar en cero, al cambiar de negocio o al salir.

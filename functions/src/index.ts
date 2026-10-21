@@ -3808,9 +3808,12 @@ export const claimConversation = onCall({ maxInstances: 10 }, async (request) =>
       }
 
       const membershipRef = db.collection('memberships').doc(`${uid}_${tenantId}`);
-      const [membershipSnap, settingsSnap] = await Promise.all([
+      const leadRef = conv.leadId ? db.collection('leads').doc(conv.leadId) : null;
+      const [membershipSnap, settingsSnap, presenceSnap, leadSnap] = await Promise.all([
         tx.get(membershipRef),
         tx.get(db.collection('settings').doc(tenantId)),
+        tx.get(db.collection('user_presence').doc(`${tenantId}_${uid}`)),
+        leadRef ? tx.get(leadRef) : Promise.resolve(null),
       ]);
 
       if (!membershipSnap.exists || membershipSnap.data()?.status !== 'active') {
@@ -3828,7 +3831,6 @@ export const claimConversation = onCall({ maxInstances: 10 }, async (request) =>
       // tomar una conversación a mano igual, contradiciendo el propósito
       // completo de la feature (evitar que alguien fuera de turno reciba
       // trabajo nuevo).
-      const presenceSnap = await tx.get(db.collection('user_presence').doc(`${tenantId}_${uid}`));
       if (presenceSnap.data()?.operationalStatus !== 'working') {
         throw new HttpsError('failed-precondition', 'Tenés que estar en estado "Trabajando" para tomar una conversación.');
       }
@@ -3840,6 +3842,13 @@ export const claimConversation = onCall({ maxInstances: 10 }, async (request) =>
         assignmentSource: 'manual_claim',
         updatedAt: FieldValue.serverTimestamp(),
       });
+
+      if (leadSnap && leadSnap.exists) {
+        tx.update(leadSnap.ref, {
+          advisorId: uid,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
 
       return { conversationId, advisorId: uid };
     });

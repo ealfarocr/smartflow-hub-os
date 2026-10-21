@@ -172,7 +172,7 @@ describe('authStore real + negocio validado por el servidor', () => {
     // ConversationsPageView suscribe el inbox con activeMembership.tenantId:
     // ConversationService no necesita cambios.
     const src = fuentes['/src/modules/conversations/ConversationsPageView.tsx'];
-    expect(src).toContain('subscribeInbox(activeMembership.tenantId)');
+    expect(src).toMatch(/subscribeInbox\(\s*activeMembership\.tenantId/);
   });
 });
 
