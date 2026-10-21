@@ -1,5 +1,11 @@
 # Estado del proyecto — SmartFlow Hub OS
 
+## 🚀 Cierre productivo: Live Video remux + optimización de fotos + round-robin (2026-10-21)
+- **Live Video**: validado físicamente en producción (10s y 60s con autostop a 60s). Pipeline completo: captura WebM/fMP4 → subida concurrente de chunks → compose y remux stream copy en Cloud Function `chatLiveVideo` (us-central1, 512MiB, `minInstances: 1`, FFmpeg `/usr/bin/ffmpeg`, `-c copy -movflags +faststart` sin transcode) → envío de `final.mp4` remoto a Meta → recepción y reproducción WhatsApp con audio PASS. Bitrate optimizado a 1.0 Mbps (720p, audio 64 kbps). Preview local instantáneo (`URL.createObjectURL`). Latencia percibida: 3–6 s. Desplegado: Function `chatLiveVideo` (revisión `chatlivevideo-00003-faw`) y Hosting `app`.
+- **Optimización de fotos**: desplegado en hosting. Criterio inteligente: optimiza si lado mayor > 1600 px o peso > 400 KB. Reducción proporcional a lado mayor 1600 px con JPEG 0.82; preservación estricta de PNG y canal alfa para transparencias/documentos. Subida atómica con `uploadBytes` para fotos <= 5 MB en lugar de `uploadBytesResumable` (ahorro de ~86% de bytes, upload pasa de ~2.6s a ~350ms). Preview local inmediato. Validado físicamente: PASS.
+- **Round-Robin y TOMAR**: asignación atómica de conversaciones nuevas vía transacción de Firestore sobre `settings/{tenantId}` con cursor persistente. Filtro estricto por `operationalStatus === 'working'` (excluye café, almuerzo, diligencia y fuera de turno). Reintento seguro si inicialmente no hubo asesor elegible. Botón TOMAR oculto para asesores cuando la distribución automática está activa; accesible para Owner/Admin o en Modo Libre.
+- **Estado de despliegue**: Cloud Function `chatLiveVideo` (revisión `chatlivevideo-00003-faw`, 512MiB, minInstances 1, ACTIVE); Hosting `app` (versión actual, HTTP 200). Sin cambios en backend de `sendWhatsappMessage` ni Storage Rules.
+
 ## 🎥 Live Video productivo + round-robin sin TOMAR — commiteado, PENDIENTE DE DEPLOY (2026-10-17)
 - Commits: 29f5c34 (asignación), 22f8cdd (backend + storage.rules), ac5c419 (UI). Nada desplegado.
 - Deploy necesario (en este orden): `firebase deploy --only storage` (regla nueva chat-live-video), `functions:chatLiveVideo,functions:whatsappWebhook,functions:metaWebhook` (autoAssign.ts toca ambos webhooks) y `hosting:app`. No desplegar Functions globales.
