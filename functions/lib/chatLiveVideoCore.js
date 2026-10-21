@@ -227,6 +227,7 @@ async function composeChatLiveVideo(bucket, p) {
         // 3. Ejecutar FFmpeg remux (-map 0 -c copy -movflags +faststart)
         const runner = p.ffmpegRunner ?? exports.defaultFfmpegRunner;
         const args = (0, exports.FFMPEG_REMUX_ARGS)(inputPath, outputPath);
+        const tRemux0 = Date.now();
         try {
             await runner(ffmpegBinary, args, { timeout: exports.FFMPEG_TIMEOUT_MS });
         }
@@ -235,6 +236,7 @@ async function composeChatLiveVideo(bucket, p) {
             console.error('[chatLiveVideo] Error en ffmpeg remux:', msg);
             throw new LiveVideoError('failed-precondition', 'No se pudo optimizar el video para WhatsApp.');
         }
+        const remuxMs = Date.now() - tRemux0;
         // 4. Validar output remuxeado en /tmp antes de subir
         const { sizeBytes } = await validateRemuxOutput(outputPath);
         // 5. Subir REMUX como final.mp4 con metadata y download token
@@ -253,7 +255,7 @@ async function composeChatLiveVideo(bucket, p) {
             metadata: { firebaseStorageDownloadTokens: p.token },
         });
         success = true;
-        return { finalName, sizeBytes };
+        return { finalName, sizeBytes, remuxMs };
     }
     finally {
         // Limpieza obligatoria:

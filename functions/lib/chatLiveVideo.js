@@ -43,7 +43,7 @@ const chatLiveVideoCore_1 = require("./chatLiveVideoCore");
 // esta función solo los compone y devuelve la URL con token para enviar por el
 // pipeline normal (ConversationService.sendMessage → sendWhatsappMessage).
 // El uid sale SIEMPRE de request.auth, nunca del payload.
-exports.chatLiveVideo = (0, https_1.onCall)({ maxInstances: 10, memory: '512MiB', timeoutSeconds: 90 }, async (request) => {
+exports.chatLiveVideo = (0, https_1.onCall)({ maxInstances: 10, minInstances: 1, memory: '512MiB', timeoutSeconds: 90 }, async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
     const uid = request.auth.uid;
@@ -76,10 +76,10 @@ exports.chatLiveVideo = (0, https_1.onCall)({ maxInstances: 10, memory: '512MiB'
         }
         const t0 = Date.now();
         const token = crypto.randomUUID();
-        const { finalName, sizeBytes } = await (0, chatLiveVideoCore_1.composeChatLiveVideo)(bucket, { ...base, chunkCount: chunkCount, mimeType, token });
+        const { finalName, sizeBytes, remuxMs } = await (0, chatLiveVideoCore_1.composeChatLiveVideo)(bucket, { ...base, chunkCount: chunkCount, mimeType, token });
         const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(finalName)}?alt=media&token=${token}`;
-        console.log('CHAT_LIVE_VIDEO_COMPOSED', { tenantId, conversationId, jobId, chunkCount, sizeBytes, ms: Date.now() - t0 });
-        return { ok: true, url, sizeBytes };
+        console.log('CHAT_LIVE_VIDEO_COMPOSED', { tenantId, conversationId, jobId, chunkCount, sizeBytes, remuxMs, ms: Date.now() - t0 });
+        return { ok: true, url, sizeBytes, remuxMs };
     }
     catch (e) {
         if (e instanceof chatLiveVideoCore_1.LiveVideoError)

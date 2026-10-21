@@ -177,7 +177,7 @@ export async function deleteChatLiveVideoJob(bucket: BucketLike, p: Omit<Compose
   return files.length;
 }
 
-export async function composeChatLiveVideo(bucket: BucketLike, p: ComposeParams): Promise<{ finalName: string; sizeBytes: number }> {
+export async function composeChatLiveVideo(bucket: BucketLike, p: ComposeParams): Promise<{ finalName: string; sizeBytes: number; remuxMs: number }> {
   if (!Number.isInteger(p.chunkCount) || p.chunkCount < 1 || p.chunkCount > CHAT_LIVE_VIDEO_MAX_CHUNKS) {
     throw new LiveVideoError('invalid-argument', 'La grabación no es válida (duración fuera de rango).');
   }
@@ -231,6 +231,7 @@ export async function composeChatLiveVideo(bucket: BucketLike, p: ComposeParams)
     // 3. Ejecutar FFmpeg remux (-map 0 -c copy -movflags +faststart)
     const runner = p.ffmpegRunner ?? defaultFfmpegRunner;
     const args = FFMPEG_REMUX_ARGS(inputPath, outputPath);
+    const tRemux0 = Date.now();
     try {
       await runner(ffmpegBinary, args, { timeout: FFMPEG_TIMEOUT_MS });
     } catch (err: unknown) {
@@ -238,6 +239,7 @@ export async function composeChatLiveVideo(bucket: BucketLike, p: ComposeParams)
       console.error('[chatLiveVideo] Error en ffmpeg remux:', msg);
       throw new LiveVideoError('failed-precondition', 'No se pudo optimizar el video para WhatsApp.');
     }
+    const remuxMs = Date.now() - tRemux0;
 
     // 4. Validar output remuxeado en /tmp antes de subir
     const { sizeBytes } = await validateRemuxOutput(outputPath);
@@ -259,7 +261,7 @@ export async function composeChatLiveVideo(bucket: BucketLike, p: ComposeParams)
     });
 
     success = true;
-    return { finalName, sizeBytes };
+    return { finalName, sizeBytes, remuxMs };
   } finally {
     // Limpieza obligatoria:
     // Local /tmp
