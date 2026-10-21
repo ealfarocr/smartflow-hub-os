@@ -37,7 +37,7 @@ import {
 } from '@/utils/sellerErrors';
 import { isAdminRole } from '@/utils/permissions';
 import { consumePickerReload, describeEnvironment, recordMediaDiag } from '@/utils/mediaDiag';
-import { extensionOf, mimeFor, prepareImage, safeFileName } from '@/utils/mediaPrep';
+import { extensionOf, mimeFor, prepareImage, safeFileName, type ImagePrepResult } from '@/utils/mediaPrep';
 import { chromeIntentUrl, isOutsideBrowserTab } from '@/utils/openInChrome';
 import { MediaDiagPanel } from './MediaDiagPanel';
 import { FileTapTarget } from './FileTapTarget';
@@ -437,7 +437,7 @@ export const ConversationsPageView = () => {
   const uploadToStorage = async (file: File, diag: string, safeName: string, onProgress?: (pct: number) => void): Promise<string> => {
     let etapa = 'AUTH';
     try {
-      const { ref, uploadBytesResumable, getDownloadURL } = await import('firebase/storage');
+      const { ref, uploadBytes, uploadBytesResumable, getDownloadURL } = await import('firebase/storage');
       const { storage, auth } = await import('@/lib/firebase');
       const user = auth.currentUser;
       if (!user) throw Object.assign(new Error('Sin sesión activa'), { code: 'auth/no-current-user' });
@@ -456,23 +456,30 @@ export const ConversationsPageView = () => {
       const path = buildChatAttachmentPath(activeMembership!.tenantId, safeName);
       const storageRef = ref(storage, path);
       const contentType = mimeFor(file);
+      const isSmallImage = (contentType.startsWith('image/') || diag === 'PHOTO') && file.size <= 5 * 1024 * 1024;
       recordMediaDiag(`${diag}_UPLOAD_START`, {
         kb: Math.round(file.size / 1024), tipo: contentType,
         proyecto: storage.app.options.projectId, bucket: storageRef.bucket, ruta: storageRef.fullPath,
-        operacion: 'uploadBytesResumable',
+        operacion: isSmallImage ? 'uploadBytes' : 'uploadBytesResumable',
       });
-      await new Promise<void>((resolve, reject) => {
-        let lastBucket = 0;
-        uploadBytesResumable(storageRef, file, { contentType }).on('state_changed', (snap) => {
-          const pct = progressPercent(snap.bytesTransferred, snap.totalBytes);
-          onProgress?.(pct);
-          const bucket = Math.floor(pct / 25) * 25;
-          if (bucket > lastBucket && bucket < 100) {
-            lastBucket = bucket;
-            recordMediaDiag(`${diag}_UPLOAD_PROGRESS`, { pct: bucket });
-          }
-        }, reject, () => resolve());
-      });
+      if (isSmallImage) {
+        onProgress?.(50);
+        await uploadBytes(storageRef, file, { contentType });
+        onProgress?.(100);
+      } else {
+        await new Promise<void>((resolve, reject) => {
+          let lastBucket = 0;
+          uploadBytesResumable(storageRef, file, { contentType }).on('state_changed', (snap) => {
+            const pct = progressPercent(snap.bytesTransferred, snap.totalBytes);
+            onProgress?.(pct);
+            const bucket = Math.floor(pct / 25) * 25;
+            if (bucket > lastBucket && bucket < 100) {
+              lastBucket = bucket;
+              recordMediaDiag(`${diag}_UPLOAD_PROGRESS`, { pct: bucket });
+            }
+          }, reject, () => resolve());
+        });
+      }
       recordMediaDiag(`${diag}_UPLOAD_OK`);
       etapa = 'DOWNLOAD_URL';
       const url = await getDownloadURL(storageRef);
@@ -575,10 +582,24 @@ export const ConversationsPageView = () => {
     // archivo termine de leerse antes de resetear su value — limpiarlo antes puede invalidar
     // el File en algunos navegadores móviles (mismo cuidado que ya se aplicaba acá).
     if (kind === 'video') debugAttach('VIDEO_UPLOAD_START', { id, name: file.name });
+    const t0 = Date.now();
+    let prepResult: ImagePrepResult | null = null;
     const prepared = kind === 'image'
       ? prepareImage(file).then((r) => {
-          if (r.compressed) recordMediaDiag(`${diag}_IMAGE_COMPRESSED`, { antesKb: r.beforeKb, despuesKb: r.afterKb });
-          else if (r.reason !== 'liviana') recordMediaDiag(`${diag}_IMAGE_AS_IS`, { motivo: r.reason });
+          prepResult = r;
+          if (r.compressed) {
+            recordMediaDiag(`${diag}_IMAGE_COMPRESSED`, {
+              antesKb: r.beforeKb,
+              despuesKb: r.afterKb,
+              origW: r.originalWidth,
+              origH: r.originalHeight,
+              finalW: r.finalWidth,
+              finalH: r.finalHeight,
+              procMs: r.processingMs,
+            });
+          } else if (r.reason !== 'liviana') {
+            recordMediaDiag(`${diag}_IMAGE_AS_IS`, { motivo: r.reason });
+          }
           return r.file;
         })
       : Promise.resolve(file);
@@ -590,7 +611,31 @@ export const ConversationsPageView = () => {
           return;
         }
         const uploadName = toUpload === file ? safeName : safeFileName(toUpload.name, mimeFor(toUpload));
+        const tUploadStart = Date.now();
         const url = await uploadToStorage(toUpload, diag, uploadName, pct => dispatchPending({ type: 'progress', id, pct }));
+        const tUploadEnd = Date.now();
+        const uploadMs = tUploadEnd - tUploadStart;
+        const readyMs = tUploadEnd - t0;
+
+        if (kind === 'image' || source === 'PHOTO') {
+          const origW = prepResult?.originalWidth ?? null;
+          const origH = prepResult?.originalHeight ?? null;
+          const finalW = prepResult?.finalWidth ?? origW;
+          const finalH = prepResult?.finalHeight ?? origH;
+          const procMs = prepResult?.processingMs ?? (tUploadStart - t0);
+          recordMediaDiag(`${diag}_METRICS`, {
+            PHOTO_ORIGINAL_WIDTH: origW,
+            PHOTO_ORIGINAL_HEIGHT: origH,
+            PHOTO_ORIGINAL_BYTES: file.size,
+            PHOTO_FINAL_WIDTH: finalW,
+            PHOTO_FINAL_HEIGHT: finalH,
+            PHOTO_FINAL_BYTES: toUpload.size,
+            PHOTO_PROCESSING_MS: procMs,
+            PHOTO_UPLOAD_MS: uploadMs,
+            PHOTO_READY_MS: readyMs,
+          });
+        }
+
         debugAttach(`${source}_ATTACHMENT_CREATED`, { url, name: uploadName });
         recordMediaDiag(`${diag}_ATTACHMENT_READY`, { tipo: kind, kb: Math.round(toUpload.size / 1024) });
         if (kind === 'video') debugAttach('VIDEO_UPLOAD_SUCCESS', { id, mediaUrl: url });

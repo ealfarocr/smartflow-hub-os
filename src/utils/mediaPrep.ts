@@ -52,26 +52,97 @@ export function fitWithin(w: number, h: number, max: number): { w: number; h: nu
   return { w: Math.round(w * scale), h: Math.round(h * scale) };
 }
 
-export const COMPRESS_OVER_BYTES = 1.5 * 1024 * 1024;
-const MAX_SIDE = 2048;
-const JPEG_QUALITY = 0.82;
+export const TARGET_MAX_SIDE = 1600;
+export const JPEG_QUALITY = 0.82;
+/**
+ * Umbral de peso para fotos: 400 KB (409,600 bytes).
+ * Por debajo de 400 KB y con lado mayor <= 1600 px, una foto ya se considera
+ * liviana y nítida y no se recomprime para no generar artefactos innecesarios.
+ * Si supera 400 KB o supera 1600 px en cualquier lado, se optimiza.
+ */
+export const PHOTO_MAX_BYTES_WITHOUT_RESIZE = 400 * 1024;
+export const COMPRESS_OVER_BYTES = PHOTO_MAX_BYTES_WITHOUT_RESIZE;
 
 export type ImagePrepResult =
-  | { file: File; compressed: true; beforeKb: number; afterKb: number }
-  | { file: File; compressed: false; reason: string };
+  | {
+      file: File;
+      compressed: true;
+      beforeKb: number;
+      afterKb: number;
+      originalWidth: number;
+      originalHeight: number;
+      finalWidth: number;
+      finalHeight: number;
+      processingMs: number;
+    }
+  | {
+      file: File;
+      compressed: false;
+      reason: string;
+      originalWidth?: number;
+      originalHeight?: number;
+      finalWidth?: number;
+      finalHeight?: number;
+      processingMs?: number;
+    };
 
 /**
- * Reduce una foto pesada a JPEG. Si no hace falta (ya es liviana, o no es
- * JPEG/PNG/WebP) o el navegador no puede decodificarla (HEIC en Chrome), se
- * devuelve el original y se dice por qué — nunca se pierde el archivo.
+ * Optimiza fotos y capturas antes de subir a Storage.
+ *
+ * Criterios:
+ * 1. Para JPEG / WebP fotográficos:
+ *    Se procesa si lado mayor > 1600 px OR peso > 400 KB.
+ *    Se escala manteniendo proporción a MAX 1600 px en el lado mayor (sin upscale)
+ *    y se codifica a JPEG con calidad 0.82.
+ *    Si ya viene <= 1600 px y <= 400 KB, no se recomprime innecesariamente.
+ * 2. Para PNG:
+ *    Se preserva el formato PNG con transparencia (no conversión destructiva a JPEG).
+ *    Si el lado mayor > 1600 px, se escala proporcionalmente a 1600 px pero se exporta
+ *    como 'image/png' para preservar alfa y nitidez de logos/textos.
+ * 3. Otros formatos (GIF, HEIC no decodificable, etc.):
+ *    Se devuelven tal cual sin romper el archivo.
  */
 export async function prepareImage(file: File): Promise<ImagePrepResult> {
+  const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const mime = mimeFor(file);
-  if (file.size <= COMPRESS_OVER_BYTES) return { file, compressed: false, reason: 'liviana' };
-  if (!/^image\/(jpeg|png|webp)$/.test(mime)) return { file, compressed: false, reason: `formato ${mime}` };
+
+  if (!/^image\/(jpeg|png|webp)$/.test(mime)) {
+    return { file, compressed: false, reason: `formato ${mime}` };
+  }
+
+  if (typeof createImageBitmap !== 'function') {
+    return { file, compressed: false, reason: 'sin createImageBitmap' };
+  }
+
+  let bitmap: ImageBitmap | null = null;
   try {
-    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-    const { w, h } = fitWithin(bitmap.width, bitmap.height, MAX_SIDE);
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const origW = bitmap.width;
+    const origH = bitmap.height;
+    const maxSide = Math.max(origW, origH);
+    const isPng = mime === 'image/png';
+    const isPhotographic = mime === 'image/jpeg' || mime === 'image/webp';
+
+    const needsResize = maxSide > TARGET_MAX_SIDE;
+    const needsCompression = isPhotographic && file.size > PHOTO_MAX_BYTES_WITHOUT_RESIZE;
+
+    // Si ya tiene dimensiones <= 1600 y peso adecuado, no procesar innecesariamente
+    if (!needsResize && !needsCompression) {
+      bitmap.close?.();
+      const elapsed = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
+      return {
+        file,
+        compressed: false,
+        reason: 'dimensiones y peso optimos',
+        originalWidth: origW,
+        originalHeight: origH,
+        finalWidth: origW,
+        finalHeight: origH,
+        processingMs: elapsed,
+      };
+    }
+
+    const { w, h } = fitWithin(origW, origH, TARGET_MAX_SIDE);
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
@@ -79,17 +150,54 @@ export async function prepareImage(file: File): Promise<ImagePrepResult> {
     if (!ctx) throw new Error('sin canvas 2d');
     ctx.drawImage(bitmap, 0, 0, w, h);
     bitmap.close?.();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));
+    bitmap = null;
+
+    // PNG se mantiene PNG para preservar transparencia y vectores/logos; fotos van a JPEG 0.82
+    const outputMime = isPng ? 'image/png' : 'image/jpeg';
+    const outputQuality = isPng ? undefined : JPEG_QUALITY;
+
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, outputMime, outputQuality));
     if (!blob) throw new Error('toBlob vacío');
-    if (blob.size >= file.size) return { file, compressed: false, reason: 'no achica' };
-    const name = file.name.replace(/\.[^.]*$/, '') + '.jpg';
+
+    // Si no hubo resize y el blob resultante no ahorra bytes, conservar original
+    if (!needsResize && blob.size >= file.size) {
+      const elapsed = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
+      return {
+        file,
+        compressed: false,
+        reason: 'no achica',
+        originalWidth: origW,
+        originalHeight: origH,
+        finalWidth: origW,
+        finalHeight: origH,
+        processingMs: elapsed,
+      };
+    }
+
+    const ext = isPng ? '.png' : '.jpg';
+    const name = file.name.replace(/\.[^.]*$/, '') + ext;
+    const processedFile = new File([blob], name, { type: outputMime, lastModified: file.lastModified });
+    const elapsed = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
+
     return {
-      file: new File([blob], name, { type: 'image/jpeg', lastModified: file.lastModified }),
+      file: processedFile,
       compressed: true,
       beforeKb: Math.round(file.size / 1024),
       afterKb: Math.round(blob.size / 1024),
+      originalWidth: origW,
+      originalHeight: origH,
+      finalWidth: w,
+      finalHeight: h,
+      processingMs: elapsed,
     };
   } catch (e) {
-    return { file, compressed: false, reason: `no se pudo decodificar (${(e as Error)?.message?.slice(0, 40) || 'error'})` };
+    bitmap?.close?.();
+    const elapsed = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
+    return {
+      file,
+      compressed: false,
+      reason: `no se pudo decodificar (${(e as Error)?.message?.slice(0, 40) || 'error'})`,
+      processingMs: elapsed,
+    };
   }
 }

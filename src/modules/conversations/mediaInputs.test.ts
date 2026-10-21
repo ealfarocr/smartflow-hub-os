@@ -278,10 +278,10 @@ describe('Nada fijo tapa los controles del chat en el teléfono', () => {
 });
 
 describe('Subida desde el teléfono: reanudable, con avance y fotos reducidas', () => {
-  it('sube por partes con reintento y reporta el avance', () => {
+  it('sube por partes con reintento para archivos grandes y directo para fotos pequeñas', () => {
     expect(view).toContain('uploadBytesResumable');
     expect(view).toContain('_UPLOAD_PROGRESS');
-    expect(view).not.toMatch(/\buploadBytes\(/);
+    expect(view).toContain('uploadBytes(');
   });
 
   it('las fotos se reducen antes de medir el límite de 5 MB', () => {
@@ -314,5 +314,37 @@ describe('Cada etapa de subida queda marcada en el panel QA', () => {
   it('la nota de voz separa grabación, subida y envío', () => {
     ['VOICE_TAP', 'MIC_PERMISSION_OK', 'RECORDER_START', 'RECORDER_STOP', 'VOICE_BLOB_CREATED', "uploadToStorage(file, 'VOICE'", 'VOICE_ATTACHMENT_READY', "etapa = 'send'"]
       .forEach((s) => expect(view).toContain(s));
+  });
+
+  it('F. preview local se genera de inmediato con URL.createObjectURL', () => {
+    expect(view).toContain('localPreviewUrl = URL.createObjectURL(file)');
+  });
+
+  it('G. fotos pequeñas/medianas usan una sola subida directa atómica (uploadBytes)', () => {
+    expect(view).toContain("const isSmallImage = (contentType.startsWith('image/') || diag === 'PHOTO') && file.size <= 5 * 1024 * 1024");
+    expect(view).toContain('await uploadBytes(storageRef, file, { contentType });');
+  });
+
+  it('H. video no cambia: mantiene uploadBytesResumable con progreso', () => {
+    expect(view).toContain('uploadBytesResumable(storageRef, file, { contentType })');
+    expect(view).toContain("kind === 'video'");
+  });
+
+  it('I. audio y documentos no cambian: mantienen uploadBytesResumable si no son imágenes', () => {
+    expect(view).toContain("operacion: isSmallImage ? 'uploadBytes' : 'uploadBytesResumable'");
+  });
+
+  it('registra métricas completas de latencia y dimensiones de foto', () => {
+    [
+      'PHOTO_ORIGINAL_WIDTH',
+      'PHOTO_ORIGINAL_HEIGHT',
+      'PHOTO_ORIGINAL_BYTES',
+      'PHOTO_FINAL_WIDTH',
+      'PHOTO_FINAL_HEIGHT',
+      'PHOTO_FINAL_BYTES',
+      'PHOTO_PROCESSING_MS',
+      'PHOTO_UPLOAD_MS',
+      'PHOTO_READY_MS',
+    ].forEach((metric) => expect(view).toContain(metric));
   });
 });
