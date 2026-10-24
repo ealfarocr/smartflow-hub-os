@@ -20,7 +20,8 @@
         "firestore-debug.log",
         "**/*.test.js",
         "**/*.test.js.map",
-        "**/*.test.ts"
+        "**/*.test.ts",
+        ".env.usaditos-secrets"
       ]
     }
   ],
