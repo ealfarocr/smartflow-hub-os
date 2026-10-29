@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.chatLiveVideo = exports.liveVideoQa = exports.repairOrphanLeads = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.verifyDeviceSession = exports.loginWithDevice = exports.loginWithPin = exports.getTenantAccessOverview = exports.getVendorAccessInfo = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
+exports.chatLiveVideo = exports.liveVideoQa = exports.checkSilentLeads = exports.checkWindowExpiry = exports.capturePaymentRequestPaypalOrder = exports.createPaymentRequestPaypalOrder = exports.verifyPaypalOrder = exports.generateSocialMediaContent = exports.checkSubscriptionRenewals = exports.sendOnboardingFollowups = exports.onTenantCreatedAutomation = exports.processOutboundEmail = exports.inboundEmailV2 = exports.getWhatsappNumbers = exports.sendMetaMessage = exports.claimConversation = exports.tickPresence = exports.setOperationalStatus = exports.setMembershipActive = exports.revokeDevice = exports.renameDevice = exports.registerDevice = exports.verifyDeviceSession = exports.loginWithDevice = exports.loginWithPin = exports.getTenantAccessOverview = exports.getVendorAccessInfo = exports.setVendorPin = exports.acceptTenantInvite = exports.saveManualWhatsAppConfig = exports.completeWhatsappEmbeddedSignup = exports.sendWhatsappMessage = exports.generateMarketingImage = exports.chatWithAgent = exports.metaWebhook = exports.whatsappWebhook = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const crypto = __importStar(require("crypto"));
@@ -5135,76 +5135,6 @@ exports.checkSilentLeads = (0, scheduler_1.onSchedule)({
         }
     }
     console.log('[SilentLeads] Ejecución completada.');
-});
-/**
- * Reparación de un solo uso: corrige leads huérfanos en TODOS los tenants.
- * Un lead queda huérfano cuando su `stage` no coincide con ninguna etiqueta del
- * pipeline del tenant (antes los webhooks hardcodeaban 'Nuevo'), o cuando le falta
- * `orderIndex` (Firestore excluye del CRM los docs sin el campo del orderBy).
- *
- * Se ejecuta vía HTTP con token: /repairOrphanLeads?token=REPAIR_2026
- */
-const DEFAULT_PIPELINE_LABELS = ['Nuevo', 'Seguimiento', 'Visita Técnica', 'Venta Realizada', 'Perdido'];
-exports.repairOrphanLeads = functions.https.onRequest(async (req, res) => {
-    if (req.query.token !== 'REPAIR_2026') {
-        res.status(403).send('Forbidden');
-        return;
-    }
-    const report = { tenantsWithSettings: 0, leadsScanned: 0, leadsFixed: 0, details: [] };
-    // 1. Cargar pipeline (etiquetas válidas + etapa por defecto) por tenant
-    const settingsSnap = await db.collection('settings').get();
-    const pipelineByTenant = {};
-    for (const docSnap of settingsSnap.docs) {
-        const stages = docSnap.data()?.pipeline?.stages;
-        if (Array.isArray(stages) && stages.length > 0) {
-            const valid = new Set();
-            for (const s of stages)
-                if (s?.label)
-                    valid.add(s.label);
-            const d = stages.find((s) => s.isDefault)
-                || stages.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0];
-            pipelineByTenant[docSnap.id] = { valid, def: d?.label || 'Nuevo' };
-        }
-        else {
-            // Tenant sin pipeline custom: el frontend muestra el pipeline por defecto
-            pipelineByTenant[docSnap.id] = { valid: new Set(DEFAULT_PIPELINE_LABELS), def: 'Nuevo' };
-        }
-    }
-    report.tenantsWithSettings = settingsSnap.size;
-    // 2. Recorrer todos los leads y reparar huérfanos
-    const leadsSnap = await db.collection('leads').get();
-    report.leadsScanned = leadsSnap.size;
-    let batch = db.batch();
-    let ops = 0;
-    for (const leadDoc of leadsSnap.docs) {
-        const lead = leadDoc.data();
-        const pipe = pipelineByTenant[lead.tenantId]
-            || { valid: new Set(DEFAULT_PIPELINE_LABELS), def: 'Nuevo' };
-        const updates = {};
-        if (!lead.stage || !pipe.valid.has(lead.stage)) {
-            updates.stage = pipe.def;
-        }
-        if (lead.orderIndex === undefined || lead.orderIndex === null) {
-            updates.orderIndex = Date.now();
-        }
-        if (Object.keys(updates).length > 0) {
-            batch.update(leadDoc.ref, updates);
-            ops++;
-            report.leadsFixed++;
-            if (report.details.length < 100) {
-                report.details.push({ id: leadDoc.id, tenantId: lead.tenantId, oldStage: lead.stage || null, ...updates });
-            }
-            if (ops >= 400) {
-                await batch.commit();
-                batch = db.batch();
-                ops = 0;
-            }
-        }
-    }
-    if (ops > 0)
-        await batch.commit();
-    console.log(`[RepairOrphanLeads] ${report.leadsFixed}/${report.leadsScanned} leads reparados.`);
-    res.json(report);
 });
 // Prototipo QA "Live Video" (solo SuperAdmin; no toca tenants ni WhatsApp).
 var liveVideoQa_1 = require("./liveVideoQa");
