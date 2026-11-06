@@ -47,6 +47,40 @@ export function checkConversationTenantMatch(conversationTenantId: string, reque
   return conversationTenantId === requestedTenantId;
 }
 
+export interface ConversationSendAccessInput {
+  isSuperAdmin: boolean;
+  /** Rol de la membership del uid en el tenant (null si no tiene; SuperAdmin puede no tener). */
+  role: string | null;
+  /** advisorId de la conversación (vacío/ausente = sin asignar). */
+  conversationAdvisorId: string | null | undefined;
+  uid: string;
+}
+
+export interface ConversationSendAccessResult {
+  allowed: boolean;
+  reason?: 'unassigned-conversation' | 'not-assigned-advisor';
+}
+
+/**
+ * Checkpoint 3: ownership de la conversación (misma política que
+ * canAccessConversation / messages.write de firestore.rules). Owner, Admin y
+ * SuperAdmin operan todo el tenant; Asesor Comercial y Técnico solo la
+ * conversación asignada a su uid; una conversación sin asesor requiere claim.
+ * Se evalúa DESPUÉS de checkMembershipAuth y checkConversationTenantMatch.
+ */
+export function checkConversationSendAccess(input: ConversationSendAccessInput): ConversationSendAccessResult {
+  if (input.isSuperAdmin || input.role === 'Owner' || input.role === 'Admin') {
+    return { allowed: true };
+  }
+  if (!input.conversationAdvisorId) {
+    return { allowed: false, reason: 'unassigned-conversation' };
+  }
+  if (input.conversationAdvisorId !== input.uid) {
+    return { allowed: false, reason: 'not-assigned-advisor' };
+  }
+  return { allowed: true };
+}
+
 export interface MetaErrorDetail {
   httpStatus: number;
   type: string | null;

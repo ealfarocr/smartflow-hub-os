@@ -8,6 +8,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkMembershipAuth = checkMembershipAuth;
 exports.checkConversationTenantMatch = checkConversationTenantMatch;
+exports.checkConversationSendAccess = checkConversationSendAccess;
 exports.buildMetaErrorDetail = buildMetaErrorDetail;
 /**
  * Checkpoint 1 (paso 2 real): membership activa + rol permitido, con bypass
@@ -33,6 +34,25 @@ function checkMembershipAuth(input) {
  */
 function checkConversationTenantMatch(conversationTenantId, requestedTenantId) {
     return conversationTenantId === requestedTenantId;
+}
+/**
+ * Checkpoint 3: ownership de la conversación (misma política que
+ * canAccessConversation / messages.write de firestore.rules). Owner, Admin y
+ * SuperAdmin operan todo el tenant; Asesor Comercial y Técnico solo la
+ * conversación asignada a su uid; una conversación sin asesor requiere claim.
+ * Se evalúa DESPUÉS de checkMembershipAuth y checkConversationTenantMatch.
+ */
+function checkConversationSendAccess(input) {
+    if (input.isSuperAdmin || input.role === 'Owner' || input.role === 'Admin') {
+        return { allowed: true };
+    }
+    if (!input.conversationAdvisorId) {
+        return { allowed: false, reason: 'unassigned-conversation' };
+    }
+    if (input.conversationAdvisorId !== input.uid) {
+        return { allowed: false, reason: 'not-assigned-advisor' };
+    }
+    return { allowed: true };
 }
 /**
  * Sanea el error crudo de Meta Graph API antes de persistirlo en Firestore.

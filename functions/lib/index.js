@@ -57,6 +57,7 @@ const mail_1 = __importDefault(require("@sendgrid/mail"));
 const axios_1 = __importDefault(require("axios"));
 const pinAuth_1 = require("./pinAuth");
 const sendMessageAuth_1 = require("./sendMessageAuth");
+const sendMetaMessageCore_1 = require("./sendMetaMessageCore");
 const vendorPinAuth_1 = require("./vendorPinAuth");
 const messageStatusUpdate_1 = require("./messageStatusUpdate");
 const autoAssign_1 = require("./autoAssign");
@@ -3589,84 +3590,58 @@ exports.claimConversation = (0, https_1.onCall)({ maxInstances: 10 }, async (req
  * Función Callable para enviar mensajes de Instagram/Facebook
  */
 exports.sendMetaMessage = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
-    if (!request.auth) {
-        throw new https_1.HttpsError('unauthenticated', 'Usuario no autenticado');
-    }
-    const { conversationId, text, tenantId, source } = request.data;
-    const uid = request.auth.uid;
-    if (!conversationId || !text || !tenantId || !source) {
-        throw new https_1.HttpsError('invalid-argument', 'Faltan parámetros obligatorios');
-    }
-    // 1. VALIDACIÓN DE MEMBRESÍA
-    const membershipRef = db.collection('memberships').doc(`${uid}_${tenantId}`);
-    const membershipDoc = await membershipRef.get();
-    if (!membershipDoc.exists || membershipDoc.data()?.status !== 'active') {
-        throw new https_1.HttpsError('permission-denied', 'No tienes una membresía activa en este tenant');
-    }
-    // 2. OBTENER INTEGRACIÓN
-    const integrationSnapshot = await db.collection('integrations')
-        .where('tenantId', '==', tenantId)
-        .where('provider', '==', source)
-        .where('isActive', '==', true)
-        .limit(1)
-        .get();
-    if (integrationSnapshot.empty) {
-        throw new https_1.HttpsError('failed-precondition', `No hay una integración de ${source} activa`);
-    }
-    const integration = integrationSnapshot.docs[0].data();
-    const accessToken = integration.accessToken;
-    // 3. OBTENER CONVERSACIÓN
-    const conversationRef = db.collection('conversations').doc(conversationId);
-    const conversationDoc = await conversationRef.get();
-    if (!conversationDoc.exists) {
-        throw new https_1.HttpsError('not-found', 'Conversación no encontrada');
-    }
-    const recipientId = conversationDoc.data()?.platformId;
-    // 4. ENVÍO A META
-    let status = 'sent';
-    let externalId = `meta.${crypto.randomBytes(8).toString('hex')}`;
-    let errorMessage = '';
-    try {
-        const payload = {
-            recipient: { id: recipientId },
-            message: { text: text }
-        };
-        const response = await fetch(`https://graph.facebook.com/v17.0/me/messages?access_token=${accessToken}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const result = await response.json();
-        if (!response.ok) {
-            throw new Error(result.error?.message || 'Error en Graph API');
-        }
-        externalId = result.message_id || externalId;
-    }
-    catch (err) {
-        status = 'failed';
-        errorMessage = err.message || 'Error desconocido';
-    }
-    // 5. PERSISTENCIA
-    const msgRef = conversationRef.collection('messages').doc();
-    await db.runTransaction(async (transaction) => {
-        transaction.set(msgRef, {
-            text,
-            sender: 'advisor',
-            direction: 'outbound',
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
-            type: 'text',
-            status,
-            externalId,
-            errorMessage: status === 'failed' ? errorMessage : null
-        });
-        transaction.update(conversationRef, {
-            lastMessage: text,
-            lastMessageDate: admin.firestore.FieldValue.serverTimestamp(),
-            lastMessageSender: 'advisor',
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-    });
-    return { success: status === 'sent', messageId: msgRef.id };
+    // Lógica en sendMetaMessageCore.ts (testeable). Aquí solo se cablean las
+    // dependencias reales de Firestore/Graph.
+    return (0, sendMetaMessageCore_1.runSendMetaMessage)({
+        isSuperAdmin: async (uid) => {
+            const snap = await db.collection('users').doc(uid).get();
+            return snap.exists && snap.data()?.isSuperAdmin === true;
+        },
+        getMembership: async (uid, tenantId) => {
+            const snap = await db.collection('memberships').doc(`${uid}_${tenantId}`).get();
+            const d = snap.data();
+            return snap.exists && d ? { status: d.status, role: d.role } : null;
+        },
+        getConversation: async (conversationId) => {
+            const snap = await db.collection('conversations').doc(conversationId).get();
+            return snap.exists ? snap.data() : null;
+        },
+        findActiveIntegration: async (tenantId, provider) => {
+            const snap = await db.collection('integrations')
+                .where('tenantId', '==', tenantId)
+                .where('provider', '==', provider)
+                .where('isActive', '==', true)
+                .limit(1)
+                .get();
+            return snap.empty ? null : snap.docs[0].data();
+        },
+        fetchFn: (url, init) => fetch(url, init),
+        persistMessage: async (conversationId, message) => {
+            const conversationRef = db.collection('conversations').doc(conversationId);
+            const msgRef = conversationRef.collection('messages').doc();
+            await db.runTransaction(async (transaction) => {
+                transaction.set(msgRef, {
+                    text: message.text,
+                    sender: 'advisor',
+                    direction: 'outbound',
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    type: 'text',
+                    status: message.status,
+                    externalId: message.externalId,
+                    errorMessage: message.status === 'failed' ? message.errorMessage : null,
+                    metaErrorDetail: message.metaErrorDetail,
+                });
+                transaction.update(conversationRef, {
+                    lastMessage: message.text,
+                    lastMessageDate: admin.firestore.FieldValue.serverTimestamp(),
+                    lastMessageSender: 'advisor',
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            });
+            return msgRef.id;
+        },
+        randomId: () => crypto.randomBytes(8).toString('hex'),
+    }, { uid: request.auth?.uid, data: request.data });
 });
 /**
  * getWhatsappNumbers — Solo SuperAdmin.
